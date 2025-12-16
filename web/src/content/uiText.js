@@ -12,7 +12,7 @@ export const UI_TEXT = {
       location: "France",
     },
     heroTitle: "Fullstack junior.",
-    heroSubtitle: "Je suis prêt pour mon premier poste.",
+    heroSubtitle: "Prêt pour mon premier poste.",
     heroProjectsCta: "Voir mes projets",
     configHint:
       "Configuration: les liens et textes (email, GitHub, projets) sont dans",
