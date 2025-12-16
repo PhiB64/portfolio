@@ -1,4 +1,4 @@
-export const AVATAR_SRC = "/Image1.png";
+export const AVATAR_SRC = `${import.meta.env.BASE_URL}Image1.png`;
 
 export const NAV_ITEMS = [
   { key: "projects", href: "#projets" },

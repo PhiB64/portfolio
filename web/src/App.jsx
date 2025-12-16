@@ -302,7 +302,7 @@ export default function App() {
                 </a>
                 <a
                   className="inline-flex items-center rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-slate-950/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
-                  href="/cv.pdf"
+                  href={`${import.meta.env.BASE_URL}cv.pdf`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -310,7 +310,7 @@ export default function App() {
                 </a>
                 <a
                   className="inline-flex items-center rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-slate-950/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
-                  href="/lettre-motivation.docx"
+                  href={`${import.meta.env.BASE_URL}lettre-motivation.docx`}
                 >
                   {t.contact.downloadCoverLetter}
                 </a>
