@@ -46,6 +46,10 @@ export const RESUME = {
   experiences: [],
   education: [
     {
+      dates: "Mars à décembre 2025",
+      text: "AFEC PAU | FORMATION DEVELOPPEUR WEB ET WEB MOBILE",
+    },
+    {
       dates: "1990-1993",
       text: "UNIVERSITE DES SCIENCES SOCIALES TOULOUSE 1 | DEUG DROIT",
     },

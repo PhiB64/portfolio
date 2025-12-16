@@ -27,7 +27,7 @@ export const UI_TEXT = {
       valueBody:
         "J’aime transformer une idée en une application lisible, rapide et robuste. Je sors de formation et je cherche un poste junior fullstack pour grandir sur des projets concrets.",
       cvExtract: "Extrait de mon CV",
-      resumeTitle: "Parcours (CV)",
+      resumeTitle: "Parcours",
       education: "Formation",
       experience: "Expérience",
       languages: "Langues",
