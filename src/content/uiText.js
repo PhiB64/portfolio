@@ -25,7 +25,7 @@ export const UI_TEXT = {
     about: {
       valueTitle: "Ce que j’apporte",
       valueBody:
-        "J’aime transformer une idée en une application lisible, rapide et robuste. Je sors de formation et je cherche un poste junior fullstack pour grandir sur des projets concrets.",
+        "J’aime transformer une idée en une application lisible, rapide et robuste. Je sors de formation et je cherche un poste de développeur full stack pour évoluer sur des projets concrets.",
       cvExtract: "Extrait de mon CV",
       resumeTitle: "Parcours",
       education: "Formation",
@@ -37,7 +37,7 @@ export const UI_TEXT = {
     contact: {
       availabilityTitle: "Disponible pour missions",
       availabilityBody:
-        "Je cherche actuellement un poste de développeur fullstack junior. Je suis joignable par email, et mon CV ainsi que ma lettre de motivation sont disponibles au téléchargement.",
+        "Je cherche actuellement un poste de développeur full stack. Je suis joignable par email, et mon CV ainsi que ma lettre de motivation sont disponibles au téléchargement.",
       phoneLabel: "Téléphone",
       addressLabel: "Adresse",
       emailCta: "Envoyer un email",
@@ -73,10 +73,10 @@ export const UI_TEXT = {
     },
     headerCta: "Contact",
     heroMeta: {
-      role: "Junior full-stack developer",
+      role: "Full-stack developer",
       location: "France",
     },
-    heroTitle: "Junior full-stack.",
+    heroTitle: "Full-stack developer.",
     heroSubtitle: "Ready for my first role.",
     heroProjectsCta: "View projects",
     configHint: "Config: links and text (email, GitHub, projects) are in",
@@ -89,7 +89,7 @@ export const UI_TEXT = {
     about: {
       valueTitle: "What I bring",
       valueBody:
-        "I enjoy turning an idea into a readable, fast and robust application. I’m finishing my training and looking for a junior full-stack role to grow on real-world projects.",
+        "I enjoy turning an idea into a readable, fast and robust application. I’m finishing my training and looking for a full-stack developer role to grow on real-world projects.",
       cvExtract: "From my resume",
       resumeTitle: "Resume",
       education: "Education",

@@ -20,7 +20,3 @@ npm run build
 ```bash
 npm run lint
 ```
-
-## Notes
-
-- Le dossier `web/` n'est plus utilisé (ancienne structure).

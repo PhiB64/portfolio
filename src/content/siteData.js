@@ -9,10 +9,10 @@ export const NAV_ITEMS = [
 
 export const profile = {
   name: "Philippe Barbosa",
-  role: "Développeur Fullstack Junior",
+  role: "Développeur Full Stack",
   location: "France",
   tagline:
-    "Je viens de terminer ma formation TP Développeur Web. Je recherche un poste de développeur fullstack junior, motivé et prêt à apprendre en équipe.",
+    "Je viens de terminer ma formation TP Développeur Web. Je recherche un poste de développeur full stack, motivé et prêt à apprendre en équipe.",
   highlights: ["Fullstack junior", "React", "Node.js", "SQL", "Accessibilité"],
   email: "philippebarbosa64@gmail.com",
   github: "",
@@ -23,7 +23,7 @@ export const projects = [
   {
     title: "CoolBooking",
     description: {
-      fr: "Application full-stack de gestion d’annonces et de réservations (comptes, annonces, favoris, messagerie) avec une interface React + Vite et une API REST côté back.",
+      fr: "Application full stack de gestion d’annonces et de réservations (comptes, annonces, favoris, messagerie) avec une interface React + Vite et une API REST côté back.",
       en: "Full-stack application for listings and bookings management (accounts, listings, favorites, messaging), with a React + Vite UI and a REST API backend.",
     },
     stack: ["React", "Vite", "Node.js", "Express", "MariaDB"],

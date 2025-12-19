@@ -4,7 +4,7 @@ export const RESUME_SUMMARY = {
 };
 
 export const LANGUAGE_LEVELS = {
-  Anglais: "Intermédiaire",
+  Anglais: "Débutant",
   Espagnol: "Intermédiaire",
   Portugais: "Débutant",
 };
