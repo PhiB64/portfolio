@@ -8,10 +8,10 @@ export const UI_TEXT = {
     },
     headerCta: "Me contacter",
     heroMeta: {
-      role: "Développeur Fullstack Junior",
+      role: "Développeur Full Stack",
       location: "France",
     },
-    heroTitle: "Fullstack junior.",
+    heroTitle: "Développeur Full Stack.",
     heroSubtitle: "Prêt pour mon premier poste.",
     heroProjectsCta: "Voir mes projets",
     configHint:
