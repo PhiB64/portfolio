@@ -152,10 +152,6 @@ export default function App() {
                 {contactEmail}
               </a>
             </div>
-
-            <p className="mt-4 text-xs text-slate-400">
-              {t.configHint} <span className="font-mono">src/App.jsx</span>.
-            </p>
           </div>
         </section>
 
