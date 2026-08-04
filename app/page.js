@@ -20,7 +20,7 @@ export default function Home() {
   const imageExt = /\.(jpg|jpeg|png|gif|webp|avif|svg)$/i;
   const cubeImages = [
     ...shuffle(allFiles.filter(f => videoExt.test(f))).map(f => `/${f}`),
-    ...shuffle(allFiles.filter(f => imageExt.test(f))).map(f => `/${f}`),
+    ...shuffle(allFiles.filter(f => imageExt.test(f) && !/^(icon|favicon)\.png$/i.test(f))).map(f => `/${f}`),
   ].slice(0, 6);
   return (
     <main>
