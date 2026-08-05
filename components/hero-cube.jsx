@@ -493,10 +493,11 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       // the whole end sequence is driven by the scroll position, so it plays
       // forward and backward and can never be skipped.
       const tlP = unlocked ? p : Math.min(p, CUBE_END);
-      // Once the wheel/hint have faded out, prevent seeking back into their fade range.
+      // Clamp seek to INTRO_END once the intro has played: polygon gone, cube visible.
+      const introEndMs = W.wheelFade + W.morph + W.fadeIn;
       const seekMs = tlP * TOTAL;
-      tl.seek(introCompleted ? Math.max(W.wheelFade, seekMs) : seekMs);
-      if (seekMs >= W.wheelFade) introCompleted = true;
+      tl.seek(introCompleted ? Math.max(introEndMs, seekMs) : seekMs);
+      if (seekMs >= introEndMs) introCompleted = true;
       facesVisibleRef.current = tlP < SPIN_START;
 
       // Show/hide the cube only while the square is gone. The cube's own
@@ -590,7 +591,8 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
           bgResetRef.current = true;
           resetBackground();
         }
-      } else if (tlP < INTRO_END) {
+      } else if (!introCompleted && tlP < INTRO_END) {
+        // Only reset background during the initial intro, not when scrolling back later.
         if (!bgResetRef.current) {
           bgResetRef.current = true;
           resetBackground();
