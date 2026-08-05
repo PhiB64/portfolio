@@ -38,7 +38,7 @@ const DEFAULT_FACE_MEDIA = [
   `${BASE}/backend.mp4`,
   `${BASE}/database.jpg`,
   `${BASE}/mobile.mp4`,
-  `${BASE}/projets.png`,
+  `${BASE}/projets.jpg`,
 ];
 
 export function HeroCube({ title, subtitle, images = [], scrollTo }) {
