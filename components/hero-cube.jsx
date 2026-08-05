@@ -840,7 +840,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
               <button
                 key={link.name}
                 onClick={() => openProject(i)}
-                className="w-full sm:w-auto bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
+                className="justify-self-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
                 style={{
                   opacity: zoomedFaces[i] ? 1 : 0,
                   transform: zoomedFaces[i] ? "translateY(0)" : "translateY(-15px)",
