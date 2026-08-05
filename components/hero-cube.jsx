@@ -835,7 +835,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
               }
             `}</style>
           </div>
-          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-2 gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
+          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => (
               <button
                 key={link.name}
