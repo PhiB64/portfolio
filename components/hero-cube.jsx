@@ -30,13 +30,15 @@ const PROJECT_LINKS = [
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
 // [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS]
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 const DEFAULT_FACE_MEDIA = [
-  "/web.jpg",
-  "/react.jpg",
-  "/backend.mp4",
-  "/database.mp4",
-  "/mobile.mp4",
-  "/projets.png",
+  `${BASE}/web.mp4`,
+  `${BASE}/react.jpg`,
+  `${BASE}/backend.mp4`,
+  `${BASE}/database.jpg`,
+  `${BASE}/mobile.mp4`,
+  `${BASE}/projets.png`,
 ];
 
 export function HeroCube({ title, subtitle, images = [], scrollTo }) {
@@ -411,6 +413,8 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
     let rafId = null;
     let isPinning = false;
     let lastTickTime = 0;
+    // Once the intro wheel/hint fade completes, this prevents them from reappearing.
+    let introCompleted = false;
 
     // Cache face DOM children once to avoid querySelector calls in the animation loop.
     const faceCache = Array.from({ length: 6 }, (_, i) => {
@@ -489,7 +493,10 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       // the whole end sequence is driven by the scroll position, so it plays
       // forward and backward and can never be skipped.
       const tlP = unlocked ? p : Math.min(p, CUBE_END);
-      tl.seek(tlP * TOTAL);
+      // Once the wheel/hint have faded out, prevent seeking back into their fade range.
+      const seekMs = tlP * TOTAL;
+      tl.seek(introCompleted ? Math.max(W.wheelFade, seekMs) : seekMs);
+      if (seekMs >= W.wheelFade) introCompleted = true;
       facesVisibleRef.current = tlP < SPIN_START;
 
       // Show/hide the cube only while the square is gone. The cube's own
@@ -700,7 +707,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
           aria-label="Accueil"
         >
           <img
-            src="/icon.png"
+            src={`${BASE}/icon.png`}
             alt=""
             className="h-20 w-20 rounded-2xl object-cover"
           />
