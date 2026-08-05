@@ -5,3 +5,4 @@ build
 .next
 *.tsbuildinfo
 next-env.d.ts
+dist

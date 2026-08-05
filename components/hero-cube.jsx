@@ -52,7 +52,9 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
   const [zoomedFaces, setZoomedFaces] = useState([false, false, false, false, false, false]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showContact, setShowContact] = useState(false);
-  const contactTabRef = useRef(null);
+  const [contactDone, setContactDone] = useState(false);
+  const [cubeScale, setCubeScale] = useState(1);
+  const cubeScaleRef = useRef(1);
   const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
   const morphWheelRef = useRef(null);
@@ -244,6 +246,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       rect.top + rect.height / 2,
       rot.rx,
       rot.ry,
+      cubeScaleRef.current,
     );
     if (idx >= 0 && faceImages[idx] && facesVisibleRef.current) {
       const labelShown = faceVisibilityCountRef.current[idx] >= 2;
@@ -265,6 +268,18 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
   }, []);
 
   useEffect(() => {
+    const compute = () => {
+      const w = window.innerWidth;
+      const s = Math.min(1, (w - 24) / 300);
+      cubeScaleRef.current = s;
+      setCubeScale(s);
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+
+  useEffect(() => {
     faceImages.forEach((url) => {
       if (!url) return;
       if (isVideoUrl(url)) {
@@ -279,8 +294,6 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
   }, [faceImages]);
 
   useEffect(() => {
-    if (window.innerWidth <= 768) return;
-
     if (history.scrollRestoration !== "manual") {
       history.scrollRestoration = "manual";
     }
@@ -431,7 +444,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       const rot = getCubeRotation(Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE));
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE);
-      const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
+      const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current, cubeScaleRef.current);
       lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
       if (wireRef.current) {
         if (!wirePathRef.current) {
@@ -539,7 +552,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
         Math.abs(rot.ry - lastWireRotRef.current.ry) > 0.05
       ) {
         lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
-        const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
+        const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current, cubeScaleRef.current);
         if (wireRef.current) {
           if (!wirePathRef.current) {
             const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -642,11 +655,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       // Reveal the contact tab once names appear (one-shot, persists on scroll back).
       if (!contactTabRevealedRef.current && tlP >= NAMES_START && allClickedRef.current) {
         contactTabRevealedRef.current = true;
-        if (contactTabRef.current) {
-          contactTabRef.current.style.opacity = "1";
-          contactTabRef.current.style.transform = "translateY(0)";
-          contactTabRef.current.style.pointerEvents = "auto";
-        }
+        setContactDone(true);
       }
     };
 
@@ -670,13 +679,24 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
     };
   }, [faceImages]);
 
+  const onContactClick = () => {
+    setShowContact(true);
+    try { window.history.pushState({ ufoContact: true }, "", window.location.href); } catch (e) {}
+  };
+  const contactBtnStyle = {
+    opacity: contactDone ? 1 : 0,
+    transform: contactDone ? "translateY(0)" : "translateY(-15px)",
+    pointerEvents: contactDone ? "auto" : "none",
+    transition: "opacity 0.5s ease 0.6s, transform 0.5s ease 0.6s",
+  };
+
   return (
     <section
       ref={sectionRef}
-      className="relative z-10 h-auto lg:h-[700vh]"
+      className="relative z-10 h-[700vh]"
       style={{ clipPath: "inset(0)" }}
     >
-      <div className="lg:sticky lg:top-0 min-h-screen flex items-center overflow-hidden">
+      <div className="sticky top-0 min-h-screen flex items-center overflow-hidden">
         <div
           ref={bgRef}
           className="absolute inset-0 bg-cover bg-center"
@@ -705,20 +725,20 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
         <div className="absolute inset-0 bg-[#0a0f1c]/60" />
         <button
           onClick={() => window.location.reload()}
-          className="absolute top-5 left-5 z-30 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
+          className="absolute top-3 left-3 z-30 sm:top-5 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
           aria-label="Accueil"
         >
           <img
             src={`${BASE}/icon.png`}
             alt=""
-            className="h-20 w-20 rounded-2xl object-cover"
+            className="h-12 w-12 sm:h-20 sm:w-20 rounded-2xl object-cover"
           />
         </button>
 
         <div className="relative z-10 w-full">
           <div ref={scrollIndicatorRef} className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="relative">
-              <svg width={343} height={343} viewBox="0 0 300 300" style={{ overflow: "visible" }}>
+              <svg className="w-[min(343px,88vw)] h-[min(343px,88vw)]" width={343} height={343} viewBox="0 0 300 300" style={{ overflow: "visible" }}>
                 <polygon
                   ref={morphBodyRef}
                   points="135,150 136,144 139,139 144,136 150,135 156,136 161,139 164,144 165,150 165,155 165,160 165,165 165,170 164,176 161,181 156,184 150,185 144,184 139,181 136,176 135,170 135,165 135,160 135,155"
@@ -815,12 +835,12 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
               }
             `}</style>
           </div>
-          <nav className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex flex-nowrap items-center justify-center gap-2 sm:gap-3 px-4">
+          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-2 gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => (
               <button
                 key={link.name}
                 onClick={() => openProject(i)}
-                className="bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:text-sm transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
+                className="w-full sm:w-auto bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
                 style={{
                   opacity: zoomedFaces[i] ? 1 : 0,
                   transform: zoomedFaces[i] ? "translateY(0)" : "translateY(-15px)",
@@ -832,28 +852,26 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
               </button>
             ))}
             <button
-              ref={contactTabRef}
-              onClick={() => {
-                setShowContact(true);
-                try { window.history.pushState({ ufoContact: true }, "", window.location.href); } catch (e) {}
-              }}
-              className="bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0 ml-4 sm:ml-6"
-              style={{
-                opacity: 0,
-                transform: "translateY(-15px)",
-                pointerEvents: "none",
-                transition: "opacity 0.5s ease 0.6s, transform 0.5s ease 0.6s",
-              }}
+              onClick={onContactClick}
+              className="hidden text-center sm:inline-block bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:ml-6 hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
+              style={contactBtnStyle}
             >
               CONTACT
             </button>
           </nav>
+          <button
+            onClick={onContactClick}
+            className="sm:hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
+            style={contactBtnStyle}
+          >
+            CONTACT
+          </button>
           <div
             ref={contentRef}
             className="relative mx-auto w-full opacity-0"
           >
             <div className="min-h-screen flex items-center justify-center">
-              <div ref={cubeContainerRef} className="relative shrink-0" style={{ width: 300, height: 300 }}>
+              <div ref={cubeContainerRef} className="relative shrink-0" style={{ width: 300, height: 300, transform: `scale(${cubeScale})`, transformOrigin: "center" }}>
                 <div style={{ perspective: 1200, perspectiveOrigin: "50% 50%" }}>
                   <div
                     ref={cubeRef}
@@ -924,7 +942,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
                             alignItems: "center",
                             justifyContent: "center",
                             color: "#33d1c8",
-                            fontSize: "1rem",
+                            fontSize: "1.25rem",
                             letterSpacing: "0.3em",
                             opacity: 0,
                             transition: "opacity 0.5s ease",
