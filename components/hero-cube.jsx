@@ -4,6 +4,7 @@ import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import anime from "animejs";
 
 import { renderProjectContent } from "./cube/project-content";
+import { ContactOverlay } from "./contact-overlay";
 import {
   FACE_LABELS,
   FACE_NORMALS,
@@ -48,6 +49,9 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
   const [zoomedFace, setZoomedFace] = useState(-1);
   const [zoomedFaces, setZoomedFaces] = useState([false, false, false, false, false, false]);
   const [selectedProject, setSelectedProject] = useState(null);
+  const [showContact, setShowContact] = useState(false);
+  const contactTabRef = useRef(null);
+  const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
   const morphWheelRef = useRef(null);
   const scrollIndicatorRef = useRef(null);
@@ -73,6 +77,15 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
   const facesVisibleRef = useRef(true);
   const spinFromRef = useRef(null);
   const bgResetRef = useRef(true);
+  const wirePathRef = useRef(null);
+  // Infinity triggers wireframe computation on the very first tick.
+  const lastWireRotRef = useRef({ rx: Infinity, ry: Infinity });
+  // Scroll position where the cube pauses for the user to click a labeled face.
+  const labelPinPRef = useRef(null);
+  // Prevents the unlock reset from running more than once.
+  const wasUnlockedRef = useRef(false);
+  // Set to true once every face has completed its 2nd exposure.
+  const allSeenTwiceRef = useRef(false);
 
   zoomedFacesRef.current = zoomedFaces;
   zoomedFaceRef.current = zoomedFace;
@@ -159,6 +172,11 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
     if (typeof window === "undefined") return;
     const onPop = (e) => {
       const s = e.state;
+      if (s && s.ufoContact) {
+        setShowContact(true);
+        return;
+      }
+      setShowContact(false);
       if (s && typeof s.ufoProject === "number") {
         setSelectedProject(s.ufoProject);
         return;
@@ -225,7 +243,11 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       rot.rx,
       rot.ry,
     );
-    if (idx >= 0 && faceImages[idx] && facesVisibleRef.current) handleFaceClick(idx);
+    if (idx >= 0 && faceImages[idx] && facesVisibleRef.current) {
+      const labelShown = faceVisibilityCountRef.current[idx] >= 2;
+      const mediaShown = zoomedFacesRef.current[idx];
+      if (labelShown || mediaShown) handleFaceClick(idx);
+    }
   }, [handleFaceClick, faceImages]);
 
   const openProject = useCallback((i) => {
@@ -309,7 +331,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       idle: 5000,
       facesOut: 900,
       cubeFade: 600,
-      spin: 2400,
+      spin: 3600,
       squareIn: 250,
       cubeOut: 500,
       lineMorph: 900,
@@ -388,23 +410,36 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
     let currentP = restoreP !== null ? restoreP : 0;
     let rafId = null;
     let isPinning = false;
+    let lastTickTime = 0;
+
+    // Cache face DOM children once to avoid querySelector calls in the animation loop.
+    const faceCache = Array.from({ length: 6 }, (_, i) => {
+      const faceEl = cubeRef.current?.children[i];
+      if (!faceEl) return null;
+      return {
+        el: faceEl,
+        media: faceEl.querySelector("img,video"),
+        wrapper: faceEl.querySelector(".face-media-wrapper"),
+      };
+    });
 
     if (restoreP !== null) {
       const rot = getCubeRotation(Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE));
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE);
       const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
-      let path = wireRef.current?.querySelector("path");
-      if (path) {
-        path.setAttribute("d", pathData);
-      } else if (wireRef.current) {
-        path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("fill", "none");
-        path.setAttribute("stroke", borderColorRef.current);
-        path.setAttribute("stroke-width", strokeWidthRef.current);
-        path.setAttribute("vector-effect", "non-scaling-stroke");
-        wireRef.current.appendChild(path);
-        path.setAttribute("d", pathData);
+      lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
+      if (wireRef.current) {
+        if (!wirePathRef.current) {
+          const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          p.setAttribute("fill", "none");
+          p.setAttribute("stroke", "#00a5b0");
+          p.setAttribute("stroke-width", "2");
+          p.setAttribute("vector-effect", "non-scaling-stroke");
+          wireRef.current.appendChild(p);
+          wirePathRef.current = p;
+        }
+        wirePathRef.current.setAttribute("d", pathData);
       }
     }
 
@@ -412,24 +447,40 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       const rect = el.getBoundingClientRect();
       const sb = el.offsetHeight - window.innerHeight;
       targetP = sb > 0 ? Math.min(1, Math.max(0, -rect.top / sb)) : 0;
-      if (targetP >= 1 && !allClickedRef.current && !isPinning) {
-        isPinning = true;
-        window.scrollTo(0, el.offsetHeight - window.innerHeight);
-        requestAnimationFrame(() => {
-          isPinning = false;
-        });
+      // Block scroll at the labeled-face pin position until the user clicks it.
+      if (!allClickedRef.current && labelPinPRef.current !== null && !isPinning) {
+        const pinP = labelPinPRef.current;
+        if (targetP > pinP) {
+          isPinning = true;
+          window.scrollTo(0, pinP * sb);
+          requestAnimationFrame(() => { isPinning = false; });
+          targetP = pinP;
+        }
       }
     };
 
-    const tick = () => {
-      sync();
+    const tick = (now) => {
+      const dt = lastTickTime > 0 ? Math.min(now - lastTickTime, 100) : 16.67;
+      lastTickTime = now;
       const diff = targetP - currentP;
-      if (Math.abs(diff) < 0.001) {
+      if (Math.abs(diff) < 0.0005) {
         currentP = targetP;
+        lastTickTime = 0;
         rafId = null;
       } else {
-        currentP += diff * 0.15;
+        // Frame-rate independent: same perceived speed at 30, 60, or 120 fps.
+        currentP += diff * (1 - Math.pow(0.85, dt / 16.67));
         rafId = requestAnimationFrame(tick);
+      }
+      const unlocked = allClickedRef.current;
+      // On the first frame after all faces are clicked, reset currentP to CUBE_END
+      // so the exit animation plays forward from there instead of jumping ahead.
+      if (unlocked && !wasUnlockedRef.current) {
+        wasUnlockedRef.current = true;
+        if (currentP > CUBE_END) {
+          currentP = CUBE_END;
+          if (!rafId) rafId = requestAnimationFrame(tick);
+        }
       }
       const p = currentP;
 
@@ -437,7 +488,6 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       // stops at the end of the idle phase; once every face has been clicked
       // the whole end sequence is driven by the scroll position, so it plays
       // forward and backward and can never be skipped.
-      const unlocked = allClickedRef.current;
       const tlP = unlocked ? p : Math.min(p, CUBE_END);
       tl.seek(tlP * TOTAL);
       facesVisibleRef.current = tlP < SPIN_START;
@@ -475,22 +525,25 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       }
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = baseP;
-      // Compute this once per tick so both the wireframe block and the
-      // overlay block below can use `overlayBounds`.
-      const { path: pathData, overlayBounds } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
-      if (wireRef.current) {
-        let path = wireRef.current.querySelector("path");
-        if (!path) {
-          path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          path.setAttribute("fill", "none");
-          path.setAttribute("stroke", borderColorRef.current);
-          path.setAttribute("stroke-width", strokeWidthRef.current);
-          path.setAttribute("vector-effect", "non-scaling-stroke");
-          wireRef.current.appendChild(path);
+      // Only recompute wireframe geometry when rotation changes by a visible amount.
+      if (
+        Math.abs(rot.rx - lastWireRotRef.current.rx) > 0.05 ||
+        Math.abs(rot.ry - lastWireRotRef.current.ry) > 0.05
+      ) {
+        lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
+        const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
+        if (wireRef.current) {
+          if (!wirePathRef.current) {
+            const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            p.setAttribute("fill", "none");
+            p.setAttribute("stroke", "#00a5b0");
+            p.setAttribute("stroke-width", "2");
+            p.setAttribute("vector-effect", "non-scaling-stroke");
+            wireRef.current.appendChild(p);
+            wirePathRef.current = p;
+          }
+          wirePathRef.current.setAttribute("d", pathData);
         }
-        path.setAttribute("stroke", borderColorRef.current);
-        path.setAttribute("stroke-width", strokeWidthRef.current);
-        path.setAttribute("d", pathData);
       }
       // 2nd exposure => reveal the label (click affordance). Once every face has
       // been clicked the labels stay hidden.
@@ -512,6 +565,19 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
         }
         faceWasVisibleRef.current[i] = nowVisible;
       }
+      // After ALL faces have been seen twice, snap to the next face-forward step boundary.
+      if (!allSeenTwiceRef.current && faceVisibilityCountRef.current.every(c => c >= 2)) {
+        allSeenTwiceRef.current = true;
+        const cubeP = Math.max(0, (currentP - INTRO_END) / CUBE_RANGE);
+        const snapBaseP = Math.min(1, Math.ceil(cubeP * 12) / 12);
+        labelPinPRef.current = INTRO_END + snapBaseP * CUBE_RANGE;
+      }
+      // Release the pin once every labeled face has been clicked.
+      if (labelPinPRef.current !== null && !FACE_NORMALS.some((_, i) =>
+        faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i]
+      )) {
+        labelPinPRef.current = null;
+      }
       if (spinning) {
         if (!bgResetRef.current) {
           bgResetRef.current = true;
@@ -530,10 +596,9 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       // Per-face lighting: rotate face normal by current cube rotation
       if (cubeRef.current) {
         for (let i = 0; i < 6; i++) {
-          const faceEl = cubeRef.current.children[i];
-          if (!faceEl) continue;
-          const media = faceEl.querySelector("img,video");
-          const wrapper = faceEl.querySelector(".face-media-wrapper");
+          const cached = faceCache[i];
+          if (!cached) continue;
+          const { el: faceEl, media, wrapper } = cached;
           const n = FACE_NORMALS[i];
           const [rxn, ryn, rzn] = rotateVecByXY(n[0], n[1], n[2], rot.rx, rot.ry);
           const dot = Math.max(0, rxn * LIGHT_DIR[0] + ryn * LIGHT_DIR[1] + rzn * LIGHT_DIR[2]);
@@ -565,6 +630,15 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
         names.style.transform = "translateY(70px)";
         sub.style.transform = "translateY(-70px)";
       }
+      // Reveal the contact tab once names appear (one-shot, persists on scroll back).
+      if (!contactTabRevealedRef.current && tlP >= NAMES_START && allClickedRef.current) {
+        contactTabRevealedRef.current = true;
+        if (contactTabRef.current) {
+          contactTabRef.current.style.opacity = "1";
+          contactTabRef.current.style.transform = "translateY(0)";
+          contactTabRef.current.style.pointerEvents = "auto";
+        }
+      }
     };
 
     tickRef.current = tick;
@@ -578,6 +652,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
     if (restoreP !== null) {
       window.scrollTo(0, restoreP * (el.offsetHeight - window.innerHeight));
     }
+    sync();
     rafId = requestAnimationFrame(tick);
 
     return () => {
@@ -619,9 +694,9 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
           />
         </div>
         <div className="absolute inset-0 bg-[#0a0f1c]/60" />
-        <a
-          href="#top"
-          className="absolute top-5 left-5 z-30 sm:left-8"
+        <button
+          onClick={() => window.location.reload()}
+          className="absolute top-5 left-5 z-30 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
           aria-label="Accueil"
         >
           <img
@@ -629,7 +704,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
             alt=""
             className="h-20 w-20 rounded-2xl object-cover"
           />
-        </a>
+        </button>
 
         <div className="relative z-10 w-full">
           <div ref={scrollIndicatorRef} className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -731,7 +806,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
               }
             `}</style>
           </div>
-          <nav className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex flex-wrap justify-center gap-2 sm:gap-3 px-4">
+          <nav className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex flex-nowrap items-center justify-center gap-2 sm:gap-3 px-4">
             {PROJECT_LINKS.map((link, i) => (
               <button
                 key={link.name}
@@ -747,6 +822,22 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
                 {link.name}
               </button>
             ))}
+            <button
+              ref={contactTabRef}
+              onClick={() => {
+                setShowContact(true);
+                try { window.history.pushState({ ufoContact: true }, "", window.location.href); } catch (e) {}
+              }}
+              className="bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0 ml-4 sm:ml-6"
+              style={{
+                opacity: 0,
+                transform: "translateY(-15px)",
+                pointerEvents: "none",
+                transition: "opacity 0.5s ease 0.6s, transform 0.5s ease 0.6s",
+              }}
+            >
+              CONTACT
+            </button>
           </nav>
           <div
             ref={contentRef}
@@ -860,6 +951,18 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
           </div>
         </div>
       </div>
+
+      {showContact && (
+        <ContactOverlay
+          onClose={() => {
+            if (typeof window !== "undefined" && window.history?.state?.ufoContact) {
+              window.history.back();
+            } else {
+              setShowContact(false);
+            }
+          }}
+        />
+      )}
 
       {selectedProject !== null && (
         <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: "#0a0f1c" }}>
