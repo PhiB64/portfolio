@@ -41,7 +41,7 @@ const DEFAULT_FACE_MEDIA = [
   `${BASE}/projets.jpg`,
 ];
 
-export function HeroCube({ title, subtitle, images = [], scrollTo }) {
+export function HeroCube({ title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
   const cubeRef = useRef(null);
   const wireRef = useRef(null);
@@ -106,7 +106,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       try {
         const p = s.split("/").pop().split("?")[0];
         return p.toLowerCase();
-      } catch (e) {
+      } catch {
         return s.toLowerCase();
       }
     };
@@ -263,7 +263,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
         const url = new URL(window.location.href);
         url.searchParams.set("project", String(i + 1));
         window.history.pushState(state, "", url.pathname + url.search);
-      } catch (e) {}
+      } catch {}
     }
   }, []);
 
@@ -334,8 +334,6 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
     // Every stage of the animation lives in this one timeline. Its playhead is
     // driven by scroll progress (tl.seek), so the entire animation scrubs
     // forwards and backwards and is fully reversible.
-    const WHEEL_POINTS =
-      "135,150 136,144 139,139 144,136 150,135 156,136 161,139 164,144 165,150 165,155 165,160 165,165 165,170 164,176 161,181 156,184 150,185 144,184 139,181 136,176 135,170 135,165 135,160 135,155";
     const SQUARE_POINTS =
       "0,0 50,0 100,0 150,0 200,0 250,0 300,0 300,50 300,100 300,150 300,200 300,250 300,300 250,300 200,300 150,300 100,300 50,300 0,300 0,250 0,200 0,150 0,100 0,50";
 
@@ -670,11 +668,11 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
       window.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [faceImages]);
+  }, [faceImages, changeBackground]);
 
   const onContactClick = () => {
     setShowContact(true);
-    try { window.history.pushState({ ufoContact: true }, "", window.location.href); } catch (e) {}
+    try { window.history.pushState({ ufoContact: true }, "", window.location.href); } catch {}
   };
   const contactBtnStyle = {
     opacity: contactDone ? 1 : 0,
@@ -780,7 +778,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
                         userSelect: "none",
                       }}
                     >
-                      Philippe Barbosa
+                      {title}
                     </text>
                   </g>
                 </g>
@@ -801,7 +799,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
                         userSelect: "none",
                       }}
                     >
-                      Concepteur Développeur
+                      {subtitle}
                     </text>
                   </g>
                 </g>
@@ -1000,7 +998,7 @@ export function HeroCube({ title, subtitle, images = [], scrollTo }) {
                         const url = new URL(window.location.href);
                         url.searchParams.delete("project");
                         window.history.replaceState(null, "", url.pathname + url.search);
-                      } catch (e) {}
+                      } catch {}
                     }
                   }
                 }}

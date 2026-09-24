@@ -109,8 +109,8 @@ export function ContactOverlay({ onClose }) {
                   <p className="tracking-widest uppercase text-xs">Message prêt</p>
                 </div>
                 <p className="text-[#94a3b8] leading-relaxed text-sm">
-                  Votre messagerie va s'ouvrir avec le message pré-rempli.
-                  Il ne vous reste qu'à l'envoyer.
+                  Votre messagerie va&nbsp;s&rsquo;ouvrir avec le message pré-rempli.
+                  Il ne vous reste qu&rsquo;à l&rsquo;envoyer.
                 </p>
               </div>
             ) : (

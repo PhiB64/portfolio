@@ -7,8 +7,8 @@ export default function Home() {
   return (
     <main>
       <HeroCube
-        title="Mon Portfolio"
-        subtitle="Créatif & Développeur"
+        title="Philippe Barbosa"
+        subtitle="Concepteur Développeur"
         images={HERO_IMAGES}
       />
     </main>

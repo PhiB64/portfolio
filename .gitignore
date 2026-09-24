@@ -1,8 +1,11 @@
-.next
-node_modules
-out
-build
-.next
-*.tsbuildinfo
+# Dependencies
+/node_modules
+
+# Next.js build output
+/.next
+/out
 next-env.d.ts
-dist
+*.tsbuildinfo
+
+# Static export (GitHub Pages)
+/dist
