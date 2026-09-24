@@ -280,20 +280,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   }, []);
 
   useEffect(() => {
-    faceImages.forEach((url) => {
-      if (!url) return;
-      if (isVideoUrl(url)) {
-        const v = document.createElement("video");
-        v.preload = "metadata";
-        v.src = url;
-      } else {
-        const i = new Image();
-        i.src = url;
-      }
-    });
-  }, [faceImages]);
-
-  useEffect(() => {
     if (history.scrollRestoration !== "manual") {
       history.scrollRestoration = "manual";
     }
