@@ -410,6 +410,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let rafId = null;
     let isPinning = false;
     let lastTickTime = 0;
+    // Once every face has been clicked, the end sequence plays out at a steady
+    // pace (autoplay) instead of snapping to the real scroll position.
+    let autoplay = false;
+    let autoplayElapsed = 0;
+    const AUTOPLAY_MS = 9000;
 
     // Cache face DOM children once to avoid querySelector calls in the animation loop.
     const faceCache = Array.from({ length: 6 }, (_, i) => {
@@ -445,7 +450,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const sync = () => {
       const rect = el.getBoundingClientRect();
       const sb = el.offsetHeight - window.innerHeight;
-      targetP = sb > 0 ? Math.min(1, Math.max(0, -rect.top / sb)) : 0;
+      const real = sb > 0 ? Math.min(1, Math.max(0, -rect.top / sb)) : 0;
+      // While autoplay is running the page is scrolled programmatically. Only a
+      // real user scroll (position drifting away from the driven head) takes back.
+      if (autoplay) {
+        if (Math.abs(real - currentP) > 0.02) autoplay = false;
+        else return;
+      }
+      targetP = real;
       // Block scroll at the labeled-face pin position until the user clicks it.
       if (!allClickedRef.current && labelPinPRef.current !== null && !isPinning) {
         const pinP = labelPinPRef.current;
@@ -462,7 +474,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const dt = lastTickTime > 0 ? Math.min(now - lastTickTime, 100) : 16.67;
       lastTickTime = now;
       const diff = targetP - currentP;
-      if (Math.abs(diff) < 0.0005) {
+      if (autoplay) {
+        // Steady, frame-rate independent progression through the end sequence.
+        autoplayElapsed += dt;
+        currentP = CUBE_END + (autoplayElapsed / AUTOPLAY_MS) * (1 - CUBE_END);
+        if (autoplayElapsed >= AUTOPLAY_MS) {
+          autoplay = false;
+          currentP = Math.min(1, currentP);
+        }
+        targetP = currentP;
+        let sbNow = el.offsetHeight - window.innerHeight;
+        if (sbNow > 0) window.scrollTo(0, currentP * sbNow);
+        rafId = requestAnimationFrame(tick);
+      } else if (Math.abs(diff) < 0.0005) {
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -478,6 +502,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         wasUnlockedRef.current = true;
         if (currentP > CUBE_END) {
           currentP = CUBE_END;
+          targetP = CUBE_END;
+          autoplay = true;
+          autoplayElapsed = 0;
           if (!rafId) rafId = requestAnimationFrame(tick);
         }
       }
