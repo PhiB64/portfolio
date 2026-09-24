@@ -5,8 +5,8 @@ export const metadata = {
   description:
     "Portfolio de Philippe Barbosa, concepteur développeur full stack (React, Next.js, Node.js). Découvrez ses projets web, mobile et back-end, du code en production.",
   icons: {
-    icon: [{ url: "/favicon.png", sizes: "any", type: "image/png" }],
-    apple: "/favicon.png",
+    icon: [{ url: "/favicon.webp", sizes: "any", type: "image/webp" }],
+    apple: "/favicon.webp",
   },
   openGraph: {
     title: "Philippe Barbosa — Concepteur Développeur",

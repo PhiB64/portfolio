@@ -33,12 +33,12 @@ const PROJECT_LINKS = [
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 const DEFAULT_FACE_MEDIA = [
-  `${BASE}/web.mp4`,
-  `${BASE}/react.jpg`,
-  `${BASE}/backend.mp4`,
-  `${BASE}/database.jpg`,
-  `${BASE}/mobile.mp4`,
-  `${BASE}/projets.jpg`,
+  `${BASE}/web.webm`,
+  `${BASE}/react.webp`,
+  `${BASE}/backend.webm`,
+  `${BASE}/database.webp`,
+  `${BASE}/mobile.webm`,
+  `${BASE}/projets.webp`,
 ];
 
 export function HeroCube({ title, subtitle, images = [] }) {
@@ -720,7 +720,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           aria-label="Accueil"
         >
           <img
-            src={`${BASE}/icon.png`}
+            src={`${BASE}/icon.webp`}
             alt=""
             className="h-12 w-12 sm:h-20 sm:w-20 rounded-2xl object-cover"
           />
@@ -903,13 +903,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           >
                             {isVideoUrl(faceImages[i]) ? (
                               <video
-                                src={faceImages[i]}
+                                src={zoomedFaces[i] ? faceImages[i] : undefined}
                                 className="w-full h-full object-cover"
                                 autoPlay
                                 muted
                                 loop
                                 playsInline
-                                preload="metadata"
+                                preload={zoomedFaces[i] ? "metadata" : "none"}
                               />
                             ) : (
                               <img
