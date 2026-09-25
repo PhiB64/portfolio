@@ -484,6 +484,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // pace (autoplay) instead of snapping to the real scroll position.
     let autoplay = false;
     let autoplayElapsed = 0;
+    // Position (timeline units) the skip morph glides up from. On the manual
+    // skip that equals the start pose, so the cube holds still while its faces
+    // fold in; on the automatic load it is wherever the page was, so the intro
+    // sweep gently rides up to the cube during the fold instead of jumping.
+    let skipFrom = 0;
     const AUTOPLAY_MS = 9000;
     // Skipped intro: first a calm empty-cube rotation (the cube keeps turning
     // softly while its blank faces scroll by), then the finale with the name
@@ -590,6 +595,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (!skipActiveRef.current) {
           skipActiveRef.current = true;
           autoplayElapsed = 0;
+          skipFrom = currentP;
           skipStartRef.current = Math.min(SPIN_START, INTRO_END + Math.max(0, currentPRef.current) * CUBE_RANGE);
           // Lay down the folding transition once: each face surface shrinks away
           // over the morph window, revealing the empty cube before it turns.
@@ -606,8 +612,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         autoplayElapsed += dt;
         const start = skipStartRef.current;
         if (autoplayElapsed < SKIP_MORPH_MS) {
-          // Morphing first: the cube holds its pose while the faces fold in.
-          currentP = start;
+          // Morphing first: glide from the current position up to the cube pose
+          // while the faces fold in, so the sweep is never a visual jump.
+          currentP = skipFrom + (start - skipFrom) * smoothstep(autoplayElapsed / SKIP_MORPH_MS);
         } else {
           skipFoldRef.current = false;
           skipFacesHiddenRef.current = true;
