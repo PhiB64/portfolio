@@ -61,6 +61,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [contactDone, setContactDone] = useState(false);
   const [cubeScale, setCubeScale] = useState(1);
   const [skipped, setSkipped] = useState(false);
+  // Locked viewport height (px). Mobile browsers shift dvh as the URL bar
+  // shows or hides, which would move the cube up and down while scrolling;
+  // every scroll math below therefore uses this frozen value instead.
+  const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
   // first skip frame so the gentle rotation begins exactly where we are.
@@ -312,21 +316,43 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const s = Math.min(1, (w - 24) / 300);
       cubeScaleRef.current = s;
       setCubeScale(s);
+      // Refresh the locked height only on a real resize (rotation, desktop
+      // window) — the small jumps the URL bar causes on mobile are ignored so
+      // the section and the scroll targets never move during a gesture.
+      const h = window.innerHeight;
+      if (h > 0 && Math.abs(h - vhRef.current) > 130) vhRef.current = h;
     };
     compute();
     window.addEventListener("resize", compute);
     return () => window.removeEventListener("resize", compute);
   }, []);
 
-  // Passe automatiquement la page en plein écran au premier geste sur mobile
-  // (masque les barres du navigateur). One-shot : se désactive après coup.
+  // Passe automatiquement la page en plein écran au premier tap mobile
+  // (masque les barres du navigateur). Demander le fullscreen au pointerdown
+  // débordait sur le premier geste : le clic sur une face était avalé et
+  // l'utilisateur devait re-taper. On le demande maintenant au pointerup d'un
+  // vrai tap (aucun déplacement) pour ne pas gêner l'interaction.
   useEffect(() => {
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
     const isFullscreen = window.matchMedia("(display-mode: fullscreen)").matches;
     if (!isMobile || isStandalone || isFullscreen) return;
 
-    const enterFullscreen = () => {
+    let downX = 0;
+    let downY = 0;
+    let armed = false;
+
+    const onDown = (e) => {
+      downX = e.clientX;
+      downY = e.clientY;
+      armed = true;
+    };
+
+    const onUp = (e) => {
+      if (!armed) return;
+      armed = false;
+      const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
+      if (dist > 12) return;
       const el = document.documentElement;
       const request =
         el.requestFullscreen?.bind(el) || el.webkitRequestFullscreen?.bind(el);
@@ -338,12 +364,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       cleanup();
     };
+
     const cleanup = () => {
-      document.removeEventListener("pointerdown", enterFullscreen);
-      document.removeEventListener("touchstart", enterFullscreen);
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("pointerup", onUp);
     };
-    document.addEventListener("pointerdown", enterFullscreen);
-    document.addEventListener("touchstart", enterFullscreen, { passive: true });
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("pointerup", onUp);
     return cleanup;
   }, []);
 
@@ -560,7 +587,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         targetP = 1;
         return;
       }
-      const sb = el.offsetHeight - window.innerHeight;
+      const sb = el.offsetHeight - (vhRef.current || window.innerHeight);
       // window.scrollY avoids the layout read of getBoundingClientRect on every
       // scroll frame — noticeably smoother on mobile.
       const pos = window.scrollY - sectionTop;
@@ -693,7 +720,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipFoldRef.current = false;
           currentP = SPIN_START + (1 - SPIN_START) * Math.min(1, (autoplayElapsed - SKIP_MORPH_MS - galleryDur - SKIP_GAP_MS) / SKIP_FINALE_MS);
         }
-        const sbNow = el.offsetHeight - window.innerHeight;
+        const sbNow = el.offsetHeight - (vhRef.current || window.innerHeight);
         if (sbNow > 0) window.scrollTo(0, sectionTop + currentP * sbNow);
         if (autoplayElapsed >= SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS + SKIP_FINALE_MS) {
           currentP = 1;
@@ -716,7 +743,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           currentP = Math.min(1, currentP);
         }
         targetP = currentP;
-        let sbNow = el.offsetHeight - window.innerHeight;
+        let sbNow = el.offsetHeight - (vhRef.current || window.innerHeight);
         if (sbNow > 0) window.scrollTo(0, currentP * sbNow);
         rafId = requestAnimationFrame(tick);
       } else if (Math.abs(diff) < 0.0005) {
@@ -965,7 +992,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
     window.addEventListener("scroll", onScroll, { passive: true });
     if (restoreP !== null) {
-      window.scrollTo(0, restoreP * (el.offsetHeight - window.innerHeight));
+      window.scrollTo(0, restoreP * (el.offsetHeight - (vhRef.current || window.innerHeight)));
     }
     sync();
     rafId = requestAnimationFrame(tick);
@@ -982,7 +1009,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const zone = clickZoneRef.current;
     if (!zone) return;
 
-    const DRAG_THRESHOLD = 8;
     let suppressTimer = null;
     let dragRafQueued = false;
     let pendingRafId = null;
@@ -1022,7 +1048,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
       st.lastY = e.clientY;
       const distX = e.clientX - st.startX;
       const distY = e.clientY - st.startY;
-      if (!st.moved && Math.hypot(distX, distY) > DRAG_THRESHOLD) {
+      // Touch gets a larger threshold: a finger drifts a few pixels while
+      // tapping, and under 8px a tap was silently treated as a drag, killing
+      // the click and forcing the user to try again.
+      const threshold = st.pointerType === "touch" ? 14 : 8;
+      if (!st.moved && Math.hypot(distX, distY) > threshold) {
         st.moved = true;
       }
       if (!st.moved) return;
@@ -1099,10 +1129,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   return (
     <section
       ref={sectionRef}
-      className="relative z-10 h-[700dvh]"
-      style={{ clipPath: "inset(0)" }}
+      className="relative z-10"
+      style={{ height: "700svh", clipPath: "inset(0)" }}
     >
-      <div className="sticky top-0 min-h-[100dvh] flex items-center overflow-hidden">
+      <div className="sticky top-0 min-h-[100svh] flex items-center overflow-hidden">
         <div
           ref={bgRef}
           className="absolute inset-0 bg-cover bg-center"
@@ -1285,7 +1315,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             ref={contentRef}
             className="relative mx-auto w-full opacity-0"
           >
-            <div className="min-h-[100dvh] flex items-center justify-center">
+            <div className="min-h-[100svh] flex items-center justify-center">
               <div ref={cubeContainerRef} className="relative shrink-0" style={{ width: 300, height: 300, transform: `scale(${cubeScale})`, transformOrigin: "center" }}>
                 <div style={{ perspective: 1200, perspectiveOrigin: "50% 50%" }}>
                   <div
