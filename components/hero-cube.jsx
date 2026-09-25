@@ -60,6 +60,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [showContact, setShowContact] = useState(false);
   const [contactDone, setContactDone] = useState(false);
   const [cubeScale, setCubeScale] = useState(1);
+  const [skipped, setSkipped] = useState(false);
+  const skipRef = useRef(false);
   const cubeScaleRef = useRef(1);
   const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
@@ -331,6 +333,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const bg = bgRef.current;
     if (!body || !wheel || !hint || !names || !sub || !cubeContainer || !contentEl || !bg) return;
 
+    // Distance of the section from the document top; scrollY is measured from it.
+    const sectionTop = el.offsetTop;
+
     const resetBackground = () => {
       if (videoBgContainerRef.current) videoBgContainerRef.current.style.opacity = "0";
       if (videoBgRef.current) videoBgRef.current.pause();
@@ -441,6 +446,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let autoplay = false;
     let autoplayElapsed = 0;
     const AUTOPLAY_MS = 9000;
+    // Duration of the accelerated sweep to the end when the user skips.
+    const SKIP_MS = 1100;
 
     // Cache face DOM children once to avoid querySelector calls in the animation loop.
     const faceCache = Array.from({ length: 6 }, (_, i) => {
@@ -474,9 +481,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     }
 
     const sync = () => {
-      const rect = el.getBoundingClientRect();
+      // While the skip sweep runs, always steer toward the end of the section.
+      if (skipRef.current) {
+        targetP = 1;
+        return;
+      }
       const sb = el.offsetHeight - window.innerHeight;
-      const real = sb > 0 ? Math.min(1, Math.max(0, -rect.top / sb)) : 0;
+      // window.scrollY avoids the layout read of getBoundingClientRect on every
+      // scroll frame — noticeably smoother on mobile.
+      const pos = window.scrollY - sectionTop;
+      const real = sb > 0 ? Math.min(1, Math.max(0, pos / sb)) : 0;
       // While autoplay is running the page is scrolled programmatically. Only a
       // real user scroll (position drifting away from the driven head) takes back.
       if (autoplay) {
@@ -489,7 +503,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         const pinP = labelPinPRef.current;
         if (targetP > pinP) {
           isPinning = true;
-          window.scrollTo(0, pinP * sb);
+          window.scrollTo(0, sectionTop + pinP * sb);
           requestAnimationFrame(() => { isPinning = false; });
           targetP = pinP;
         }
@@ -500,7 +514,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const dt = lastTickTime > 0 ? Math.min(now - lastTickTime, 100) : 16.67;
       lastTickTime = now;
       const diff = targetP - currentP;
-      if (autoplay) {
+      if (skipRef.current) {
+        // Accelerated sweep to the end: drives currentP from its current value
+        // up to 1 while scrolling the page at the same pace. Smooth and ffps.
+        autoplayElapsed += dt;
+        currentP = Math.min(1, autoplayElapsed / SKIP_MS);
+        const sbNow = el.offsetHeight - window.innerHeight;
+        if (sbNow > 0) window.scrollTo(0, sectionTop + currentP * sbNow);
+        if (currentP >= 1) {
+          currentP = 1;
+          targetP = 1;
+          autoplayElapsed = 0;
+          skipRef.current = false;
+        }
+        rafId = requestAnimationFrame(tick);
+      } else if (autoplay) {
         // Steady, frame-rate independent progression through the end sequence.
         autoplayElapsed += dt;
         currentP = CUBE_END + (autoplayElapsed / AUTOPLAY_MS) * (1 - CUBE_END);
@@ -518,7 +546,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = null;
       } else {
         // Frame-rate independent: same perceived speed at 30, 60, or 120 fps.
-        currentP += diff * (1 - Math.pow(0.85, dt / 16.67));
+        // 0.8 tracks the finger faster than before for a smoother feel on mobile.
+        currentP += diff * (1 - Math.pow(0.8, dt / 16.67));
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
@@ -848,6 +877,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
   }, []);
 
+  const skipIntro = useCallback(() => {
+    if (skipRef.current) return;
+    skipRef.current = true;
+    // Unlock everything: the pin disappears and the timeline head can reach the
+    // end of the sequence (names, links and CONTACT reveal) during the sweep.
+    allClickedRef.current = true;
+    labelPinPRef.current = null;
+    setSkipped(true);
+    for (let i = 0; i < 6; i++) {
+      if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
+    }
+    if (typeof tickRef.current === "function") tickRef.current();
+  }, []);
+
   const onContactClick = () => {
     setShowContact(true);
     try { window.history.pushState({ ufoContact: true }, "", window.location.href); } catch {}
@@ -1005,21 +1048,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
             `}</style>
           </div>
           <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
-            {PROJECT_LINKS.map((link, i) => (
-              <button
-                key={link.name}
-                onClick={() => openProject(i)}
-                className="justify-self-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
-                style={{
-                  opacity: zoomedFaces[i] ? 1 : 0,
-                  transform: zoomedFaces[i] ? "translateY(0)" : "translateY(-15px)",
-                  transition: `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
-                  pointerEvents: zoomedFaces[i] ? "auto" : "none",
-                }}
-              >
-                {link.name}
-              </button>
-            ))}
+            {PROJECT_LINKS.map((link, i) => {
+              const shown = zoomedFaces[i] || skipped;
+              return (
+                <button
+                  key={link.name}
+                  onClick={() => openProject(i)}
+                  className="justify-self-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
+                  style={{
+                    opacity: shown ? 1 : 0,
+                    transform: shown ? "translateY(0)" : "translateY(-15px)",
+                    transition: `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
+                    pointerEvents: shown ? "auto" : "none",
+                  }}
+                >
+                  {link.name}
+                </button>
+              );
+            })}
             <button
               onClick={onContactClick}
               className="hidden text-center sm:inline-block bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:ml-6 hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
@@ -1028,6 +1074,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
               CONTACT
             </button>
           </nav>
+          <button
+            onClick={skipIntro}
+            aria-label="Passer l'animation"
+            className="absolute top-24 right-3 sm:top-5 sm:right-8 z-30 bg-[#0a0f1c]/70 border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs cursor-pointer transition-opacity duration-500 hover:bg-[#00a5b0]/10"
+            style={contactDone ? { opacity: 0, pointerEvents: "none" } : { opacity: 1 }}
+          >
+            PASSER
+          </button>
           <button
             onClick={onContactClick}
             className="sm:hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
