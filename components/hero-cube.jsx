@@ -47,6 +47,9 @@ const smoothstep = (t) => {
   return x * x * (3 - 2 * x);
 };
 
+const SCROLL_SMOOTHING_MS = 90;
+const MAX_FRAME_DT = 100;
+
 export function HeroCube({ title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
   const cubeRef = useRef(null);
@@ -64,9 +67,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // pour que le crossfade carré→cube reste aligné sur tous les formats.
   const [squareSize, setSquareSize] = useState(343);
   const [skipped, setSkipped] = useState(false);
-  // Hauteur d'écran (px) rafraîchie à la rotation/resize. Utilisée pour
-  // ramener le temps de lissage du cube à une sensation constante sur
-  // portrait, paysage, mobile et desktop.
   const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
@@ -503,12 +503,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
     const AUTOPLAY_MS = 9000;
-    // Hauteur d'écran de référence (px) pour laquelle le rattrapage du cube
-    // vaut 0.8/frame. Le rapport vhRef/REF_SCREEN_H ajuste le temps de lissage
-    // pour que le cube traîne derrière le doigt d'une même fraction d'écran en
-    // portrait comme en paysage (plus fluide sur grand écran, plus direct en
-    // paysage où l'on défile moins).
-    const REF_SCREEN_H = 700;
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly one second, label included), then the cube folds and
     // the finale plays at its own readable pace.
@@ -610,7 +604,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
 
     const tick = (now) => {
-      const dt = lastTickTime > 0 ? Math.min(now - lastTickTime, 100) : 16.67;
+      const dt = lastTickTime > 0
+        ? Math.min(Math.max(now - lastTickTime, 0), MAX_FRAME_DT)
+        : 16.67;
       lastTickTime = now;
       const diff = targetP - currentP;
       if (skipRef.current) {
@@ -743,12 +739,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
         lastTickTime = 0;
         rafId = null;
       } else {
-        // Frame-rate independent: same perceived speed at 30, 60, or 120 fps.
-        // Le temps de lissage s'adapte à la hauteur d'écran (voir REF_SCREEN_H) :
-        // sur grand écran le cube suit avec plus d'aisance, en paysage il accroche
-        // plus vite le doigt.
-        const screenH = vhRef.current || window.innerHeight || REF_SCREEN_H;
-        currentP += diff * (1 - Math.pow(0.8, (dt / 16.67) * (REF_SCREEN_H / screenH)));
+        const follow = 1 - Math.exp(-dt / SCROLL_SMOOTHING_MS);
+        currentP += diff * follow;
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
