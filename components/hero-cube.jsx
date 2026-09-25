@@ -875,13 +875,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
         for (let i = 0; i < 6; i++) {
           const cached = faceCache[i];
           if (!cached) continue;
-          if (skipFoldRef.current) continue;
           const { el: faceEl, media, wrapper } = cached;
           const n = FACE_NORMALS[i];
           const [rxn, ryn, rzn] = rotateVecByXY(n[0], n[1], n[2], rot.rx, rot.ry);
           const dot = Math.max(0, rxn * LIGHT_DIR[0] + ryn * LIGHT_DIR[1] + rzn * LIGHT_DIR[2]);
           const brightness = 0.35 + 1.3 * dot;
-if (spinning || skipFacesHiddenRef.current) {
+          // During the sweep the media stay folded away, but the lighting keeps
+          // tracking the cube rotation: the frontally exposed face always reads
+          // fully lit, the others fall off naturally.
+          if (skipFoldRef.current) {
+            faceEl.style.filter = `brightness(${brightness})`;
+            continue;
+          }
+          if (spinning || skipFacesHiddenRef.current) {
             if (media) media.style.filter = "";
             if (wrapper) {
               wrapper.style.transition = "none";
