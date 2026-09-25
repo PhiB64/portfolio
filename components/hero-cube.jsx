@@ -48,6 +48,7 @@ const smoothstep = (t) => {
 };
 
 const WEB_SCROLL_SMOOTHING_MS = 130;
+const WEB_REVERSE_SCROLL_SMOOTHING_MS = 220;
 const MOBILE_SCROLL_SMOOTHING_MS = 90;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 180;
 const MAX_FRAME_DT = 100;
@@ -838,7 +839,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
           ? diff < 0
             ? MOBILE_REVERSE_SCROLL_SMOOTHING_MS
             : MOBILE_SCROLL_SMOOTHING_MS
-          : WEB_SCROLL_SMOOTHING_MS;
+          : diff < 0
+            ? WEB_REVERSE_SCROLL_SMOOTHING_MS
+            : WEB_SCROLL_SMOOTHING_MS;
         const follow = 1 - Math.exp(-dt / smoothingMs);
         currentP += diff * follow;
         rafId = requestAnimationFrame(tick);
