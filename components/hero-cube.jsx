@@ -327,53 +327,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => window.removeEventListener("resize", compute);
   }, []);
 
-  // Passe automatiquement la page en plein écran au premier tap mobile
-  // (masque les barres du navigateur). Demander le fullscreen au pointerdown
-  // débordait sur le premier geste : le clic sur une face était avalé et
-  // l'utilisateur devait re-taper. On le demande maintenant au pointerup d'un
-  // vrai tap (aucun déplacement) pour ne pas gêner l'interaction.
-  useEffect(() => {
-    const isMobile = window.matchMedia("(max-width: 767px)").matches;
-    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
-    const isFullscreen = window.matchMedia("(display-mode: fullscreen)").matches;
-    if (!isMobile || isStandalone || isFullscreen) return;
-
-    let downX = 0;
-    let downY = 0;
-    let armed = false;
-
-    const onDown = (e) => {
-      downX = e.clientX;
-      downY = e.clientY;
-      armed = true;
-    };
-
-    const onUp = (e) => {
-      if (!armed) return;
-      armed = false;
-      const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-      if (dist > 12) return;
-      const el = document.documentElement;
-      const request =
-        el.requestFullscreen?.bind(el) || el.webkitRequestFullscreen?.bind(el);
-      if (request) {
-        try {
-          const result = request({ navigationUI: "hide" });
-          if (result && typeof result.catch === "function") result.catch(() => {});
-        } catch {}
-      }
-      cleanup();
-    };
-
-    const cleanup = () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("pointerup", onUp);
-    };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("pointerup", onUp);
-    return cleanup;
-  }, []);
-
   useEffect(() => {
     if (history.scrollRestoration !== "manual") {
       history.scrollRestoration = "manual";
