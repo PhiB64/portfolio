@@ -62,6 +62,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [cubeScale, setCubeScale] = useState(1);
   const [skipped, setSkipped] = useState(false);
   const skipRef = useRef(false);
+  const skipAutoRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
   // first skip frame so the gentle rotation begins exactly where we are.
   const skipStartRef = useRef(0);
@@ -527,6 +528,26 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const sync = () => {
       // While the skip sweep runs, always steer toward the end of the section.
       if (skipRef.current) {
+        // An automatic sweep hands control back as soon as the user scrolls.
+        if (skipAutoRef.current) {
+          const sbAuto = el.offsetHeight - window.innerHeight;
+          const posAuto = window.scrollY - sectionTop;
+          const realAuto = sbAuto > 0 ? Math.min(1, Math.max(0, posAuto / sbAuto)) : 0;
+          if (Math.abs(realAuto - currentP) > 0.03) {
+            skipRef.current = false;
+            skipActiveRef.current = false;
+            skipFoldRef.current = false;
+            skipFacesHiddenRef.current = false;
+            skipAutoRef.current = false;
+            allClickedRef.current = false;
+            wasUnlockedRef.current = false;
+            exitOrderRef.current = null;
+            labelPinPRef.current = null;
+            setSkipped(false);
+            targetP = realAuto;
+            return;
+          }
+        }
         targetP = 1;
         return;
       }
@@ -961,9 +982,10 @@ if (spinning || skipFacesHiddenRef.current) {
     };
   }, []);
 
-  const skipIntro = useCallback(() => {
+  const skipIntro = useCallback((auto = false) => {
     if (skipRef.current) return;
     skipRef.current = true;
+    skipAutoRef.current = !!auto;
     // Unlock everything: the pin disappears and the timeline head can reach the
     // end of the sequence (names, links and CONTACT reveal) during the sweep.
     allClickedRef.current = true;
@@ -977,6 +999,23 @@ if (spinning || skipFacesHiddenRef.current) {
     }
     if (typeof tickRef.current === "function") tickRef.current();
   }, []);
+
+  // On first load, play the whole skipped sequence by itself once the scene
+  // has settled, unless the visitor already started exploring the cube.
+  useEffect(() => {
+    const autoSkipTimer = setTimeout(() => {
+      if (skipRef.current || allClickedRef.current) return;
+      const el = sectionRef.current;
+      if (!el) return;
+      const sbAuto = el.offsetHeight - window.innerHeight;
+      if (sbAuto > 0) {
+        const realAuto = (window.scrollY - el.offsetTop) / sbAuto;
+        if (Math.abs(realAuto) > 0.03) return;
+      }
+      skipIntro(true);
+    }, 2000);
+    return () => clearTimeout(autoSkipTimer);
+  }, [skipIntro]);
 
   const onContactClick = () => {
     setShowContact(true);
