@@ -49,6 +49,18 @@ const smoothstep = (t) => {
 
 const SCROLL_SMOOTHING_MS = 90;
 const MAX_FRAME_DT = 100;
+const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
+const MOBILE_CUBE_MAX_SCALE = 0.8;
+
+const isMobileDevice = () => {
+  if (typeof window === "undefined") return false;
+  const userAgent = window.navigator.userAgent || "";
+  const mobileUserAgent = MOBILE_USER_AGENT.test(userAgent) || window.navigator.userAgentData?.mobile === true;
+  const touchDevice = window.navigator.maxTouchPoints > 0 || "ontouchstart" in window;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches === true;
+  const compactViewport = Math.max(window.innerWidth, window.innerHeight) <= 1100;
+  return mobileUserAgent || ((touchDevice || coarsePointer) && compactViewport);
+};
 
 export function HeroCube({ title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
@@ -62,6 +74,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [selectedProject, setSelectedProject] = useState(null);
   const [showContact, setShowContact] = useState(false);
   const [contactDone, setContactDone] = useState(false);
+  const [isMobileLandscape, setIsMobileLandscape] = useState(false);
   const [cubeScale, setCubeScale] = useState(1);
   // Taille affichée (px) de la carte d'intro (viewBox 300) ; suit cubeScale
   // pour que le crossfade carré→cube reste aligné sur tous les formats.
@@ -336,15 +349,70 @@ export function HeroCube({ title, subtitle, images = [] }) {
   }, []);
 
   useEffect(() => {
+    const portraitQuery = window.matchMedia?.("(orientation: portrait)");
+    const updateOrientation = () => {
+      const portrait = portraitQuery?.matches ?? window.innerHeight >= window.innerWidth;
+      setIsMobileLandscape(isMobileDevice() && !portrait);
+    };
+    const screenOrientation = window.screen?.orientation;
+
+    updateOrientation();
+    window.addEventListener("resize", updateOrientation);
+    window.addEventListener("orientationchange", updateOrientation);
+    window.addEventListener("pageshow", updateOrientation);
+    document.addEventListener("visibilitychange", updateOrientation);
+
+    if (portraitQuery?.addEventListener) {
+      portraitQuery.addEventListener("change", updateOrientation);
+    } else {
+      portraitQuery?.addListener?.(updateOrientation);
+    }
+    if (screenOrientation?.addEventListener) {
+      screenOrientation.addEventListener("change", updateOrientation);
+    } else {
+      screenOrientation?.addListener?.(updateOrientation);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateOrientation);
+      window.removeEventListener("orientationchange", updateOrientation);
+      window.removeEventListener("pageshow", updateOrientation);
+      document.removeEventListener("visibilitychange", updateOrientation);
+      if (portraitQuery?.removeEventListener) {
+        portraitQuery.removeEventListener("change", updateOrientation);
+      } else {
+        portraitQuery?.removeListener?.(updateOrientation);
+      }
+      if (screenOrientation?.removeEventListener) {
+        screenOrientation.removeEventListener("change", updateOrientation);
+      } else {
+        screenOrientation?.removeListener?.(updateOrientation);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileLandscape) return;
+    const orientation = window.screen?.orientation;
+    if (!orientation?.lock) return;
+    try {
+      const result = orientation.lock("portrait");
+      result?.catch(() => {});
+    } catch {}
+  }, [isMobileLandscape]);
+
+  useEffect(() => {
     const compute = () => {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const landscape = w > h;
+      const mobile = isMobileDevice();
       const baseSize = 300;
       const reserveH = landscape ? 96 : 168;
+      const maxScale = mobile ? MOBILE_CUBE_MAX_SCALE : 1;
       const availW = Math.max(120, w - 24);
       const availH = Math.max(120, h - reserveH);
-      const s = Math.max(0.35, Math.min(1, availW / baseSize, availH / baseSize));
+      const s = Math.max(0.35, Math.min(maxScale, availW / baseSize, availH / baseSize));
       cubeScaleRef.current = s;
       setCubeScale(s);
       setSquareSize(Math.min(343 * s, w - 8));
@@ -1164,11 +1232,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
   };
 
   return (
-    <section
-      ref={sectionRef}
-      className="relative z-10 h-[100svh] overflow-y-auto overflow-x-hidden scroll-none"
-      style={{ clipPath: "inset(0)" }}
-    >
+    <>
+      <section
+        ref={sectionRef}
+        className="relative z-10 h-[100svh] overflow-y-auto overflow-x-hidden scroll-none"
+        aria-hidden={isMobileLandscape}
+        inert={isMobileLandscape ? "" : undefined}
+        style={{
+          clipPath: "inset(0)",
+          pointerEvents: isMobileLandscape ? "none" : undefined,
+        }}
+      >
       <div style={{ height: "700svh" }}>
         <div className="sticky top-0 min-h-[100svh] flex items-center overflow-hidden">
         <div
@@ -1528,7 +1602,33 @@ export function HeroCube({ title, subtitle, images = [] }) {
           </div>
         </div>
       )}
-    </section>
+      </section>
+
+      {isMobileLandscape && (
+        <div
+          className="fixed inset-0 z-[100] flex min-h-[100svh] items-center justify-center bg-[#0a0f1c] px-8 text-center"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="orientation-lock-title"
+          aria-describedby="orientation-lock-description"
+          onTouchMove={(event) => event.preventDefault()}
+          onWheel={(event) => event.preventDefault()}
+          style={{ touchAction: "none", overscrollBehavior: "none" }}
+        >
+          <div className="max-w-sm">
+            <div className="relative mx-auto mb-8 h-20 w-12 rounded-[10px] border-2 border-[#00a5b0] shadow-[0_0_24px_rgba(0,165,176,0.25)]">
+              <div className="absolute left-1/2 top-1 h-1 w-3 -translate-x-1/2 rounded-full bg-[#00a5b0]" />
+              <div className="absolute inset-x-2 bottom-3 h-1 rounded-full bg-[#00a5b0]/50" />
+            </div>
+            <p className="mb-3 text-xs font-light tracking-[0.3em] text-[#00a5b0] uppercase">Orientation requise</p>
+            <h1 id="orientation-lock-title" className="mb-4 text-3xl font-light text-white">Tournez votre appareil</h1>
+            <p id="orientation-lock-description" className="text-sm leading-relaxed text-[#94a3b8]">
+              Le portfolio est disponible en format portrait.
+            </p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
