@@ -337,18 +337,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const landscape = w > h;
-      // Le cube s'adapte à la fois à la largeur et à la hauteur de l'écran.
-      // En portrait on réserve de la place pour le logo/les contrôles en haut
-      // et l'indice de scroll en bas ; en paysage la hauteur est la contrainte
-      // principale donc la réserve est réduite. Borné pour ne jamais devenir
-      // intouchable (0.35) ni déborder un écran desktop (1.5).
+      const baseSize = 300;
       const reserveH = landscape ? 96 : 168;
-      const availW = Math.max(120, w - 40);
+      const availW = Math.max(120, w - 24);
       const availH = Math.max(120, h - reserveH);
-      const s = Math.max(0.35, Math.min(1.5, availW / 300, availH / 300));
+      const s = Math.max(0.35, Math.min(1, availW / baseSize, availH / baseSize));
       cubeScaleRef.current = s;
       setCubeScale(s);
-      // Carte d'intro alignée sur le cube (factor 343/300) sans dépasser l'écran.
       setSquareSize(Math.min(343 * s, w - 8));
       // Refresh the locked height only on a real resize (rotation, desktop
       // window) — the small jumps the URL bar causes on mobile are ignored so
@@ -562,7 +557,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const rot = getCubeRotation(Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE));
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE);
-      const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current, cubeScaleRef.current);
+      const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
       lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
       if (wireRef.current) {
         if (!wirePathRef.current) {
@@ -836,7 +831,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         Math.abs(rot.ry - lastWireRotRef.current.ry) > 0.05
       ) {
         lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
-        const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current, cubeScaleRef.current);
+        const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
         if (wireRef.current) {
           if (!wirePathRef.current) {
             const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
