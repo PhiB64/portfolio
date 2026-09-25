@@ -625,6 +625,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
             cached.wrapper.style.transform = "scale(0)";
             cached.wrapper.style.opacity = "1";
           }
+          // Labels are handed over to the gallery: none at the very start, only
+          // the frontally exposed face once the morph is over.
+          for (let i = 0; i < 6; i++) {
+            const label = clickLabelRefs.current[i];
+            if (label) label.style.opacity = "0";
+          }
           skipFoldRef.current = true;
           skipFacesHiddenRef.current = true;
           gallerySetup(skipStartRef.current);
@@ -819,7 +825,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
       }
       // 2nd exposure => reveal the label (click affordance). Once every face has
-      // been clicked the labels stay hidden.
+      // been clicked the labels stay hidden. Frozen during the auto sweep: there
+      // the labels are driven solely by the gallery, otherwise they would light
+      // up mid-rotation (perspective-stretched) and then snap to frontal size.
+      if (!skipActiveRef.current) {
       for (let i = 0; i < 6; i++) {
         const nowVisible = isFaceVisible(
           FACE_NORMALS[i][0],
@@ -837,6 +846,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           }
         }
         faceWasVisibleRef.current[i] = nowVisible;
+      }
       }
       // After ALL faces have been seen twice, snap to the next face-forward step boundary.
       if (!allSeenTwiceRef.current && faceVisibilityCountRef.current.every(c => c >= 2)) {
