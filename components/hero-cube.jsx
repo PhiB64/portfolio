@@ -499,6 +499,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
     const SKIP_FINALE_MS = 3000;
+    // Label choreography within each hold: fade in only after the cube fully
+    // settles (its composited render is stable by then), and fade out before
+    // the next turn begins so the text never shrinks in perspective.
+    const SKIP_LABEL_DELAY_MS = 100;
+    const SKIP_LABEL_EXIT_MS = 360;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
@@ -658,7 +663,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
             const loc = t - j * SEG;
             if (loc < SKIP_HOLD_MS) {
               galP = galleryRot[j];
-              labelIdx = Math.round(galleryRot[j] * 12) % 6;
+              // The label fades in only once the cube has fully settled, and
+              // fades out again before the next turn so it never stays visible
+              // while the cube rotates (which reads as the text shrinking).
+              const labelOn = loc >= SKIP_LABEL_DELAY_MS && loc < SKIP_HOLD_MS - SKIP_LABEL_EXIT_MS;
+              labelIdx = labelOn ? Math.round(galleryRot[j] * 12) % 6 : -1;
             } else if (j < galleryRot.length - 1) {
               const tt = smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS));
               galP = galleryRot[j] + (galleryRot[j + 1] - galleryRot[j]) * tt;
@@ -1378,7 +1387,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                             fontSize: "1.25rem",
                             letterSpacing: "0.3em",
                             opacity: 0,
-                            transition: "opacity 0.5s ease",
+                            transition: "opacity 0.35s ease",
                             zIndex: 5,
                           }}
                         >
