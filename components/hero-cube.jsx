@@ -942,10 +942,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   return (
     <section
       ref={sectionRef}
-      className="relative z-10 h-[700vh]"
+      className="relative z-10 h-[700dvh]"
       style={{ clipPath: "inset(0)" }}
     >
-      <div className="sticky top-0 min-h-screen flex items-center overflow-hidden">
+      <div className="sticky top-0 min-h-[100dvh] flex items-center overflow-hidden">
         <div
           ref={bgRef}
           className="absolute inset-0 bg-cover bg-center"
@@ -1114,14 +1114,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
           <button
             onClick={skipIntro}
             aria-label="Passer l'animation"
-            className="absolute bottom-6 right-3 sm:bottom-8 sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs cursor-pointer transition-opacity duration-500 hover:text-white"
+            className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs cursor-pointer transition-opacity duration-500 hover:text-white"
             style={contactDone || skipped ? { opacity: 0, pointerEvents: "none" } : { opacity: 1 }}
           >
             SKIP
           </button>
           <button
             onClick={onContactClick}
-            className="sm:hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
+            className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
             style={contactBtnStyle}
           >
             CONTACT
@@ -1130,7 +1130,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             ref={contentRef}
             className="relative mx-auto w-full opacity-0"
           >
-            <div className="min-h-screen flex items-center justify-center">
+            <div className="min-h-[100dvh] flex items-center justify-center">
               <div ref={cubeContainerRef} className="relative shrink-0" style={{ width: 300, height: 300, transform: `scale(${cubeScale})`, transformOrigin: "center" }}>
                 <div style={{ perspective: 1200, perspectiveOrigin: "50% 50%" }}>
                   <div
