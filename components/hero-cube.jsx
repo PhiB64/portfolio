@@ -66,6 +66,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // first skip frame so the gentle rotation begins exactly where we are.
   const skipStartRef = useRef(0);
   const skipActiveRef = useRef(false);
+  // Once skipped, the faces fold away so the cube is visibly empty during the
+  // gentle rotation (only the cyan wireframe shows).
+  const skipFacesHiddenRef = useRef(false);
   const cubeScaleRef = useRef(1);
   const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
@@ -762,7 +765,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           const [rxn, ryn, rzn] = rotateVecByXY(n[0], n[1], n[2], rot.rx, rot.ry);
           const dot = Math.max(0, rxn * LIGHT_DIR[0] + ryn * LIGHT_DIR[1] + rzn * LIGHT_DIR[2]);
           const brightness = 0.35 + 1.3 * dot;
-          if (spinning) {
+if (spinning || skipFacesHiddenRef.current) {
             if (media) media.style.filter = "";
             if (wrapper) {
               wrapper.style.transition = "none";
@@ -943,6 +946,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     exitOrderRef.current = [5, 4, 3, 2, 1, 0];
     labelPinPRef.current = null;
     skipActiveRef.current = false;
+    skipFacesHiddenRef.current = true;
     setSkipped(true);
     for (let i = 0; i < 6; i++) {
       if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
@@ -1108,7 +1112,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           </div>
           <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => {
-              const shown = zoomedFaces[i] || skipped;
+              const shown = zoomedFaces[i] || (skipped && contactDone);
               return (
                 <button
                   key={link.name}
