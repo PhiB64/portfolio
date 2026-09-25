@@ -513,7 +513,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           if (k / 12 >= startRot - 1e-9) galleryRot.push(k / 12);
         }
       }
-      galleryRot.push(1);
+      if (galleryRot.length === 0) galleryRot.push(Math.min(startRot, 5 / 12));
       const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
       galleryDur = lead + galleryRot.length * (SKIP_HOLD_MS + SKIP_TURN_MS) - SKIP_TURN_MS;
     };
@@ -681,7 +681,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
             if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
           }
           const gapK = smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS);
-          currentP = CUBE_END + (SPIN_START - CUBE_END) * gapK;
+          const galEnd = INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE;
+          currentP = galEnd + (SPIN_START - galEnd) * gapK;
         } else {
           // Finale (spin, line, name) at its own steady pace on the blank cube.
           skipFacesHiddenRef.current = true;
