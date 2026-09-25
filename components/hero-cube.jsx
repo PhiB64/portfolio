@@ -60,10 +60,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [showContact, setShowContact] = useState(false);
   const [contactDone, setContactDone] = useState(false);
   const [cubeScale, setCubeScale] = useState(1);
+  // Taille affichée (px) de la carte d'intro (viewBox 300) ; suit cubeScale
+  // pour que le crossfade carré→cube reste aligné sur tous les formats.
+  const [squareSize, setSquareSize] = useState(343);
   const [skipped, setSkipped] = useState(false);
-  // Locked viewport height (px). Mobile browsers shift dvh as the URL bar
-  // shows or hides, which would move the cube up and down while scrolling;
-  // every scroll math below therefore uses this frozen value instead.
+  // Hauteur d'écran (px) rafraîchie à la rotation/resize. Utilisée pour
+  // ramener le temps de lissage du cube à une sensation constante sur
+  // portrait, paysage, mobile et desktop.
   const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
@@ -332,18 +335,33 @@ export function HeroCube({ title, subtitle, images = [] }) {
   useEffect(() => {
     const compute = () => {
       const w = window.innerWidth;
-      const s = Math.min(1, (w - 24) / 300);
+      const h = window.innerHeight;
+      const landscape = w > h;
+      // Le cube s'adapte à la fois à la largeur et à la hauteur de l'écran.
+      // En portrait on réserve de la place pour le logo/les contrôles en haut
+      // et l'indice de scroll en bas ; en paysage la hauteur est la contrainte
+      // principale donc la réserve est réduite. Borné pour ne jamais devenir
+      // intouchable (0.35) ni déborder un écran desktop (1.5).
+      const reserveH = landscape ? 96 : 168;
+      const availW = Math.max(120, w - 40);
+      const availH = Math.max(120, h - reserveH);
+      const s = Math.max(0.35, Math.min(1.5, availW / 300, availH / 300));
       cubeScaleRef.current = s;
       setCubeScale(s);
+      // Carte d'intro alignée sur le cube (factor 343/300) sans dépasser l'écran.
+      setSquareSize(Math.min(343 * s, w - 8));
       // Refresh the locked height only on a real resize (rotation, desktop
       // window) — the small jumps the URL bar causes on mobile are ignored so
       // the section and the scroll targets never move during a gesture.
-      const h = window.innerHeight;
       if (h > 0 && Math.abs(h - vhRef.current) > 130) vhRef.current = h;
     };
     compute();
     window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
+    window.addEventListener("orientationchange", compute);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("orientationchange", compute);
+    };
   }, []);
 
   useEffect(() => {
@@ -490,6 +508,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
     const AUTOPLAY_MS = 9000;
+    // Hauteur d'écran de référence (px) pour laquelle le rattrapage du cube
+    // vaut 0.8/frame. Le rapport vhRef/REF_SCREEN_H ajuste le temps de lissage
+    // pour que le cube traîne derrière le doigt d'une même fraction d'écran en
+    // portrait comme en paysage (plus fluide sur grand écran, plus direct en
+    // paysage où l'on défile moins).
+    const REF_SCREEN_H = 700;
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly one second, label included), then the cube folds and
     // the finale plays at its own readable pace.
@@ -725,8 +749,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = null;
       } else {
         // Frame-rate independent: same perceived speed at 30, 60, or 120 fps.
-        // 0.8 tracks the finger faster than before for a smoother feel on mobile.
-        currentP += diff * (1 - Math.pow(0.8, dt / 16.67));
+        // Le temps de lissage s'adapte à la hauteur d'écran (voir REF_SCREEN_H) :
+        // sur grand écran le cube suit avec plus d'aisance, en paysage il accroche
+        // plus vite le doigt.
+        const screenH = vhRef.current || window.innerHeight || REF_SCREEN_H;
+        currentP += diff * (1 - Math.pow(0.8, (dt / 16.67) * (REF_SCREEN_H / screenH)));
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
@@ -1171,7 +1198,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
         <div className="relative z-10 w-full">
           <div ref={scrollIndicatorRef} className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="relative">
-              <svg className="w-[min(343px,88vw)] h-[min(343px,88vw)]" width={343} height={343} viewBox="0 0 300 300" style={{ overflow: "visible" }}>
+              <svg
+                width={squareSize}
+                height={squareSize}
+                viewBox="0 0 300 300"
+                style={{ overflow: "visible" }}
+              >
                 <polygon
                   ref={morphBodyRef}
                   points="135,150 136,144 139,139 144,136 150,135 156,136 161,139 164,144 165,150 165,155 165,160 165,165 165,170 164,176 161,181 156,184 150,185 144,184 139,181 136,176 135,170 135,165 135,160 135,155"
