@@ -490,14 +490,33 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
     const AUTOPLAY_MS = 9000;
-    // Skipped intro: first a calm empty-cube rotation (the cube keeps turning
-    // softly while its blank faces scroll by), then the finale with the name
-    // reveal at its own readable pace.
+    // Skipped intro: faces come back out and each one is exposed frontally for
+    // a moment (roughly one second, label included), then the cube folds and
+    // the finale plays at its own readable pace.
     const SKIP_MORPH_MS = 900;
-    const SKIP_GENTLE_MS = 4600;
+    const SKIP_HOLD_MS = 1000;
+    const SKIP_TURN_MS = 400;
+    const SKIP_LEAD_MS = 400;
+    const SKIP_GAP_MS = 1100;
     const SKIP_FINALE_MS = 3000;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
+    // Poses (rotation units) the skip gallery lingers on, one per exposed face,
+    // computed from where the cube is when the sweep starts.
+    let galleryRot = [];
+    let galleryDur = 0;
+    const gallerySetup = (start) => {
+      galleryRot = [];
+      const startRot = (start - INTRO_END) / CUBE_RANGE;
+      if (startRot < 5 / 12 - 1e-9) {
+        for (let k = 0; k < 6; k++) {
+          if (k / 12 >= startRot - 1e-9) galleryRot.push(k / 12);
+        }
+      }
+      galleryRot.push(1);
+      const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
+      galleryDur = lead + galleryRot.length * (SKIP_HOLD_MS + SKIP_TURN_MS) - SKIP_TURN_MS;
+    };
 
     // Cache face DOM children once to avoid querySelector calls in the animation loop.
     const faceCache = Array.from({ length: 6 }, (_, i) => {
@@ -597,39 +616,81 @@ export function HeroCube({ title, subtitle, images = [] }) {
           autoplayElapsed = 0;
           skipFrom = currentP;
           skipStartRef.current = Math.min(SPIN_START, INTRO_END + Math.max(0, currentPRef.current) * CUBE_RANGE);
-          // Lay down the folding transition once: each face surface shrinks away
-          // over the morph window, revealing the empty cube before it turns.
+          // Bring every face surface back out once (they are folded before the sweep):
+          // the skip exposes each face frontally in turn instead of rotating a
+          // blank cube, so the surfaces rise again over the morph window.
           for (let i = 0; i < 6; i++) {
             const cached = faceCache[i];
             if (!cached?.wrapper) continue;
-            cached.wrapper.style.transition = `transform ${SKIP_MORPH_MS}ms cubic-bezier(0.6, 0.05, 0.4, 1), opacity ${SKIP_MORPH_MS}ms ease`;
-            cached.wrapper.style.transform = "scale(0)";
+            cached.wrapper.style.transition = `transform 700ms cubic-bezier(0.6, 0.05, 0.4, 1), opacity 700ms ease`;
+            cached.wrapper.style.transform = "scale(1)";
             cached.wrapper.style.opacity = "1";
           }
           skipFoldRef.current = true;
           skipFacesHiddenRef.current = false;
+          gallerySetup(start);
         }
         autoplayElapsed += dt;
         const start = skipStartRef.current;
         if (autoplayElapsed < SKIP_MORPH_MS) {
           // Morphing first: glide from the current position up to the cube pose
-          // while the faces fold in, so the sweep is never a visual jump.
+          // while the faces unfold, so the sweep is never a visual jump.
           currentP = skipFrom + (start - skipFrom) * smoothstep(autoplayElapsed / SKIP_MORPH_MS);
-        } else {
-          skipFoldRef.current = false;
-          skipFacesHiddenRef.current = true;
-          if (autoplayElapsed < SKIP_MORPH_MS + SKIP_GENTLE_MS) {
-            // Soft rotation of the empty cube: ease through the idle/faces-out
-            // stretch, slowly, so the cube reads as calmly turning.
-            currentP = start + (SPIN_START - start) * smoothstep((autoplayElapsed - SKIP_MORPH_MS) / SKIP_GENTLE_MS);
+        } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur) {
+          // Gallery: settle on each face so it stares frontally one second,
+          // its label visible, with a short spin between two exposures.
+          const galT = autoplayElapsed - SKIP_MORPH_MS;
+          const startRot = (start - INTRO_END) / CUBE_RANGE;
+          const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
+          const SEG = SKIP_HOLD_MS + SKIP_TURN_MS;
+          let galP;
+          let labelIdx = -1;
+          if (galT < lead) {
+            galP = startRot + (galleryRot[0] - startRot) * smoothstep(galT / lead);
           } else {
-            // Finale (spin, line, name) at its own steady pace.
-            currentP = SPIN_START + (1 - SPIN_START) * Math.min(1, (autoplayElapsed - SKIP_MORPH_MS - SKIP_GENTLE_MS) / SKIP_FINALE_MS);
+            const t = galT - lead;
+            const j = Math.min(galleryRot.length - 1, Math.floor(t / SEG));
+            const loc = t - j * SEG;
+            if (loc < SKIP_HOLD_MS) {
+              galP = galleryRot[j];
+              labelIdx = Math.round(galleryRot[j] * 12) % 6;
+            } else if (j < galleryRot.length - 1) {
+              const tt = smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS));
+              galP = galleryRot[j] + (galleryRot[j + 1] - galleryRot[j]) * tt;
+              labelIdx = -1;
+            } else {
+              galP = galleryRot[j];
+            }
           }
+          currentP = INTRO_END + galP * CUBE_RANGE;
+          for (let i = 0; i < 6; i++) {
+            const label = clickLabelRefs.current[i];
+            if (label) label.style.opacity = i === labelIdx ? "1" : "0";
+          }
+        } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS) {
+          // Fold every face away again while the playhead eases up to the spin.
+          // skipFoldRef stays true so the render loop lets the transition play.
+          for (let i = 0; i < 6; i++) {
+            const cached = faceCache[i];
+            if (!cached?.wrapper) continue;
+            if (cached.wrapper.style.transform !== "scale(0)") {
+              cached.wrapper.style.transform = "scale(0)";
+            }
+          }
+          for (let i = 0; i < 6; i++) {
+            if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
+          }
+          const gapK = smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS);
+          currentP = CUBE_END + (SPIN_START - CUBE_END) * gapK;
+        } else {
+          // Finale (spin, line, name) at its own steady pace on the blank cube.
+          skipFacesHiddenRef.current = true;
+          skipFoldRef.current = false;
+          currentP = SPIN_START + (1 - SPIN_START) * Math.min(1, (autoplayElapsed - SKIP_MORPH_MS - galleryDur - SKIP_GAP_MS) / SKIP_FINALE_MS);
         }
         const sbNow = el.offsetHeight - window.innerHeight;
         if (sbNow > 0) window.scrollTo(0, sectionTop + currentP * sbNow);
-        if (autoplayElapsed >= SKIP_MORPH_MS + SKIP_GENTLE_MS + SKIP_FINALE_MS) {
+        if (autoplayElapsed >= SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS + SKIP_FINALE_MS) {
           currentP = 1;
           targetP = 1;
           autoplayElapsed = 0;
@@ -637,6 +698,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipActiveRef.current = false;
           skipFoldRef.current = false;
           skipFacesHiddenRef.current = false;
+          galleryRot = [];
+          galleryDur = 0;
         }
         rafId = requestAnimationFrame(tick);
       } else if (autoplay) {
