@@ -569,10 +569,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
         spinFromRef.current = null;
       }
       spinningRef.current = spinning;
-      // User drag adds a fixed offset on top of the scroll-driven orientation.
+      // The direct drag adds a fixed offset over the scroll-driven orientation.
+      // From the end-sequence spin onward the offset fades out so the cube
+      // returns to its aligned ("square") rest pose before the names appear.
+      let dragRx = dragOffsetRef.current.rx;
+      let dragRy = dragOffsetRef.current.ry;
+      if (tlP > SPIN_START) {
+        const kSpin = Math.min(1, Math.max(0, (tlP - SPIN_START) / (SPIN_END - SPIN_START)));
+        const fade = 1 - kSpin * kSpin * (3 - 2 * kSpin);
+        dragRx *= fade;
+        dragRy *= fade;
+      }
       rot = {
-        rx: rot.rx + dragOffsetRef.current.rx,
-        ry: rot.ry + dragOffsetRef.current.ry,
+        rx: rot.rx + dragRx,
+        ry: rot.ry + dragRy,
       };
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = baseP;
