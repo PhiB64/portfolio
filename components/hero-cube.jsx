@@ -616,18 +616,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
           autoplayElapsed = 0;
           skipFrom = currentP;
           skipStartRef.current = Math.min(SPIN_START, INTRO_END + Math.max(0, currentPRef.current) * CUBE_RANGE);
-          // Bring every face surface back out once (they are folded before the sweep):
-          // the skip exposes each face frontally in turn instead of rotating a
-          // blank cube, so the surfaces rise again over the morph window.
+          // During the whole sweep the cube stays blank: the media stay folded
+          // away (scale 0), only the labels show up as each face turns frontally.
           for (let i = 0; i < 6; i++) {
             const cached = faceCache[i];
             if (!cached?.wrapper) continue;
-            cached.wrapper.style.transition = `transform 700ms cubic-bezier(0.6, 0.05, 0.4, 1), opacity 700ms ease`;
-            cached.wrapper.style.transform = "scale(1)";
+            cached.wrapper.style.transition = "none";
+            cached.wrapper.style.transform = "scale(0)";
             cached.wrapper.style.opacity = "1";
           }
           skipFoldRef.current = true;
-          skipFacesHiddenRef.current = false;
+          skipFacesHiddenRef.current = true;
           gallerySetup(skipStartRef.current);
         }
         autoplayElapsed += dt;
@@ -638,7 +637,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           currentP = skipFrom + (start - skipFrom) * smoothstep(autoplayElapsed / SKIP_MORPH_MS);
         } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur) {
           // Gallery: settle on each face so it stares frontally one second,
-          // its label visible, with a short spin between two exposures.
+          // only its label visible, with a short spin between two exposures.
           const galT = autoplayElapsed - SKIP_MORPH_MS;
           const startRot = (start - INTRO_END) / CUBE_RANGE;
           const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
