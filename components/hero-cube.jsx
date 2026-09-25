@@ -628,7 +628,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           }
           skipFoldRef.current = true;
           skipFacesHiddenRef.current = false;
-          gallerySetup(start);
+          gallerySetup(skipStartRef.current);
         }
         autoplayElapsed += dt;
         const start = skipStartRef.current;
@@ -1229,8 +1229,6 @@ if (spinning || skipFacesHiddenRef.current) {
                 SCROLL
                 <br />
                 DOWN
-                <br />
-                <span style={{ fontSize: "3em", lineHeight: "1", display: "block" }}>↓</span>
               </div>
             </div>
             <style>{`
