@@ -41,6 +41,12 @@ const DEFAULT_FACE_MEDIA = [
   `${BASE}/projets.webp`,
 ];
 
+// Smoothstep easing reused by the end-sequence animations.
+const smoothstep = (t) => {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+};
+
 export function HeroCube({ title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
   const cubeRef = useRef(null);
@@ -88,6 +94,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const labelPinPRef = useRef(null);
   // Prevents the unlock reset from running more than once.
   const wasUnlockedRef = useRef(false);
+  // Order in which the six visuals take their leave (reverse click order).
+  const exitOrderRef = useRef(null);
   // Set to true once every face has completed its 2nd exposure.
   const allSeenTwiceRef = useRef(false);
   // Rotation added by the user's direct drag, layered over the scroll-driven one.
@@ -518,6 +526,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // so the exit animation plays forward from there instead of jumping ahead.
       if (unlocked && !wasUnlockedRef.current) {
         wasUnlockedRef.current = true;
+        exitOrderRef.current = [...clickStackRef.current].reverse();
         if (currentP > CUBE_END) {
           currentP = CUBE_END;
           targetP = CUBE_END;
@@ -656,6 +665,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       // Per-face lighting: rotate face normal by current cube rotation
       if (cubeRef.current) {
+        // Between CUBE_END and SPIN_START the six visuals take their leave one
+        // by one (reverse click order): each folds away (squash, slight rise,
+        // fade) instead of being cut off at the spin. Fully reversible.
+        const exitK = unlocked ? Math.min(1, Math.max(0, (tlP - CUBE_END) / (SPIN_START - CUBE_END))) : 0;
         for (let i = 0; i < 6; i++) {
           const cached = faceCache[i];
           if (!cached) continue;
@@ -666,16 +679,42 @@ export function HeroCube({ title, subtitle, images = [] }) {
           const brightness = 0.35 + 1.3 * dot;
           if (spinning) {
             if (media) media.style.filter = "";
-            if (wrapper) wrapper.style.transform = "scale(0)";
+            if (wrapper) {
+              wrapper.style.transition = "none";
+              wrapper.style.opacity = "1";
+              wrapper.style.transform = "scale(0)";
+            }
             faceEl.style.filter = `brightness(${brightness})`;
+          } else if (exitK > 0) {
+            const pos = exitOrderRef.current ? exitOrderRef.current.indexOf(i) : 5;
+            const kRaw = Math.min(1, Math.max(0, (exitK - (pos / 6) * 0.7) / 0.3));
+            const k = smoothstep(kRaw);
+            const s = Math.max(0.15, 1 - 0.85 * smoothstep(Math.min(1, k * 2)));
+            const y = -26 * smoothstep(Math.min(1, k * 1.6));
+            const o = 1 - smoothstep(Math.min(1, Math.max(0, (k - 0.4) / 0.6)));
+            if (media) media.style.filter = `brightness(${brightness})`;
+            if (faceEl.style.filter) faceEl.style.filter = "";
+            if (wrapper) {
+              wrapper.style.transition = "none";
+              wrapper.style.opacity = String(o);
+              wrapper.style.transform = `translateY(${y}px) scale(${s})`;
+            }
           } else if (zoomedFacesRef.current[i]) {
             if (media) media.style.filter = `brightness(${brightness})`;
             if (faceEl.style.filter) faceEl.style.filter = "";
-            if (wrapper) wrapper.style.transform = "scale(1)";
+            if (wrapper) {
+              wrapper.style.transition = "transform 0.6s ease";
+              wrapper.style.opacity = "1";
+              wrapper.style.transform = "scale(1)";
+            }
           } else {
             if (media) media.style.filter = "";
             faceEl.style.filter = `brightness(${brightness})`;
-            if (wrapper) wrapper.style.transform = "scale(0)";
+            if (wrapper) {
+              wrapper.style.transition = "transform 0.6s ease";
+              wrapper.style.opacity = "1";
+              wrapper.style.transform = "scale(0)";
+            }
           }
         }
       }
