@@ -67,12 +67,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // pour que le crossfade carré→cube reste aligné sur tous les formats.
   const [squareSize, setSquareSize] = useState(343);
   const [skipped, setSkipped] = useState(false);
+  const [skipRevealedFaces, setSkipRevealedFaces] = useState([false, false, false, false, false, false]);
   const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
   // first skip frame so the gentle rotation begins exactly where we are.
   const skipStartRef = useRef(0);
   const skipActiveRef = useRef(false);
+  const skipRevealedFacesRef = useRef(skipRevealedFaces);
   // Once skipped, the faces fold away so the cube is visibly empty during the
   // gentle rotation (only the cyan wireframe shows).
   const skipFacesHiddenRef = useRef(false);
@@ -135,6 +137,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const tapPointRef = useRef(null);
 
   zoomedFacesRef.current = zoomedFaces;
+  skipRevealedFacesRef.current = skipRevealedFaces;
   zoomedFaceRef.current = zoomedFace;
   borderColorRef.current = "#00a5b0";
   strokeWidthRef.current = 2;
@@ -502,6 +505,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // fold in; on the automatic load it is wherever the page was, so the intro
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
+    let skipLate = false;
     const AUTOPLAY_MS = 9000;
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly one second, label included), then the cube folds and
@@ -525,13 +529,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let galleryDur = 0;
     const gallerySetup = (start) => {
       galleryRot = [];
-      const startRot = (start - INTRO_END) / CUBE_RANGE;
-      if (startRot < 5 / 12 - 1e-9) {
+      galleryDur = 0;
+      const startRot = Math.max(0, (start - INTRO_END) / CUBE_RANGE);
+      if (startRot <= 5 / 12 + 1e-9) {
         for (let k = 0; k < 6; k++) {
           if (k / 12 >= startRot - 1e-9) galleryRot.push(k / 12);
         }
       }
-      if (galleryRot.length === 0) galleryRot.push(Math.min(startRot, 5 / 12));
+      if (galleryRot.length === 0) return;
       const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
       galleryDur = lead + galleryRot.length * (SKIP_HOLD_MS + SKIP_TURN_MS) - SKIP_TURN_MS;
     };
@@ -615,7 +620,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipActiveRef.current = true;
           autoplayElapsed = 0;
           skipFrom = currentP;
-          skipStartRef.current = Math.min(SPIN_START, INTRO_END + Math.max(0, currentPRef.current) * CUBE_RANGE);
+          skipLate = currentP >= SPIN_START;
+          skipStartRef.current = skipLate
+            ? currentP
+            : Math.min(SPIN_START, Math.max(INTRO_END, currentP));
           // During the whole sweep the cube stays blank: the media stay folded
           // away (scale 0), only the labels show up as each face turns frontally.
           for (let i = 0; i < 6; i++) {
@@ -637,7 +645,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
         autoplayElapsed += dt;
         const start = skipStartRef.current;
-        if (autoplayElapsed < SKIP_MORPH_MS) {
+        if (skipLate) {
+          skipFoldRef.current = false;
+          skipFacesHiddenRef.current = true;
+          currentP = skipFrom + (1 - skipFrom) * smoothstep(autoplayElapsed / SKIP_FINALE_MS);
+        } else if (autoplayElapsed < SKIP_MORPH_MS) {
           // Morphing first: glide from the current position up to the cube pose
           // while the faces unfold, so the sweep is never a visual jump.
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
@@ -672,6 +684,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
               galP = galleryRot[j];
             }
           }
+          if (labelIdx >= 0 && !skipRevealedFacesRef.current[labelIdx]) {
+            const next = [...skipRevealedFacesRef.current];
+            next[labelIdx] = true;
+            skipRevealedFacesRef.current = next;
+            setSkipRevealedFaces(next);
+          }
           currentP = INTRO_END + galP * CUBE_RANGE;
           // During the sweep the labels never live inside the 3D faces: a GPU
           // re-raster of a face right after a turn would re-size the text. They
@@ -700,7 +718,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
           }
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
           const gapK = smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS);
-          const galEnd = INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE;
+          const galEnd = galleryRot.length > 0
+            ? INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE
+            : start;
           currentP = galEnd + (SPIN_START - galEnd) * gapK;
         } else {
           // Finale (spin, line, name) at its own steady pace on the blank cube.
@@ -710,12 +730,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
         const sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
-        if (autoplayElapsed >= SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS + SKIP_FINALE_MS) {
+        const skipDuration = skipLate
+          ? SKIP_FINALE_MS
+          : SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS + SKIP_FINALE_MS;
+        if (autoplayElapsed >= skipDuration) {
           currentP = 1;
           targetP = 1;
           autoplayElapsed = 0;
           skipRef.current = false;
           skipActiveRef.current = false;
+          skipLate = false;
           skipFoldRef.current = false;
           skipFacesHiddenRef.current = false;
           galleryRot = [];
@@ -1117,6 +1141,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     exitOrderRef.current = [5, 4, 3, 2, 1, 0];
     labelPinPRef.current = null;
     skipActiveRef.current = false;
+    const nextSkipFaces = [false, false, false, false, false, false];
+    skipRevealedFacesRef.current = nextSkipFaces;
+    setSkipRevealedFaces(nextSkipFaces);
     setSkipped(true);
     for (let i = 0; i < 6; i++) {
       if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
@@ -1287,7 +1314,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           </div>
           <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => {
-              const shown = zoomedFaces[i] || (skipped && contactDone);
+              const shown = zoomedFaces[i] || (skipped && (skipRevealedFaces[i] || contactDone));
               return (
                 <button
                   key={link.name}
