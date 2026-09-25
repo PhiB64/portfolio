@@ -439,15 +439,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let targetP = restoreP !== null ? restoreP : 0;
     let currentP = restoreP !== null ? restoreP : 0;
     let rafId = null;
-    let isPinning = false;
     let lastTickTime = 0;
     // Once every face has been clicked, the end sequence plays out at a steady
     // pace (autoplay) instead of snapping to the real scroll position.
     let autoplay = false;
     let autoplayElapsed = 0;
     const AUTOPLAY_MS = 9000;
-    // Duration of the accelerated sweep to the end when the user skips.
-    const SKIP_MS = 1100;
+    // Duration of the smooth sweep to the end when the user skips. Long enough
+    // for the cube's spin and exit to read correctly.
+    const SKIP_MS = 2800;
+    // Timestamp of the last scroll nudge back to the labelled-face pin.
+    let lastPinFix = 0;
 
     // Cache face DOM children once to avoid querySelector calls in the animation loop.
     const faceCache = Array.from({ length: 6 }, (_, i) => {
@@ -498,13 +500,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
         else return;
       }
       targetP = real;
-      // Block scroll at the labeled-face pin position until the user clicks it.
-      if (!allClickedRef.current && labelPinPRef.current !== null && !isPinning) {
+      // Soft lock at the labelled-face pin position until the user clicks it.
+      // A forced scrollTo on every scroll event fights the finger gesture on
+      // mobile and visibly freezes the page; nudging back at most every 100ms
+      // with native smooth scrolling removes that block while still holding
+      // the labelled faces on screen.
+      if (!allClickedRef.current && labelPinPRef.current !== null) {
         const pinP = labelPinPRef.current;
         if (targetP > pinP) {
-          isPinning = true;
-          window.scrollTo(0, sectionTop + pinP * sb);
-          requestAnimationFrame(() => { isPinning = false; });
+          const nowMs = Date.now();
+          if (nowMs - lastPinFix > 100) {
+            lastPinFix = nowMs;
+            window.scrollTo({ top: sectionTop + pinP * sb, behavior: "smooth" });
+          }
           targetP = pinP;
         }
       }
@@ -1077,10 +1085,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
           <button
             onClick={skipIntro}
             aria-label="Passer l'animation"
-            className="absolute top-24 right-3 sm:top-5 sm:right-8 z-30 bg-[#0a0f1c]/70 border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs cursor-pointer transition-opacity duration-500 hover:bg-[#00a5b0]/10"
-            style={contactDone ? { opacity: 0, pointerEvents: "none" } : { opacity: 1 }}
+            className="absolute bottom-6 right-3 sm:bottom-8 sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs cursor-pointer transition-opacity duration-500 hover:text-white"
+            style={contactDone || skipped ? { opacity: 0, pointerEvents: "none" } : { opacity: 1 }}
           >
-            PASSER
+            SKIP
           </button>
           <button
             onClick={onContactClick}
