@@ -90,6 +90,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const wasUnlockedRef = useRef(false);
   // Set to true once every face has completed its 2nd exposure.
   const allSeenTwiceRef = useRef(false);
+  // Rotation added by the user's direct drag, layered over the scroll-driven one.
+  const dragOffsetRef = useRef({ rx: 0, ry: 0 });
+  // Active pointer-drag session: { startX, startY, lastX, lastY, pointerType, moved }.
+  const dragStateRef = useRef(null);
+  // True while the end-sequence spin animation is playing (drag is locked then).
+  const spinningRef = useRef(false);
+  // True while the cube is on screen and can be grabbed (after the intro, before the spin).
+  const cubeDraggableRef = useRef(false);
+  // Suppresses the native click following a real drag (used by handleCubeClick).
+  const suppressClickRef = useRef(false);
 
   zoomedFacesRef.current = zoomedFaces;
   zoomedFaceRef.current = zoomedFace;
@@ -237,7 +247,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
   }, [changeBackground]);
 
   const handleCubeClick = useCallback((e) => {
-    const rot = getCubeRotation(currentPRef.current);
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    const baseRot = getCubeRotation(currentPRef.current);
+    const rot = {
+      rx: baseRot.rx + dragOffsetRef.current.rx,
+      ry: baseRot.ry + dragOffsetRef.current.ry,
+    };
     const rect = e.currentTarget.getBoundingClientRect();
     const idx = findClickedFace(
       e.clientX,
@@ -517,6 +535,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const tlP = unlocked ? p : Math.min(p, CUBE_END);
       tl.seek(tlP * TOTAL);
       facesVisibleRef.current = tlP < SPIN_START;
+      cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START;
 
       // Show/hide the cube only while the square is gone. The cube's own
       // opacity is driven by the timeline (complementary to the square fade).
@@ -549,6 +568,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
       } else {
         spinFromRef.current = null;
       }
+      spinningRef.current = spinning;
+      // User drag adds a fixed offset on top of the scroll-driven orientation.
+      rot = {
+        rx: rot.rx + dragOffsetRef.current.rx,
+        ry: rot.ry + dragOffsetRef.current.ry,
+      };
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = baseP;
       // Only recompute wireframe geometry when rotation changes by a visible amount.
@@ -682,6 +707,97 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [faceImages, changeBackground]);
+
+  // Direct cube rotation: pointer drag layers an offset over the scroll-driven
+  // rotation. A real drag also suppresses the click that browsers fire afterward.
+  useEffect(() => {
+    const zone = clickZoneRef.current;
+    if (!zone) return;
+
+    const DRAG_THRESHOLD = 8;
+    let suppressTimer = null;
+    let dragRafQueued = false;
+    let pendingRafId = null;
+
+    const queueDragRender = () => {
+      if (dragRafQueued) return;
+      dragRafQueued = true;
+      pendingRafId = requestAnimationFrame(() => {
+        dragRafQueued = false;
+        pendingRafId = null;
+        if (typeof tickRef.current === "function") tickRef.current();
+      });
+    };
+
+    const onPointerDown = (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (dragStateRef.current) return;
+      if (!cubeDraggableRef.current) return;
+      dragStateRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        lastX: e.clientX,
+        lastY: e.clientY,
+        pointerType: e.pointerType || "mouse",
+        moved: false,
+      };
+      zone.style.cursor = "grabbing";
+    };
+
+    const onPointerMove = (e) => {
+      const st = dragStateRef.current;
+      if (!st) return;
+      if (spinningRef.current || !cubeDraggableRef.current) return;
+      const prevX = st.lastX;
+      const prevY = st.lastY;
+      st.lastX = e.clientX;
+      st.lastY = e.clientY;
+      const distX = e.clientX - st.startX;
+      const distY = e.clientY - st.startY;
+      if (!st.moved && Math.hypot(distX, distY) > DRAG_THRESHOLD) {
+        st.moved = true;
+      }
+      if (!st.moved) return;
+      // On touch the dominant vertical move is the page scroll itself: don't
+      // generate rotation that would fight the native scroll gesture.
+      if (st.pointerType === "touch" && Math.abs(distY) > Math.abs(distX)) return;
+      const dx = e.clientX - prevX;
+      const dy = e.clientY - prevY;
+      dragOffsetRef.current.ry += -dx * 0.5;
+      if (st.pointerType !== "touch") {
+        dragOffsetRef.current.rx += dy * 0.3;
+      }
+      queueDragRender();
+    };
+
+    const endDrag = () => {
+      const st = dragStateRef.current;
+      if (!st) return;
+      if (st.moved) {
+        suppressClickRef.current = true;
+        if (suppressTimer) clearTimeout(suppressTimer);
+        suppressTimer = setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 400);
+      }
+      dragStateRef.current = null;
+      zone.style.cursor = "grab";
+    };
+
+    zone.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+
+    return () => {
+      if (suppressTimer) clearTimeout(suppressTimer);
+      if (pendingRafId) cancelAnimationFrame(pendingRafId);
+      zone.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+    };
+  }, []);
 
   const onContactClick = () => {
     setShowContact(true);
@@ -974,8 +1090,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 <div
                   ref={clickZoneRef}
                   onClick={handleCubeClick}
-                  className="absolute cursor-pointer"
-                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60 }}
+                  className="absolute cursor-grab"
+                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60, userSelect: "none", touchAction: "manipulation", WebkitUserSelect: "none" }}
                 />
               </div>
             </div>
