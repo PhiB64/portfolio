@@ -1163,7 +1163,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       {selectedProject !== null && (
         <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: "#0a0f1c" }}>
           <div className="mx-auto max-w-4xl px-6 py-24">
-            {renderProjectContent(selectedProject)}
+            {renderProjectContent(selectedProject, { onContact: onContactClick })}
             <div className="text-center mt-20">
               <button
                 onClick={() => {

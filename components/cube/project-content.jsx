@@ -1,6 +1,8 @@
-import { Globe, Layers, Code2, Smartphone, Zap, Server, Package, Wand2, Play, Cpu, Box, Shield, Mail, Database, Cloud, MapPin, ChevronRight, ExternalLink, Terminal, Rocket } from "lucide-react";
+import { Globe, Layers, Code2, Smartphone, Zap, Server, Package, Wand2, Play, Cpu, Box, Shield, Mail, Database, Cloud, MapPin, ChevronRight, ExternalLink, Terminal, Rocket, Download } from "lucide-react";
 
 const PAGE_ICONS = [Globe, Layers, Server, Database, Smartphone, Rocket];
+
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const PROJECT_CONTENT = [
   {
@@ -76,15 +78,30 @@ export const PROJECT_CONTENT = [
       "Ma maîtrise du responsive design et des frameworks cross-platform me permet de concevoir des expériences cohérentes sur toutes les tailles d'écran.",
     ],
     skills: [
-      { title: "React Native", desc: "Applications natives performantes, navigation Stack/Tab, accès aux APIs système." },
+      { title: "React Native", desc: "Applications natives Android et iOS — navigation Stack/Tab, accès aux APIs système, notifications push." },
       { title: "Flutter", desc: "Interfaces riches, widgets personnalisés, animations fluides, performances natives." },
-      { title: "Responsive & Mobile-First", desc: "Approche mobile-first appliquée sur tous les projets web — testé et validé sur mobiles et tablettes." },
+      { title: "Publication sur les stores", desc: "Builds et mise en ligne — application Alumni disponible sur l'App Store et Google Play." },
+      { title: "Synchronisation d'API", desc: "Consommation d'API REST, gestion d'état, cache et mode hors-ligne — appliquée dans Alumni et El Niu al Mar." },
+      { title: "Responsive & Mobile-First", desc: "Approche mobile-first appliquée sur tous les projets web, testée et validée sur mobiles et tablettes." },
     ],
     features: ["Connexion utilisateur", "Notifications push", "Caméra", "Géolocalisation", "Stockage local", "Synchronisation API"],
   },
   {
     label: "Projets",
     title: "Des réalisations concrètes, du code en production.",
+    profile: {
+      bio: [
+        "Développeur full stack indépendant basé dans les Pyrénées-Atlantiques, je conçois des applications performantes de bout en bout : interface, API, base de données et déploiement.",
+        "Mon approche repose sur la simplicité, l'accessibilité et un code propre. Chaque projet est pensé comme une expérience soignée, utile et durable.",
+      ],
+      stats: [
+        { value: "8", label: "projets livrés" },
+        { value: "6", label: "domaines d'expertise" },
+        { value: "3", label: "bases de données" },
+        { value: "1", label: "app mobile en ligne" },
+      ],
+      cvUrl: "/cv.pdf",
+    },
     presentation: [
       "Chaque projet ci-dessous représente une problématique réelle résolue de bout en bout : conception, développement, déploiement.",
       "Plusieurs sont collaboratifs (pull requests, code review, branches de travail) et certains sont accessibles en ligne.",
@@ -179,7 +196,7 @@ export const PROJECT_CONTENT = [
   },
 ];
 
-export function renderProjectContent(i) {
+export function renderProjectContent(i, { onContact } = {}) {
   const p = PROJECT_CONTENT[i];
 
   // Map skill title keywords to a Lucide icon.
@@ -188,9 +205,8 @@ export function renderProjectContent(i) {
     if (t.includes("html")) return <Globe size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("css") || t.includes("scss")) return <Layers size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("javascript") || t.includes("ecmascript")) return <Code2 size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("responsive") || t.includes("mobile-first")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
+if (t.includes("responsive") || t.includes("mobile-first") || t.includes("react native") || t.includes("flutter") || t.includes("store") || t.includes("synchronisation")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("react") && !t.includes("native")) return <Zap size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("react native")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("next")) return <Server size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("vite")) return <Package size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("tailwind")) return <Wand2 size={15} className="text-[#00a5b0] shrink-0" />;
@@ -200,10 +216,10 @@ export function renderProjectContent(i) {
     if (t.includes("docker") || t.includes("nginx")) return <Box size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("sécurité") || t.includes("jwt")) return <Shield size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("email") || t.includes("nodemailer") || t.includes("resend")) return <Mail size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("postgres") || t.includes("mongo") || t.includes("maria") || t.includes("sql")) return <Database size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("cloudinary")) return <Cloud size={15} className="text-[#00a5b0] shrink-0" />;
+    if (t.includes("postgres") || t.includes("mongo") || t.includes("maria") || t.includes("sql") || t.includes("base")) return <Database size={15} className="text-[#00a5b0] shrink-0" />;
+    if (t.includes("cloudinary") || t.includes("cloud")) return <Cloud size={15} className="text-[#00a5b0] shrink-0" />;
     if (t.includes("leaflet") || t.includes("carte")) return <MapPin size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("flutter")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
+    if (t.includes("pwa")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
     return <Cpu size={15} className="text-[#00a5b0] shrink-0" />;
   };
 
@@ -219,6 +235,35 @@ export function renderProjectContent(i) {
       <div className="w-16 h-0.5 bg-[#00a5b0] mb-16" />
     </div>
   );
+  if (p.profile) {
+    items.push(
+      <section key="profile" className="mb-20">
+        <h2 className="text-2xl font-bold text-[#00a5b0] mb-6">À propos de moi</h2>
+        <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
+          {p.profile.bio.map((par, j) => <p key={j} className="text-[#94a3b8] leading-relaxed mb-4">{par}</p>)}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+            {p.profile.stats.map((s, j) => (
+              <div key={j} className="text-center border border-[#1e293b] rounded-lg p-4">
+                <p className="text-3xl font-bold text-[#00a5b0]">{s.value}</p>
+                <p className="text-xs uppercase tracking-widest text-[#64748b] mt-1">{s.label}</p>
+              </div>
+            ))}
+          </div>
+          {p.profile.cvUrl && (
+            <div className="text-center mt-8">
+              <a
+                href={`${BASE}${p.profile.cvUrl}`}
+                download
+                className="inline-flex items-center gap-2 text-xs tracking-widest uppercase border border-[#00a5b0]/50 text-[#00a5b0] rounded-full px-5 py-2.5 hover:bg-[#00a5b0]/10 transition-colors duration-200"
+              >
+                <Download size={13} /> Télécharger mon CV
+              </a>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
   if (p.presentation) {
     items.push(
       <section key="presentation" className="mb-20">
@@ -331,6 +376,22 @@ export function renderProjectContent(i) {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+    );
+  }
+  if (typeof onContact === "function") {
+    items.push(
+      <section key="cta" className="mb-20 text-center">
+        <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-10">
+          <h2 className="text-2xl font-bold text-white mb-3">Un projet en tête ?</h2>
+          <p className="text-[#94a3b8] mb-8">Discutons de votre besoin — réponse rapide garantie.</p>
+          <button
+            onClick={onContact}
+            className="bg-[#00a5b0] text-white tracking-[0.2em] uppercase text-xs px-8 py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 inline-flex items-center gap-2"
+          >
+            <Mail size={14} /> Me contacter
+          </button>
         </div>
       </section>
     );

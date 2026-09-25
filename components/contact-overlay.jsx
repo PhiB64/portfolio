@@ -16,18 +16,40 @@ const IconLinkedin = () => (
 
 export function ContactOverlay({ onClose }) {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
-  const [sent, setSent] = useState(false);
+  const [status, setStatus] = useState("idle");
 
   const handleChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const { name, email, message } = form;
+    const endpoint = process.env.NEXT_PUBLIC_CONTACT_ENDPOINT;
+
+    if (endpoint) {
+      setStatus("sending");
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ name, email, message }),
+        });
+        const ok = res.ok || (await res.json()).ok;
+        if (ok) {
+          setStatus("sent");
+          return;
+        }
+      } catch {}
+    }
+
+    // Repli : ouvrir le client mail avec le message pré-rempli.
     const body = encodeURIComponent(`De : ${name} (${email})\n\n${message}`);
     window.location.href = `mailto:philippebarbosa64@gmail.com?subject=Contact portfolio – ${name}&body=${body}`;
-    setSent(true);
+    setStatus("mailto");
   };
 
   return (
@@ -86,7 +108,14 @@ export function ContactOverlay({ onClose }) {
                 <IconLinkedin />
                 <div>
                   <p className="text-[#64748b] text-xs tracking-widest uppercase mb-1">LinkedIn</p>
-                  <span className="text-[#64748b] text-sm italic">Profil en cours de mise à jour</span>
+                  <a
+                    href="https://www.linkedin.com/in/philippe-barbosa/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm"
+                  >
+                    linkedin.com/in/philippe-barbosa
+                  </a>
                 </div>
               </li>
               <li className="flex items-start gap-4">
@@ -102,15 +131,18 @@ export function ContactOverlay({ onClose }) {
           {/* Formulaire */}
           <div>
             <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">Envoyer un message</h2>
-            {sent ? (
+            {status === "sent" || status === "mailto" ? (
               <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
                 <div className="flex items-center gap-2 text-[#00a5b0] mb-3">
                   <CheckCircle size={16} />
-                  <p className="tracking-widest uppercase text-xs">Message prêt</p>
+                  <p className="tracking-widest uppercase text-xs">
+                    {status === "sent" ? "Message envoyé" : "Message prêt"}
+                  </p>
                 </div>
                 <p className="text-[#94a3b8] leading-relaxed text-sm">
-                  Votre messagerie va&nbsp;s&rsquo;ouvrir avec le message pré-rempli.
-                  Il ne vous reste qu&rsquo;à l&rsquo;envoyer.
+                  {status === "sent"
+                    ? "Merci, votre message a bien été transmis. Je vous répondrai rapidement."
+                    : "Votre messagerie va s'ouvrir avec le message pré-rempli. Il ne vous reste qu'à l'envoyer."}
                 </p>
               </div>
             ) : (
@@ -159,9 +191,10 @@ export function ContactOverlay({ onClose }) {
                 </div>
                 <button
                   type="submit"
-                  className="w-full bg-[#00a5b0] text-white tracking-[0.2em] uppercase text-xs py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 flex items-center justify-center gap-2"
+                  disabled={status === "sending"}
+                  className="w-full bg-[#00a5b0] text-white tracking-[0.2em] uppercase text-xs py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Send size={14} /> Envoyer
+                  <Send size={14} /> {status === "sending" ? "Envoi..." : "Envoyer"}
                 </button>
               </form>
             )}
