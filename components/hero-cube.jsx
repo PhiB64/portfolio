@@ -62,7 +62,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [cubeScale, setCubeScale] = useState(1);
   const [skipped, setSkipped] = useState(false);
   const skipRef = useRef(false);
-  const skipAutoRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
   // first skip frame so the gentle rotation begins exactly where we are.
   const skipStartRef = useRef(0);
@@ -83,6 +82,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const zoomedFaceRef = useRef(-1);
   const currentPRef = useRef(0);
   const overlayRef = useRef(null);
+  const galleryLabelRef = useRef(null);
   const borderColorRef = useRef("#00a5b0");
   const strokeWidthRef = useRef(2);
   const cubeContainerRef = useRef(null);
@@ -557,26 +557,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const sync = () => {
       // While the skip sweep runs, always steer toward the end of the section.
       if (skipRef.current) {
-        // An automatic sweep hands control back as soon as the user scrolls.
-        if (skipAutoRef.current) {
-          const sbAuto = el.offsetHeight - window.innerHeight;
-          const posAuto = window.scrollY - sectionTop;
-          const realAuto = sbAuto > 0 ? Math.min(1, Math.max(0, posAuto / sbAuto)) : 0;
-          if (Math.abs(realAuto - currentP) > 0.03) {
-            skipRef.current = false;
-            skipActiveRef.current = false;
-            skipFoldRef.current = false;
-            skipFacesHiddenRef.current = false;
-            skipAutoRef.current = false;
-            allClickedRef.current = false;
-            wasUnlockedRef.current = false;
-            exitOrderRef.current = null;
-            labelPinPRef.current = null;
-            setSkipped(false);
-            targetP = realAuto;
-            return;
-          }
-        }
         targetP = 1;
         return;
       }
@@ -645,6 +625,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (autoplayElapsed < SKIP_MORPH_MS) {
           // Morphing first: glide from the current position up to the cube pose
           // while the faces unfold, so the sweep is never a visual jump.
+          if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
           currentP = skipFrom + (start - skipFrom) * smoothstep(autoplayElapsed / SKIP_MORPH_MS);
         } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur) {
           // Gallery: settle on each face so it stares frontally one second,
@@ -677,9 +658,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }
           }
           currentP = INTRO_END + galP * CUBE_RANGE;
+          // During the sweep the labels never live inside the 3D faces: a GPU
+          // re-raster of a face right after a turn would re-size the text. They
+          // are instead drawn by a stable 2D overlay aligned on the cube center.
+          const galleryLabel = galleryLabelRef.current;
+          if (galleryLabel) {
+            galleryLabel.textContent = labelIdx >= 0 ? FACE_LABELS[labelIdx] : "";
+            galleryLabel.style.opacity = labelIdx >= 0 ? "1" : "0";
+          }
           for (let i = 0; i < 6; i++) {
             const label = clickLabelRefs.current[i];
-            if (label) label.style.opacity = i === labelIdx ? "1" : "0";
+            if (label) label.style.opacity = "0";
           }
         } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS) {
           // Fold every face away again while the playhead eases up to the spin.
@@ -694,6 +683,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           for (let i = 0; i < 6; i++) {
             if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
           }
+          if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
           const gapK = smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS);
           const galEnd = INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE;
           currentP = galEnd + (SPIN_START - galEnd) * gapK;
@@ -1077,10 +1067,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
   }, []);
 
-  const skipIntro = useCallback((auto = false) => {
+  const skipIntro = useCallback(() => {
     if (skipRef.current) return;
     skipRef.current = true;
-    skipAutoRef.current = !!auto;
     // Unlock everything: the pin disappears and the timeline head can reach the
     // end of the sequence (names, links and CONTACT reveal) during the sweep.
     allClickedRef.current = true;
@@ -1092,25 +1081,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     for (let i = 0; i < 6; i++) {
       if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
     }
+    if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
     if (typeof tickRef.current === "function") tickRef.current();
   }, []);
-
-  // On first load, play the whole skipped sequence by itself once the scene
-  // has settled, unless the visitor already started exploring the cube.
-  useEffect(() => {
-    const autoSkipTimer = setTimeout(() => {
-      if (skipRef.current || allClickedRef.current) return;
-      const el = sectionRef.current;
-      if (!el) return;
-      const sbAuto = el.offsetHeight - window.innerHeight;
-      if (sbAuto > 0) {
-        const realAuto = (window.scrollY - el.offsetTop) / sbAuto;
-        if (Math.abs(realAuto) > 0.03) return;
-      }
-      skipIntro(true);
-    }, 2000);
-    return () => clearTimeout(autoSkipTimer);
-  }, [skipIntro]);
 
   const onContactClick = () => {
     setShowContact(true);
@@ -1397,6 +1370,26 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     ))}
                   </div>
                 </div>
+                <div
+                  ref={galleryLabelRef}
+                  data-gallery-label=""
+                  className="pointer-events-none select-none"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#33d1c8",
+                    fontSize: "1.43rem",
+                    letterSpacing: "0.3em",
+                    opacity: 0,
+                    transition: "opacity 0.35s ease",
+                    zIndex: 25,
+                    textShadow: "0 0 14px rgba(51,209,200,0.5)",
+                    willChange: "opacity",
+                  }}
+                />
                 <svg
                   ref={wireRef}
                   className="absolute inset-0 pointer-events-none"
