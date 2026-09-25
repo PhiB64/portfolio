@@ -45,6 +45,11 @@ export const metadata = {
     icon: [{ url: "/favicon.webp", sizes: "any", type: "image/webp" }],
     apple: "/favicon.webp",
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: TITLE,
+  },
 };
 
 export const viewport = {

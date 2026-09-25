@@ -307,6 +307,35 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => window.removeEventListener("resize", compute);
   }, []);
 
+  // Passe automatiquement la page en plein écran au premier geste sur mobile
+  // (masque les barres du navigateur). One-shot : se désactive après coup.
+  useEffect(() => {
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
+    const isFullscreen = window.matchMedia("(display-mode: fullscreen)").matches;
+    if (!isMobile || isStandalone || isFullscreen) return;
+
+    const enterFullscreen = () => {
+      const el = document.documentElement;
+      const request =
+        el.requestFullscreen?.bind(el) || el.webkitRequestFullscreen?.bind(el);
+      if (request) {
+        try {
+          const result = request({ navigationUI: "hide" });
+          if (result && typeof result.catch === "function") result.catch(() => {});
+        } catch {}
+      }
+      cleanup();
+    };
+    const cleanup = () => {
+      document.removeEventListener("pointerdown", enterFullscreen);
+      document.removeEventListener("touchstart", enterFullscreen);
+    };
+    document.addEventListener("pointerdown", enterFullscreen);
+    document.addEventListener("touchstart", enterFullscreen, { passive: true });
+    return cleanup;
+  }, []);
+
   useEffect(() => {
     if (history.scrollRestoration !== "manual") {
       history.scrollRestoration = "manual";
