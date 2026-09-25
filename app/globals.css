@@ -28,11 +28,27 @@
 }
 
 html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
 html::-webkit-scrollbar, body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Scroll container interne de la section hero : le document ne défile jamais,
+   seule cette couche défile, ce qui garde la barre du navigateur visible. */
+.scroll-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: none;
+}
+
+.scroll-none::-webkit-scrollbar {
   width: 0;
   height: 0;
 }

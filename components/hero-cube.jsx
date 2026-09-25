@@ -125,6 +125,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const cubeDraggableRef = useRef(false);
   // Suppresses the native click following a real drag (used by handleCubeClick).
   const suppressClickRef = useRef(false);
+  // When a tap is resolved on pointerup (mobile browsers can swallow the
+  // synthesized click), remember where and when it happened so the native
+  // click that does fire right afterwards is ignored instead of re-opening
+  // the same face a second time.
+  const tapPointRef = useRef(null);
 
   zoomedFacesRef.current = zoomedFaces;
   zoomedFaceRef.current = zoomedFace;
@@ -271,20 +276,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
     }
   }, [changeBackground]);
 
-  const handleCubeClick = useCallback((e) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
+  // Pure hit-test: given viewport coordinates and the click zone rect, open
+  // the face lying under the pointer (or do nothing). Shared by the native
+  // click handler and by the pointerup tap resolution below.
+  const hitTestAndOpen = useCallback((x, y, rect) => {
+    if (!rect) return;
     const baseRot = getCubeRotation(currentPRef.current);
     const rot = {
       rx: baseRot.rx + dragOffsetRef.current.rx,
       ry: baseRot.ry + dragOffsetRef.current.ry,
     };
-    const rect = e.currentTarget.getBoundingClientRect();
     const idx = findClickedFace(
-      e.clientX,
-      e.clientY,
+      x,
+      y,
       rect.left + rect.width / 2,
       rect.top + rect.height / 2,
       rot.rx,
@@ -297,6 +301,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (labelShown || mediaShown) handleFaceClick(idx);
     }
   }, [handleFaceClick, faceImages]);
+
+  const handleCubeClick = useCallback((e) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    // Native click synthesized after a tap we already resolved on pointerup:
+    // ignore it (same spot, right after) so the face is not re-opened.
+    const tap = tapPointRef.current;
+    if (tap && Date.now() - tap.at < 400 && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 30) {
+      tapPointRef.current = null;
+      return;
+    }
+    hitTestAndOpen(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
+  }, [hitTestAndOpen]);
 
   const openProject = useCallback((i) => {
     setSelectedProject(i);
@@ -335,13 +354,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const restoreP = restorePRef.current;
     restorePRef.current = null;
 
-    if (restoreP === null) {
-      window.scrollTo(0, 0);
-    }
-
     const el = sectionRef.current;
     const cube = cubeRef.current;
     if (!el || !cube) return;
+
+    if (restoreP === null) {
+      el.scrollTop = 0;
+    }
 
     const body = morphBodyRef.current;
     const wheel = morphWheelRef.current;
@@ -353,8 +372,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const bg = bgRef.current;
     if (!body || !wheel || !hint || !names || !sub || !cubeContainer || !contentEl || !bg) return;
 
-    // Distance of the section from the document top; scrollY is measured from it.
-    const sectionTop = el.offsetTop;
+    // The section is its own scroll container (height 100svh, content 700svh)
+    // so the document itself never scrolls and the mobile browser bar stays
+    // put. Scroll progress is read straight from the section's scrollTop.
 
     const resetBackground = () => {
       if (videoBgContainerRef.current) videoBgContainerRef.current.style.opacity = "0";
@@ -540,12 +560,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
         targetP = 1;
         return;
       }
-      const sb = el.offsetHeight - (vhRef.current || window.innerHeight);
-      // window.scrollY avoids the layout read of getBoundingClientRect on every
-      // scroll frame — noticeably smoother on mobile.
-      const pos = window.scrollY - sectionTop;
+      const sb = el.scrollHeight - el.offsetHeight;
+      // Reading the section's own scrollTop avoids the layout read of
+      // getBoundingClientRect on every scroll frame — smoother on mobile.
+      const pos = el.scrollTop;
       const real = sb > 0 ? Math.min(1, Math.max(0, pos / sb)) : 0;
-      // While autoplay is running the page is scrolled programmatically. Only a
+      // While autoplay is running the scroll is driven programmatically. Only a
       // real user scroll (position drifting away from the driven head) takes back.
       if (autoplay) {
         if (Math.abs(real - currentP) > 0.02) autoplay = false;
@@ -563,7 +583,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           const nowMs = Date.now();
           if (nowMs - lastPinFix > 100) {
             lastPinFix = nowMs;
-            window.scrollTo({ top: sectionTop + pinP * sb, behavior: "smooth" });
+            el.scrollTo({ top: pinP * sb, behavior: "smooth" });
           }
           targetP = pinP;
         }
@@ -673,8 +693,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipFoldRef.current = false;
           currentP = SPIN_START + (1 - SPIN_START) * Math.min(1, (autoplayElapsed - SKIP_MORPH_MS - galleryDur - SKIP_GAP_MS) / SKIP_FINALE_MS);
         }
-        const sbNow = el.offsetHeight - (vhRef.current || window.innerHeight);
-        if (sbNow > 0) window.scrollTo(0, sectionTop + currentP * sbNow);
+        const sbNow = el.scrollHeight - el.offsetHeight;
+        if (sbNow > 0) el.scrollTop = currentP * sbNow;
         if (autoplayElapsed >= SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS + SKIP_FINALE_MS) {
           currentP = 1;
           targetP = 1;
@@ -696,8 +716,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
           currentP = Math.min(1, currentP);
         }
         targetP = currentP;
-        let sbNow = el.offsetHeight - (vhRef.current || window.innerHeight);
-        if (sbNow > 0) window.scrollTo(0, currentP * sbNow);
+        let sbNow = el.scrollHeight - el.offsetHeight;
+        if (sbNow > 0) el.scrollTop = currentP * sbNow;
         rafId = requestAnimationFrame(tick);
       } else if (Math.abs(diff) < 0.0005) {
         currentP = targetP;
@@ -943,15 +963,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (!rafId) rafId = requestAnimationFrame(tick);
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("scroll", onScroll, { passive: true });
     if (restoreP !== null) {
-      window.scrollTo(0, restoreP * (el.offsetHeight - (vhRef.current || window.innerHeight)));
+      el.scrollTop = restoreP * (el.scrollHeight - el.offsetHeight);
     }
     sync();
     rafId = requestAnimationFrame(tick);
 
     return () => {
-      window.removeEventListener("scroll", onScroll);
+      el.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [faceImages, changeBackground]);
@@ -1001,17 +1021,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
       st.lastY = e.clientY;
       const distX = e.clientX - st.startX;
       const distY = e.clientY - st.startY;
-      // Touch gets a larger threshold: a finger drifts a few pixels while
-      // tapping, and under 8px a tap was silently treated as a drag, killing
-      // the click and forcing the user to try again.
-      const threshold = st.pointerType === "touch" ? 14 : 8;
+      // On touch a vertical sweep is the page scroll itself, not a cube drag:
+      // leave it untouched (no rotation, no click suppression) so a tap that
+      // drifts a finger vertically is never swallowed. Only a clearly
+      // horizontal sweep rotates the cube.
+      if (st.pointerType === "touch" && Math.abs(distY) > Math.abs(distX)) return;
+      // Touch gets a larger threshold: a finger drifts while tapping, and a
+      // tap that drifted beyond a small threshold used to be counted as a
+      // drag, killing the click and forcing the user to try again.
+      const threshold = st.pointerType === "touch" ? 18 : 8;
       if (!st.moved && Math.hypot(distX, distY) > threshold) {
         st.moved = true;
+        tapPointRef.current = null;
       }
       if (!st.moved) return;
-      // On touch the dominant vertical move is the page scroll itself: don't
-      // generate rotation that would fight the native scroll gesture.
-      if (st.pointerType === "touch" && Math.abs(distY) > Math.abs(distX)) return;
       const dx = e.clientX - prevX;
       const dy = e.clientY - prevY;
       dragOffsetRef.current.ry += -dx * 0.5;
@@ -1021,15 +1044,35 @@ export function HeroCube({ title, subtitle, images = [] }) {
       queueDragRender();
     };
 
-    const endDrag = () => {
+    const endDrag = (e) => {
       const st = dragStateRef.current;
       if (!st) return;
       if (st.moved) {
         suppressClickRef.current = true;
+        tapPointRef.current = null;
         if (suppressTimer) clearTimeout(suppressTimer);
         suppressTimer = setTimeout(() => {
           suppressClickRef.current = false;
         }, 400);
+      } else if (e.type !== "pointercancel") {
+        // Genuine tap (no real displacement): resolve the face hit right here
+        // instead of trusting the synthesized click, which some mobile
+        // browsers swallow after a slight drift. The native click that does
+        // follow pointerup is dismissed by handleCubeClick via tapPointRef.
+        const drift = Math.hypot(e.clientX - st.startX, e.clientY - st.startY);
+        if (drift <= 12) {
+          const rect = clickZoneRef.current?.getBoundingClientRect();
+          if (
+            rect &&
+            e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom
+          ) {
+            tapPointRef.current = { x: e.clientX, y: e.clientY, at: Date.now() };
+            hitTestAndOpen(e.clientX, e.clientY, rect);
+          }
+        }
       }
       dragStateRef.current = null;
       zone.style.cursor = "grab";
@@ -1048,7 +1091,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, []);
+  }, [hitTestAndOpen]);
 
   const skipIntro = useCallback(() => {
     if (skipRef.current) return;
@@ -1082,10 +1125,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   return (
     <section
       ref={sectionRef}
-      className="relative z-10"
-      style={{ height: "700svh", clipPath: "inset(0)" }}
+      className="relative z-10 h-[100svh] overflow-y-auto overflow-x-hidden scroll-none"
+      style={{ clipPath: "inset(0)" }}
     >
-      <div className="sticky top-0 min-h-[100svh] flex items-center overflow-hidden">
+      <div style={{ height: "700svh" }}>
+        <div className="sticky top-0 min-h-[100svh] flex items-center overflow-hidden">
         <div
           ref={bgRef}
           className="absolute inset-0 bg-cover bg-center"
@@ -1395,6 +1439,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       {showContact && (
