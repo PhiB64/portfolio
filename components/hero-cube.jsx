@@ -47,7 +47,9 @@ const smoothstep = (t) => {
   return x * x * (3 - 2 * x);
 };
 
-const SCROLL_SMOOTHING_MS = 90;
+const WEB_SCROLL_SMOOTHING_MS = 130;
+const MOBILE_SCROLL_SMOOTHING_MS = 90;
+const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 180;
 const MAX_FRAME_DT = 100;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
@@ -441,6 +443,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const el = sectionRef.current;
     const cube = cubeRef.current;
     if (!el || !cube) return;
+    const mobileScroll = isMobileDevice();
 
     if (restoreP === null) {
       el.scrollTop = 0;
@@ -831,7 +834,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
         lastTickTime = 0;
         rafId = null;
       } else {
-        const follow = 1 - Math.exp(-dt / SCROLL_SMOOTHING_MS);
+        const smoothingMs = mobileScroll
+          ? diff < 0
+            ? MOBILE_REVERSE_SCROLL_SMOOTHING_MS
+            : MOBILE_SCROLL_SMOOTHING_MS
+          : WEB_SCROLL_SMOOTHING_MS;
+        const follow = 1 - Math.exp(-dt / smoothingMs);
         currentP += diff * follow;
         rafId = requestAnimationFrame(tick);
       }
