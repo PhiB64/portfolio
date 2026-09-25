@@ -62,6 +62,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [cubeScale, setCubeScale] = useState(1);
   const [skipped, setSkipped] = useState(false);
   const skipRef = useRef(false);
+  // Start position (timeline units) of the skipped sequence, captured on the
+  // first skip frame so the gentle rotation begins exactly where we are.
+  const skipStartRef = useRef(0);
+  const skipActiveRef = useRef(false);
   const cubeScaleRef = useRef(1);
   const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
@@ -474,9 +478,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let autoplay = false;
     let autoplayElapsed = 0;
     const AUTOPLAY_MS = 9000;
-    // Duration of the smooth sweep to the end when the user skips. Long enough
-    // for the cube's spin and exit to read correctly.
-    const SKIP_MS = 2800;
+    // Skipped intro: first a calm empty-cube rotation (the cube keeps turning
+    // softly while its blank faces scroll by), then the finale with the name
+    // reveal at its own readable pace.
+    const SKIP_GENTLE_MS = 4600;
+    const SKIP_FINALE_MS = 3000;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
 
@@ -552,17 +558,30 @@ export function HeroCube({ title, subtitle, images = [] }) {
       lastTickTime = now;
       const diff = targetP - currentP;
       if (skipRef.current) {
-        // Accelerated sweep to the end: drives currentP from its current value
-        // up to 1 while scrolling the page at the same pace. Smooth and ffps.
+        // Capture the start position once, on the first skip frame.
+        if (!skipActiveRef.current) {
+          skipActiveRef.current = true;
+          autoplayElapsed = 0;
+          skipStartRef.current = Math.min(SPIN_START, INTRO_END + Math.max(0, currentPRef.current) * CUBE_RANGE);
+        }
         autoplayElapsed += dt;
-        currentP = Math.min(1, autoplayElapsed / SKIP_MS);
+        const start = skipStartRef.current;
+        if (autoplayElapsed < SKIP_GENTLE_MS) {
+          // Soft rotation of the empty cube: ease through the idle/faces-out
+          // stretch, slowly, so the cube reads as calmly turning.
+          currentP = start + (SPIN_START - start) * smoothstep(autoplayElapsed / SKIP_GENTLE_MS);
+        } else {
+          // Finale (spin, line, name) at its own steady pace.
+          currentP = SPIN_START + (1 - SPIN_START) * Math.min(1, (autoplayElapsed - SKIP_GENTLE_MS) / SKIP_FINALE_MS);
+        }
         const sbNow = el.offsetHeight - window.innerHeight;
         if (sbNow > 0) window.scrollTo(0, sectionTop + currentP * sbNow);
-        if (currentP >= 1) {
+        if (autoplayElapsed >= SKIP_GENTLE_MS + SKIP_FINALE_MS) {
           currentP = 1;
           targetP = 1;
           autoplayElapsed = 0;
           skipRef.current = false;
+          skipActiveRef.current = false;
         }
         rafId = requestAnimationFrame(tick);
       } else if (autoplay) {
@@ -920,7 +939,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Unlock everything: the pin disappears and the timeline head can reach the
     // end of the sequence (names, links and CONTACT reveal) during the sweep.
     allClickedRef.current = true;
+    wasUnlockedRef.current = true;
+    exitOrderRef.current = [5, 4, 3, 2, 1, 0];
     labelPinPRef.current = null;
+    skipActiveRef.current = false;
     setSkipped(true);
     for (let i = 0; i < 6; i++) {
       if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
