@@ -53,7 +53,7 @@ const WEB_REVERSE_SCROLL_SMOOTHING_MS = 120;
 const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
-const SNAP_THRESHOLD = 0.002;
+const SNAP_THRESHOLD = 0.0005;
 // Exposition continue requise avant qu'un label de face passe du brouillage au
 // texte lisible. Cumulée par `dt` (ms), donc à augmenter pour un délai plus long.
 const LABEL_DECODE_DELAY_MS = 500;
@@ -1538,14 +1538,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
     tickRef.current = tick;
 
-    let scrollRafId = null;
     const onScroll = () => {
-      if (scrollRafId) return;
-      scrollRafId = requestAnimationFrame(() => {
-        scrollRafId = null;
-        sync();
-        if (!rafId) rafId = requestAnimationFrame(tick);
-      });
+      sync();
+      if (!rafId) rafId = requestAnimationFrame(tick);
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -1558,7 +1553,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => {
       el.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
-      if (scrollRafId) cancelAnimationFrame(scrollRafId);
     };
   }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer]);
 
