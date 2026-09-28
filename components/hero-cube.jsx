@@ -1039,10 +1039,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
 
     const tick = (now) => {
+      // Le drag, le clic sur une face et le relâchement du pointeur appellent
+      // `tick` sans timestamp. `now` y vaut alors `undefined`, `dt` devient NaN,
+      // donc `follow` aussi, et `currentP` passe à NaN : il ne se réinitialise
+      // plus jamais et le scroll, le drag et le skip cessent tous de répondre.
+      // On retombe donc sur le dernier frame connu.
+      const t = typeof now === "number" && Number.isFinite(now) ? now : lastTickTime + 16.67;
       const dt = lastTickTime > 0
-        ? Math.min(Math.max(now - lastTickTime, 0), MAX_FRAME_DT)
+        ? Math.min(Math.max(t - lastTickTime, 0), MAX_FRAME_DT)
         : 16.67;
-      lastTickTime = now;
+      lastTickTime = t;
       const diff = targetP - currentP;
 
       // Le brouillage apparaît à la seconde visibilité : le label reste « codé »
