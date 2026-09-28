@@ -674,7 +674,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   useEffect(() => {
     const portraitQuery = window.matchMedia?.("(orientation: portrait)");
     const updateOrientation = () => {
-      const portrait = portraitQuery?.matches ?? (window.innerWidth > window.innerHeight);
+      const portrait = window.innerHeight > window.innerWidth;
       setIsMobileLandscape(isMobileDevice() && !portrait);
     };
     const screenOrientation = window.screen?.orientation;
@@ -1724,7 +1724,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
         ref={sectionRef}
         className="relative z-10 h-[100svh] overflow-y-auto overflow-x-hidden scroll-none"
         aria-hidden={isMobileLandscape}
-        inert={isMobileLandscape || undefined}
         style={{
           clipPath: "inset(0)",
           pointerEvents: isMobileLandscape ? "none" : undefined,
