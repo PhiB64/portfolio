@@ -1293,9 +1293,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         let sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
         rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode) {
-        // The cube is at rest: park the loop. `pendingDecode` holds it alive for
-        // the remainder of a face's exposure delay so its label still resolves.
+      } else if (Math.abs(diff) < SNAP_THRESHOLD) {
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -1707,26 +1705,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     transition: "opacity 0.5s ease 0.6s, transform 0.5s ease 0.6s",
   };
 
-  const [diag, setDiag] = useState({ st: 0, sm: 0, cp: 0, ml: false, err: "" });
-
-  useEffect(() => {
-    const onError = (msg) => {
-      setDiag((d) => ({ ...d, err: String(msg).slice(0, 120) }));
-    };
-    window.addEventListener("error", (e) => onError(e.message));
-    const id = setInterval(() => {
-      const el = sectionRef.current;
-      setDiag({
-        st: el ? Math.round(el.scrollTop) : -1,
-        sm: el ? el.scrollHeight - el.offsetHeight : -1,
-        cp: Math.round(currentPRef.current * 1000) / 1000,
-        ml: isMobileLandscape,
-        err: "",
-      });
-    }, 100);
-    return () => clearInterval(id);
-  }, [isMobileLandscape]);
-
   return (
     <>
       <section
@@ -2135,26 +2113,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
           </div>
         </div>
       )}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 8,
-          left: 8,
-          zIndex: 9999,
-          background: "rgba(0,0,0,0.85)",
-          color: "#0f0",
-          fontFamily: "monospace",
-          fontSize: 10,
-          lineHeight: 1.4,
-          padding: "6px 8px",
-          borderRadius: 4,
-          pointerEvents: "none",
-          maxWidth: 200,
-          whiteSpace: "pre",
-        }}
-      >
-        {`st:${diag.st} sm:${diag.sm} cp:${diag.cp}\nml:${diag.ml ? "Y" : "N"} err:${diag.err || "none"}`}
-      </div>
     </>
   );
 }
