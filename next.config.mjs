@@ -6,7 +6,9 @@ const nextConfig = {
   // basePath only applied during GitHub Pages build to avoid changing local dev URL.
   basePath: BASE,
   env: { NEXT_PUBLIC_BASE_PATH: BASE },
-  distDir: "dist",
+  // The production export goes to `dist/` (the CI uploads it). Dev mode keeps
+  // Next's default `.next/dev` so `next build` never wipes a running dev server.
+  distDir: process.env.NODE_ENV === "production" ? "dist" : ".next",
   images: {
     unoptimized: true,
   },

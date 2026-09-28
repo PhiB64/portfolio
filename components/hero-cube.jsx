@@ -11,6 +11,7 @@ import {
   FACES,
   LIGHT_DIR,
   computeWireframe,
+  faceFrontAmount,
   faceTransform,
   findClickedFace,
   getCubeRotation,
@@ -18,6 +19,7 @@ import {
   isVideoUrl,
   rotateVecByXY,
 } from "../lib/cube-math";
+import { scrambleLabel, stopScramble } from "../lib/scramble";
 
 const PROJECT_LINKS = [
   { name: "1.WEB", url: "/web" },
@@ -53,6 +55,10 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.002;
+// Le label d'une face se décode lorsqu'elle est frontalement exposée à
+// l'utilisateur (cos ≈ 0.9) ; avant ce moment, le brouillage « codé » tourne
+// en continu quelle que soit la position du cube.
+const FRONT_DECODE_COS = 0.9;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -66,6 +72,28 @@ const isMobileDevice = () => {
   return mobileUserAgent || ((touchDevice || coarsePointer) && compactViewport);
 };
 
+const sonarGeometry = (root, pointEl) => {
+  const rect = root.getBoundingClientRect();
+  if (!pointEl) {
+    const hw = rect.width / 2;
+    const hh = rect.height / 2;
+    const half = Math.sqrt(hw * hw + hh * hh) / rect.width;
+    return { maxR: half * 100, scaleMax: half * 2 };
+  }
+  const c = pointEl.getBoundingClientRect();
+  const cx = c.left + c.width / 2 - rect.left;
+  const cy = c.top + c.height / 2 - rect.top;
+  const d = Math.max(
+    Math.hypot(cx, cy),
+    Math.hypot(rect.width - cx, cy),
+    Math.hypot(cx, rect.height - cy),
+    Math.hypot(rect.width - cx, rect.height - cy),
+  );
+  return {
+    center: { x: Math.round(cx), y: Math.round(cy), dmax: Math.round(d) },
+  };
+};
+
 export function HeroCube({ title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
   const cubeRef = useRef(null);
@@ -73,6 +101,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const bgRef = useRef(null);
   const videoBgRef = useRef(null);
   const videoBgContainerRef = useRef(null);
+  // Sonar en cours sur le fond plein écran (un seul à la fois) : { mask, ring,
+  // anime }.
+  const bgSonarRef = useRef(null);
+  // Sonar en cours sur chaque face (un seul à la fois par face).
+  const faceSonarRef = useRef({});
   const [zoomedFace, setZoomedFace] = useState(-1);
   const [zoomedFaces, setZoomedFaces] = useState([false, false, false, false, false, false]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -109,6 +142,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const currentPRef = useRef(0);
   const overlayRef = useRef(null);
   const galleryLabelRef = useRef(null);
+  const faceScrambleTlRef = useRef([]);
+  const faceScrambleStateRef = useRef(["none", "none", "none", "none", "none", "none"]);
+  const galleryScrambleTlRef = useRef(null);
+  const lastGalleryLabelTextRef = useRef("");
   const borderColorRef = useRef("#00a5b0");
   const strokeWidthRef = useRef(2);
   const cubeContainerRef = useRef(null);
@@ -126,6 +163,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const facesVisibleRef = useRef(true);
   const spinFromRef = useRef(null);
   const bgResetRef = useRef(true);
+  // True tant que le fond est « vide » (couleur de base, sans visuel) ; remis
+  // à false par toute révélation (changeBackground).
+  const bgBaseRef = useRef(false);
   const wirePathRef = useRef(null);
   // Infinity triggers wireframe computation on the very first tick.
   const lastWireRotRef = useRef({ rx: Infinity, ry: Infinity });
@@ -133,8 +173,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const labelPinPRef = useRef(null);
   // Prevents the unlock reset from running more than once.
   const wasUnlockedRef = useRef(false);
-  // Order in which the six visuals take their leave (reverse click order).
-  const exitOrderRef = useRef(null);
   // Set to true once every face has completed its 2nd exposure.
   const allSeenTwiceRef = useRef(false);
   // Rotation added by the user's direct drag, layered over the scroll-driven one.
@@ -205,7 +243,153 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return mapped;
   }, [images]);
 
-  const changeBackground = useCallback((index) => {
+  // Fabrique partagée du « sonar » (voile plein + anneau cyan) : le même rendu
+  // sert aux faces du cube et au fond plein écran. `opts.maxR` (rayon max du
+  // masque, en % de la largeur) et `opts.scaleMax` (taille max de l'anneau)
+  // sont calculés par l'appelant selon la géométrie de la zone couverte (par
+  // défaut 70,7 % / 1,414 : coin d'un carré 300 × 300). Pour une origine hors
+  // du centre, `opts.center = { x, y, dmax }` (px, relatifs au conteneur) —
+  // utilisé quand le fond doit « propager » l'onde émise depuis le cube :
+  // dmax = distance du point au coin le plus éloigné, l'anneau est un cercle
+  // déjà dimensionné (scale 0.02 → 1). `opts.duration` force la durée,
+  // `opts.onClose` est appelé à la toute fin (avant le retrait du voile),
+  // moment où le masque est plein — utile pour basculer le visuel sans pop.
+  // L'animation est créée en pause : l'appelant la joue quand le média est
+  // prêt. Renvoie { mask, ring, anime }.
+  const buildSonarLayer = useCallback((container, reveal, opts = {}) => {
+    const { maxR = 70.7, scaleMax = 1.414, center, onClose, duration, erase } = opts;
+    const mask = document.createElement("div");
+    mask.style.cssText =
+      "position:absolute;top:0;left:0;right:0;bottom:0;background:#0a0f1c;" +
+      "z-index:8;pointer-events:none;";
+    // `expand` : l'onde se déploie du centre vers l'extérieur (révélation des
+    // images, ou effacement de sortie). `erase` : l'onde efface le visuel
+    // derrière elle (masque inversé) tout en gardant le même geste central →
+    // périphérie.
+    const expand = Boolean(reveal || erase);
+    // `origin` : point d'émission de l'onde (centre par défaut). `full` :
+    // rayon du masque à « onde aboutie » — hors centre, le dégradé rayonne
+    // jusqu'au coin le plus éloigné (100 % du rayon de rendu), le voile
+    // finissant exactement à 100 %.
+    const origin = center ? `${center.x}px ${center.y}px` : "center";
+    const applyMask = (r) => {
+      const stops = erase
+        ? `#000 ${Math.max(r - 0.5, 0)}%, rgba(0,0,0,0.45) ${Math.max(r + 1.5, 0)}%, transparent ${Math.max(r + 4, 0)}%`
+        : `transparent ${Math.max(r - 4, 0)}%, rgba(0,0,0,0.45) ${Math.max(r - 1.5, 0)}%, #000 ${r + 0.5}%`;
+      const img = `radial-gradient(circle at ${origin}, ${stops})`;
+      mask.style.maskImage = img;
+      mask.style.webkitMaskImage = img;
+    };
+    applyMask(0);
+    const endRadius = center ? 100 : maxR;
+    let ring;
+    let toScale;
+    if (center) {
+      const d = center.dmax;
+      ring = document.createElement("div");
+      ring.style.cssText =
+        `position:absolute;left:${center.x - d}px;top:${center.y - d}px;` +
+        `width:${2 * d}px;height:${2 * d}px;border-radius:50%;` +
+        "border:2px solid #33d1c8;box-shadow:0 0 18px rgba(0,165,176,0.85)," +
+        "inset 0 0 18px rgba(0,165,176,0.55);transform:scale(0.02);" +
+        "transform-origin:50% 50%;opacity:0;z-index:9;pointer-events:none;";
+      toScale = 1;
+    } else {
+      ring = document.createElement("div");
+      ring.style.cssText =
+        "position:absolute;left:0;top:0;width:100%;height:100%;border-radius:50%;" +
+        "border:2px solid #33d1c8;box-shadow:0 0 18px rgba(0,165,176,0.85)," +
+        "inset 0 0 18px rgba(0,165,176,0.55);transform:scale(0.02);" +
+        "transform-origin:50% 50%;opacity:0;z-index:9;pointer-events:none;";
+      toScale = scaleMax;
+    }
+    container.appendChild(mask);
+    container.appendChild(ring);
+    const anim = anime({
+      targets: ring,
+      scale: expand ? [0.02, toScale] : [toScale, 0.02],
+      opacity: [0.9, 0],
+      easing: "easeInOutCubic",
+      duration: duration ?? (expand ? 700 : 480),
+      autoplay: false,
+      update: (a) => {
+        const p = expand ? a.progress / 100 : 1 - a.progress / 100;
+        applyMask(p * endRadius);
+      },
+      complete: () => {
+        if (onClose) onClose();
+        mask.remove();
+        ring.remove();
+      },
+    });
+    return { mask, ring, anime: anim };
+  }, []);
+
+  // Sonar sur une face : le média se révèle derrière une onde radiale émise
+  // depuis le centre de la face (entrée) ; en sortie, une onde identique se
+  // déploie du centre vers l'extérieur en effaçant le visuel derrière elle.
+  // L'animation reste en pause tant que l'appelant ne la joue pas. Chaque
+  // appel remplace le sonar en cours de la même face.
+  const runFaceSonar = useCallback((wrapper, i, reveal, opts = {}) => {
+    const { duration, onClose, erase } = opts;
+    const prev = faceSonarRef.current[i];
+    if (prev) {
+      prev.anime?.pause();
+      prev.layer.mask.remove();
+    }
+    faceSonarRef.current[i] = null;
+    const layer = buildSonarLayer(wrapper, reveal, { duration, onClose, erase });
+    faceSonarRef.current[i] = { layer, anime: layer.anime };
+    return layer.anime;
+  }, [buildSonarLayer]);
+
+  // Révélation à l'ouverture d'une face : le média passe instantanément en
+  // pleine taille (au lieu du zoom 0.6 s) et reste caché sous le voile jusqu'à
+  // ce qu'il soit réellement prêt (image décodée / vidéo chargée) ; le sonar
+  // émet alors son onde radiale. Repli de sécurité si le média n'arrive pas à
+  // temps.
+  const revealFaceMedia = useCallback((i) => {
+    const faceEl = cubeRef.current?.children[i];
+    const wrapper = faceEl?.querySelector(".face-media-wrapper");
+    if (!faceEl || !wrapper) return;
+    wrapper.style.transition = "none";
+    wrapper.style.transform = "scale(1)";
+    wrapper.style.opacity = "1";
+    wrapper.style.maskImage = "";
+    wrapper.style.webkitMaskImage = "";
+    void wrapper.offsetWidth;
+    const anim = runFaceSonar(wrapper, i, true);
+    const media = wrapper.querySelector("img,video");
+    const isReady = () =>
+      media
+        ? media.tagName === "VIDEO"
+          ? media.readyState >= 2
+          : media.complete && media.naturalWidth > 0
+        : true;
+    let timeout = 0;
+    const fire = () => {
+      window.clearTimeout(timeout);
+      if (media) {
+        media.onload = null;
+        media.onloadeddata = null;
+      }
+      anim.play();
+    };
+    if (media) {
+      media.onload = fire;
+      media.onloadeddata = fire;
+    }
+    timeout = window.setTimeout(fire, 1400);
+    if (isReady()) fire();
+  }, [runFaceSonar]);
+
+  // Fond : même « sonar » que sur les faces — le nouveau visuel se pose derrière
+  // un voile déjà plein, puis une onde radiale le découvre. L'onde naît à
+  // l'emplacement du cube (origine la plus à jour sur écran) et se propage sur
+  // tout le fond : c'est le prolongement direct de celle de la face. `delay`
+  // (ms) décale son émission pour la caler sur la face. Le retour (reset)
+  // garde un simple fondu : on ne révèle rien, juste la couleur de base.
+  const changeBackground = useCallback((index, delay = 0) => {
     const bg = bgRef.current;
     const videoBg = videoBgRef.current;
     const videoContainer = videoBgContainerRef.current;
@@ -213,27 +397,112 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const url = faceImages[index];
     if (!url) return;
     bgResetRef.current = false;
-    const isVideo = isVideoUrl(url);
+    bgBaseRef.current = false;
+    const bgRoot = bg.parentElement;
+    if (bgSonarRef.current) {
+      bgSonarRef.current.anime?.pause();
+      bgSonarRef.current.mask.remove();
+      bgSonarRef.current.ring.remove();
+      window.clearTimeout(bgSonarRef.current.timeout);
+      bgSonarRef.current = null;
+    }
+    // Origine de l'onde : centre du cube (propagation cube → fond). Rayon à
+    // couvrir : distance du point au coin le plus éloigné de l'écran.
+    const opts = sonarGeometry(bgRoot, cubeContainerRef.current);
+    const layer = buildSonarLayer(bgRoot, true, opts);
+    const fire = () => layer.anime.play();
+    bgSonarRef.current = { mask: layer.mask, ring: layer.ring, anime: layer.anime };
 
+    const isVideo = isVideoUrl(url);
     if (!isVideo) {
       if (videoContainer) videoContainer.style.opacity = "0";
       if (videoBg) videoBg.pause();
       bg.style.transition = "none";
-      bg.style.opacity = "0";
       bg.style.backgroundImage = `url("${url}")`;
-      void bg.offsetHeight;
-      bg.style.transition = "opacity 0.35s ease";
       bg.style.opacity = "1";
+      void bg.offsetHeight;
+      if (delay > 0) {
+        bgSonarRef.current.timeout = window.setTimeout(fire, delay);
+      } else {
+        fire();
+      }
     } else if (videoBg && videoContainer) {
       bg.style.opacity = "0";
+      let fired = false;
+      const start = () => {
+        if (fired) return;
+        fired = true;
+        window.clearTimeout(mediaTimeout);
+        videoContainer.style.opacity = "1";
+        videoBg.play().catch(() => {});
+        if (delay > 0) {
+          bgSonarRef.current.timeout = window.setTimeout(fire, delay);
+        } else {
+          fire();
+        }
+      };
       if (videoBg.src !== url) {
         videoBg.src = url;
         videoBg.load();
       }
-      videoContainer.style.opacity = "1";
-      videoBg.play().catch(() => {});
+      videoBg.addEventListener("loadeddata", start, { once: true });
+      const mediaTimeout = window.setTimeout(start, 1400);
     }
-  }, [faceImages]);
+  }, [faceImages, buildSonarLayer]);
+
+  const stopFaceScramble = (i) => {
+    const tl = faceScrambleTlRef.current[i];
+    if (!tl) return;
+    stopScramble(tl);
+    faceScrambleTlRef.current[i] = undefined;
+    const el = clickLabelRefs.current[i];
+    if (el) el.textContent = FACE_LABELS[i];
+  };
+
+  // État « codé » : le label se brouille en continu, quelle que soit la position
+// du cube, jusqu'au décodage (aucune lettre ne se résout avant).
+  const encodeFaceLabel = (i) => {
+    const el = clickLabelRefs.current[i];
+    if (!el) return;
+    stopScramble(faceScrambleTlRef.current[i]);
+    faceScrambleTlRef.current[i] = undefined;
+    faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
+      cipher: true,
+    });
+  };
+
+  // Décodage (~1 s) déclenché à l'exposition frontale suivant la révélation du
+  // label : une fois déchiffré, le texte reste affiché, sans recodage.
+  const decodeFaceLabel = (i) => {
+    const el = clickLabelRefs.current[i];
+    if (!el) return;
+    stopScramble(faceScrambleTlRef.current[i]);
+    faceScrambleTlRef.current[i] = undefined;
+    faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
+      duration: 1,
+    });
+  };
+
+  const runGalleryScramble = (text) => {
+    const galleryLabel = galleryLabelRef.current;
+    if (!galleryLabel) return;
+    stopScramble(galleryScrambleTlRef.current);
+    galleryScrambleTlRef.current = scrambleLabel(galleryLabel, text, {
+      duration: 0.5,
+    });
+  };
+
+  const stopGalleryScramble = () => {
+    stopScramble(galleryScrambleTlRef.current);
+    galleryScrambleTlRef.current = null;
+    const galleryLabel = galleryLabelRef.current;
+    if (galleryLabel && galleryLabel.textContent !== "") galleryLabel.textContent = "";
+  };
+
+  useEffect(() => () => {
+    faceScrambleTlRef.current.forEach((tl) => stopScramble(tl));
+    stopScramble(galleryScrambleTlRef.current);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -287,17 +556,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
       allClickedRef.current = true;
       if (tickRef.current) tickRef.current();
     }
-    changeBackground(i);
+    changeBackground(i, 380);
+    revealFaceMedia(i);
     clickStackRef.current = [...clickStackRef.current.filter((idx) => idx !== i), i];
     if (clickLabelRefs.current[i]) {
       clickLabelRefs.current[i].style.opacity = "0";
+      stopFaceScramble(i);
     }
     const video = (cubeRef.current?.children[i] || document).querySelector("video");
     if (video) {
       video.currentTime = 0;
       video.play().catch(() => {});
     }
-  }, [changeBackground]);
+  }, [changeBackground, revealFaceMedia]);
 
   // Pure hit-test: given viewport coordinates and the click zone rect, open
   // the face lying under the pointer (or do nothing). Shared by the native
@@ -472,15 +743,46 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // so the document itself never scrolls and the mobile browser bar stays
     // put. Scroll progress is read straight from the section's scrollTop.
 
-    const resetBackground = () => {
+    // Bascule du visuel vers le fond vide (couleur de base), sans aucun pop :
+    // l'image est retirée pendant que la transparence repasse en douceur.
+    const emptyBackground = () => {
       if (videoBgContainerRef.current) videoBgContainerRef.current.style.opacity = "0";
       if (videoBgRef.current) videoBgRef.current.pause();
-      bg.style.transition = "none";
-      bg.style.backgroundImage = "none";
-      bg.style.opacity = "0";
-      void bg.offsetHeight;
-      bg.style.transition = "opacity 0.35s ease";
-      bg.style.opacity = "1";
+      if (bg) {
+        bg.style.transition = "none";
+        bg.style.backgroundImage = "none";
+        bg.style.opacity = "0";
+        void bg.offsetHeight;
+        bg.style.transition = "opacity 0.35s ease";
+        bg.style.opacity = "1";
+      }
+      bgBaseRef.current = true;
+    };
+
+    // Retour du fond : le visuel est effacé derrière une onde radiale puis
+    // basculé sur la couleur de base une fois le voile plein, sans aucun pop.
+    // `erase` réutilise le geste central → extérieur (comme à l'entrée) en
+    // inversant le masque ; par défaut l'onde se referme vers le cube.
+    const resetBackground = (erase = false) => {
+      if (videoBgContainerRef.current) videoBgContainerRef.current.style.opacity = "0";
+      if (videoBgRef.current) videoBgRef.current.pause();
+      if (bgSonarRef.current) {
+        bgSonarRef.current.anime?.pause();
+        bgSonarRef.current.mask.remove();
+        bgSonarRef.current.ring.remove();
+        window.clearTimeout(bgSonarRef.current.timeout);
+        bgSonarRef.current = null;
+      }
+      const bgRoot = bg.parentElement;
+      const opts = sonarGeometry(bgRoot, cubeContainerRef.current);
+      const layer = buildSonarLayer(bgRoot, false, {
+        ...opts,
+        duration: EXIT_MS,
+        erase,
+        onClose: emptyBackground,
+      });
+      bgSonarRef.current = { mask: layer.mask, ring: layer.ring, anime: layer.anime };
+      layer.anime.play();
     };
 
     // ---- Single master timeline ----
@@ -522,6 +824,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const LINE_POS = TOTAL - (W.lineMorph + W.namesRise);
     const NAMES_START = (LINE_POS + W.lineMorph) / TOTAL;
     const NAMES_END = NAMES_START + W.namesRise / TOTAL;
+    // Fenêtre complète du repli des faces (première face → dernière). La
+    // fermeture du fond est calée dessus : les visuels disparaissent pendant
+    // que le fond se rétracte, les deux finissent ensemble.
+    const EXIT_MS = (SPIN_START - CUBE_END) * TOTAL;
     // The cube only rotates on the part of the scroll that comes after the intro.
     const CUBE_RANGE = 1 - INTRO_END;
     const ROT_END = (SPIN_END - INTRO_END) / CUBE_RANGE;
@@ -588,10 +894,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let skipLate = false;
     const AUTOPLAY_MS = 9000;
     // Skipped intro: faces come back out and each one is exposed frontally for
-    // a moment (roughly one second, label included), then the cube folds and
+    // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
     const SKIP_MORPH_MS = 900;
-    const SKIP_HOLD_MS = 1000;
+    const SKIP_HOLD_MS = 2000;
     const SKIP_TURN_MS = 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
@@ -610,6 +916,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const gallerySetup = (start) => {
       galleryRot = [];
       galleryDur = 0;
+      lastGalleryLabelTextRef.current = "";
+      stopGalleryScramble();
       const startRot = Math.max(0, (start - INTRO_END) / CUBE_RANGE);
       if (startRot <= 5 / 12 + 1e-9) {
         for (let k = 0; k < 6; k++) {
@@ -712,12 +1020,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
             cached.wrapper.style.transition = "none";
             cached.wrapper.style.transform = "scale(0)";
             cached.wrapper.style.opacity = "1";
+            cached.wrapper.style.maskImage = "";
+            cached.wrapper.style.webkitMaskImage = "";
           }
           // Labels are handed over to the gallery: none at the very start, only
           // the frontally exposed face once the morph is over.
           for (let i = 0; i < 6; i++) {
             const label = clickLabelRefs.current[i];
             if (label) label.style.opacity = "0";
+            stopFaceScramble(i);
           }
           skipFoldRef.current = true;
           skipFacesHiddenRef.current = true;
@@ -735,7 +1046,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
           currentP = skipFrom + (start - skipFrom) * smoothstep(autoplayElapsed / SKIP_MORPH_MS);
         } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur) {
-          // Gallery: settle on each face so it stares frontally one second,
+          // Gallery: settle on each face so it stares frontally two seconds,
           // only its label visible, with a short spin between two exposures.
           const galT = autoplayElapsed - SKIP_MORPH_MS;
           const startRot = (start - INTRO_END) / CUBE_RANGE;
@@ -776,12 +1087,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
           // are instead drawn by a stable 2D overlay aligned on the cube center.
           const galleryLabel = galleryLabelRef.current;
           if (galleryLabel) {
-            galleryLabel.textContent = labelIdx >= 0 ? FACE_LABELS[labelIdx] : "";
+            const wantText = labelIdx >= 0 ? FACE_LABELS[labelIdx] : "";
             galleryLabel.style.opacity = labelIdx >= 0 ? "1" : "0";
+            if (wantText !== lastGalleryLabelTextRef.current) {
+              lastGalleryLabelTextRef.current = wantText;
+              if (wantText === "") {
+                stopGalleryScramble();
+              } else {
+                runGalleryScramble(wantText);
+              }
+            }
           }
           for (let i = 0; i < 6; i++) {
             const label = clickLabelRefs.current[i];
             if (label) label.style.opacity = "0";
+            stopFaceScramble(i);
           }
         } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS) {
           // Fold every face away again while the playhead eases up to the spin.
@@ -792,11 +1112,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
             if (cached.wrapper.style.transform !== "scale(0)") {
               cached.wrapper.style.transform = "scale(0)";
             }
+            cached.wrapper.style.maskImage = "";
+            cached.wrapper.style.webkitMaskImage = "";
           }
           for (let i = 0; i < 6; i++) {
             if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
+            stopFaceScramble(i);
           }
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
+          lastGalleryLabelTextRef.current = "";
+          stopGalleryScramble();
           const gapK = smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS);
           const galEnd = galleryRot.length > 0
             ? INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE
@@ -859,7 +1184,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // so the exit animation plays forward from there instead of jumping ahead.
       if (unlocked && !wasUnlockedRef.current) {
         wasUnlockedRef.current = true;
-        exitOrderRef.current = [...clickStackRef.current].reverse();
         if (currentP > CUBE_END) {
           currentP = CUBE_END;
           targetP = CUBE_END;
@@ -969,6 +1293,31 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }
           }
         }
+        // Le brouillage « codé » démarre dès la révélation du label (2e
+        // visibilité) et tourne sans arrêt, quelle que soit la position du
+        // cube ; seul le décodage (exposition frontale) le termine.
+        const front = faceFrontAmount(
+          FACE_NORMALS[i][0],
+          FACE_NORMALS[i][1],
+          FACE_NORMALS[i][2],
+          rot.rx,
+          rot.ry,
+        );
+        if (faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i]) {
+          const state = faceScrambleStateRef.current[i];
+          if (state !== "decoded" && front >= FRONT_DECODE_COS) {
+            decodeFaceLabel(i);
+            faceScrambleStateRef.current[i] = "decoded";
+          } else if (state !== "encoded") {
+            encodeFaceLabel(i);
+            faceScrambleStateRef.current[i] = "encoded";
+          }
+        } else if (faceScrambleStateRef.current[i] !== "none") {
+          // Label masqué (face pas encore révélée ou déjà cliquée) : on arrête
+          // tout brouillage en cours et on rend le texte final.
+          stopFaceScramble(i);
+          faceScrambleStateRef.current[i] = "none";
+        }
         faceWasVisibleRef.current[i] = nowVisible;
       }
       }
@@ -989,22 +1338,25 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (!bgResetRef.current) {
           bgResetRef.current = true;
           resetBackground();
+        } else if (!bgBaseRef.current) {
+          // Le fond a déjà été fondu par la sortie : on le laisse vide
+          // (couleur de base) une seule fois, sans nouvel effet sonar.
+          emptyBackground();
         }
       } else if (tlP < INTRO_END) {
         if (!bgResetRef.current) {
           bgResetRef.current = true;
           resetBackground();
         }
-      } else if (bgResetRef.current) {
+      } else if (bgResetRef.current && tlP < CUBE_END) {
         bgResetRef.current = false;
         const last = clickStackRef.current[clickStackRef.current.length - 1];
         if (typeof last === "number") changeBackground(last);
       }
       // Per-face lighting: rotate face normal by current cube rotation
       if (cubeRef.current) {
-        // Between CUBE_END and SPIN_START the six visuals take their leave one
-        // by one (reverse click order): each folds away (squash, slight rise,
-        // fade) instead of being cut off at the spin. Fully reversible.
+        // Between CUBE_END and SPIN_START the six visuals plus the background
+        // fade out together, over the same EXIT_MS window. Fully reversible.
         const exitK = unlocked ? Math.min(1, Math.max(0, (tlP - CUBE_END) / (SPIN_START - CUBE_END))) : 0;
         for (let i = 0; i < 6; i++) {
           const cached = faceCache[i];
@@ -1027,22 +1379,38 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.transition = "none";
               wrapper.style.opacity = "1";
               wrapper.style.transform = "scale(0)";
+              wrapper.style.maskImage = "";
+              wrapper.style.webkitMaskImage = "";
             }
             faceEl.style.filter = `brightness(${brightness})`;
           } else if (exitK > 0) {
-            const pos = exitOrderRef.current ? exitOrderRef.current.indexOf(i) : 5;
-            const kRaw = Math.min(1, Math.max(0, (exitK - (pos / 6) * 0.7) / 0.3));
-            const k = smoothstep(kRaw);
-            const s = Math.max(0.15, 1 - 0.85 * smoothstep(Math.min(1, k * 2)));
-            const y = -26 * smoothstep(Math.min(1, k * 1.6));
-            const o = 1 - smoothstep(Math.min(1, Math.max(0, (k - 0.4) / 0.6)));
-            if (media) media.style.filter = `brightness(${brightness})`;
-            if (faceEl.style.filter) faceEl.style.filter = "";
+            // Sortie : un fondu général — les six visuels, la vidéo et le fond
+            // s'éteignent d'un même geste sur toute la fenêtre (EXIT_MS),
+            // piloté par le scroll (totalement réversible). À l'aboutissement,
+            // le spin laisse le fond vide (couleur de base). `bgResetRef` sert
+            // de garde : au rewind sous CUBE_END, le fond se ré-vêle.
+            const k = smoothstep(exitK);
+            const fade = 1 - k;
+            if (!bgResetRef.current) {
+              bgResetRef.current = true;
+              if (videoBgRef.current) videoBgRef.current.pause();
+            }
+            if (bg) {
+              bg.style.transition = "none";
+              bg.style.opacity = String(fade);
+            }
+            if (videoBgContainerRef.current) {
+              videoBgContainerRef.current.style.transition = "none";
+              videoBgContainerRef.current.style.opacity = String(fade);
+            }
             if (wrapper) {
               wrapper.style.transition = "none";
-              wrapper.style.opacity = String(o);
-              wrapper.style.transform = `translateY(${y}px) scale(${s})`;
+              wrapper.style.opacity = String(fade);
+              wrapper.style.maskImage = "";
+              wrapper.style.webkitMaskImage = "";
             }
+            if (media) media.style.filter = `brightness(${brightness})`;
+            if (faceEl.style.filter) faceEl.style.filter = "";
           } else if (zoomedFacesRef.current[i]) {
             if (media) media.style.filter = `brightness(${brightness})`;
             if (faceEl.style.filter) faceEl.style.filter = "";
@@ -1050,6 +1418,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.transition = "transform 0.6s ease";
               wrapper.style.opacity = "1";
               wrapper.style.transform = "scale(1)";
+              wrapper.style.maskImage = "";
+              wrapper.style.webkitMaskImage = "";
             }
           } else {
             if (media) media.style.filter = "";
@@ -1058,6 +1428,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.transition = "transform 0.6s ease";
               wrapper.style.opacity = "1";
               wrapper.style.transform = "scale(0)";
+              wrapper.style.maskImage = "";
+              wrapper.style.webkitMaskImage = "";
             }
           }
         }
@@ -1105,7 +1477,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (rafId) cancelAnimationFrame(rafId);
       if (scrollRafId) cancelAnimationFrame(scrollRafId);
     };
-  }, [faceImages, changeBackground]);
+  }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer]);
 
   // Direct cube rotation: pointer drag layers an offset over the scroll-driven
   // rotation. A real drag also suppresses the click that browsers fire afterward.
@@ -1231,7 +1603,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // end of the sequence (names, links and CONTACT reveal) during the sweep.
     allClickedRef.current = true;
     wasUnlockedRef.current = true;
-    exitOrderRef.current = [5, 4, 3, 2, 1, 0];
     labelPinPRef.current = null;
     skipActiveRef.current = false;
     const nextSkipFaces = [false, false, false, false, false, false];
@@ -1240,8 +1611,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     setSkipped(true);
     for (let i = 0; i < 6; i++) {
       if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
+      stopFaceScramble(i);
     }
     if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
+    stopGalleryScramble();
+    lastGalleryLabelTextRef.current = "";
     if (typeof tickRef.current === "function") tickRef.current();
   }, []);
 
@@ -1531,6 +1905,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                             justifyContent: "center",
                             color: "#33d1c8",
                             fontSize: "1.25rem",
+                            fontFamily: "var(--font-share-tech-mono), monospace",
                             letterSpacing: "0.3em",
                             opacity: 0,
                             transition: "opacity 0.35s ease",
@@ -1555,6 +1930,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     justifyContent: "center",
                     color: "#33d1c8",
                     fontSize: "1.43rem",
+                    fontFamily: "var(--font-share-tech-mono), monospace",
                     letterSpacing: "0.3em",
                     opacity: 0,
                     transition: "opacity 0.35s ease",

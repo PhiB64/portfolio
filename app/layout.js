@@ -1,4 +1,12 @@
 import "./globals.css";
+import { Share_Tech_Mono } from "next/font/google";
+
+const shareTechMono = Share_Tech_Mono({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-share-tech-mono",
+  display: "swap",
+});
 
 // URL publique du site. À ajuster selon l'hébergement (NEXT_PUBLIC_SITE_URL),
 // sinon fallback sur l'adresse GitHub Pages du dépôt.
@@ -79,7 +87,7 @@ const jsonLd = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="fr">
+    <html lang="fr" className={shareTechMono.variable}>
       <head>
         <script
           type="application/ld+json"
