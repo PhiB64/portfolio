@@ -2109,8 +2109,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
           aria-modal="true"
           aria-labelledby="orientation-lock-title"
           aria-describedby="orientation-lock-description"
-          onTouchMove={(event) => event.preventDefault()}
-          onWheel={(event) => event.preventDefault()}
           style={{ touchAction: "none", overscrollBehavior: "none" }}
         >
           <div className="max-w-sm">
