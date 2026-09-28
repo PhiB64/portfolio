@@ -11,7 +11,6 @@ import {
   FACES,
   LIGHT_DIR,
   computeWireframe,
-  faceFrontAmount,
   faceTransform,
   findClickedFace,
   getCubeRotation,
@@ -55,10 +54,6 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.002;
-// Le label d'une face se décode lorsqu'elle est frontalement exposée à
-// l'utilisateur (cos ≈ 0.9) ; avant ce moment, le brouillage « codé » tourne
-// en continu quelle que soit la position du cube.
-const FRONT_DECODE_COS = 0.9;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -459,20 +454,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
     if (el) el.textContent = FACE_LABELS[i];
   };
 
-  // État « codé » : le label se brouille en continu, quelle que soit la position
-// du cube, jusqu'au décodage (aucune lettre ne se résout avant).
-  const encodeFaceLabel = (i) => {
-    const el = clickLabelRefs.current[i];
-    if (!el) return;
-    stopScramble(faceScrambleTlRef.current[i]);
-    faceScrambleTlRef.current[i] = undefined;
-    faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
-      cipher: true,
-    });
-  };
-
-  // Décodage (~1 s) déclenché à l'exposition frontale suivant la révélation du
-  // label : une fois déchiffré, le texte reste affiché, sans recodage.
+  // Décodage (~1 s) déclenché dès la révélation du label : une fois déchiffré,
+  // le texte reste affiché, sans recodage.
   const decodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
     if (!el) return;
@@ -1272,9 +1255,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
           wirePathRef.current.setAttribute("d", pathData);
         }
       }
-      // Le brouillage (label) apparaît à la seconde visibilité ; le décodage,
-      // lui, peut se faire dès l'apparition : une face révélée qui devient
-      // frontale (cos ≈ 0.9) se décode, sans exiger d'exposition supplémentaire.
+      // Le brouillage apparaît à la seconde visibilité et se décode aussitôt :
+      // une face simplement exposée (révélée) suffit, sans exiger de visée
+      // frontale.
       // Frozen during the auto sweep: there the labels are driven solely by the
       // gallery, otherwise they would light up mid-rotation.
       if (!skipActiveRef.current) {
@@ -1288,35 +1271,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
         );
         if (nowVisible && !faceWasVisibleRef.current[i]) {
           faceVisibilityCountRef.current[i]++;
-          // Deuxième visibilité : le label apparaît (brouillé) et tourne sans
-          // arrêt, quelle que soit la position du cube.
-          if (faceVisibilityCountRef.current[i] === 2 && !zoomedFacesRef.current[i]) {
-            if (clickLabelRefs.current[i]) {
-              clickLabelRefs.current[i].style.opacity = "1";
-            }
-          }
         }
-        const front = faceFrontAmount(
-          FACE_NORMALS[i][0],
-          FACE_NORMALS[i][1],
-          FACE_NORMALS[i][2],
-          rot.rx,
-          rot.ry,
-        );
-        if (faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i]) {
-          const state = faceScrambleStateRef.current[i];
-          // Décodage dès l'apparition : face révélée + frontale == décodée.
-          if (state !== "decoded" && front >= FRONT_DECODE_COS) {
-            decodeFaceLabel(i);
-            faceScrambleStateRef.current[i] = "decoded";
-          } else if (state !== "encoded") {
-            encodeFaceLabel(i);
-            faceScrambleStateRef.current[i] = "encoded";
-          }
-        } else if (faceScrambleStateRef.current[i] !== "none") {
-          // Face jamais vue ou déjà cliquée : on arrête tout brouillage.
-          stopFaceScramble(i);
-          faceScrambleStateRef.current[i] = "none";
+        // Seconde visibilité (ou plus) : révélation + décodage immédiats.
+        if (
+          faceVisibilityCountRef.current[i] >= 2 &&
+          !zoomedFacesRef.current[i] &&
+          faceScrambleStateRef.current[i] !== "decoded"
+        ) {
+          if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "1";
+          decodeFaceLabel(i);
+          faceScrambleStateRef.current[i] = "decoded";
         }
         faceWasVisibleRef.current[i] = nowVisible;
       }
