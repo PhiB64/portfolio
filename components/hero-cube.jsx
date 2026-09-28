@@ -47,11 +47,12 @@ const smoothstep = (t) => {
   return x * x * (3 - 2 * x);
 };
 
-const WEB_SCROLL_SMOOTHING_MS = 130;
-const WEB_REVERSE_SCROLL_SMOOTHING_MS = 220;
-const MOBILE_SCROLL_SMOOTHING_MS = 90;
-const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 180;
+const WEB_SCROLL_SMOOTHING_MS = 80;
+const WEB_REVERSE_SCROLL_SMOOTHING_MS = 120;
+const MOBILE_SCROLL_SMOOTHING_MS = 60;
+const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
+const SNAP_THRESHOLD = 0.002;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -436,6 +437,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
   useEffect(() => {
     if (history.scrollRestoration !== "manual") {
       history.scrollRestoration = "manual";
+    }
+
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReducedMotion) {
+      const el = sectionRef.current;
+      if (el) el.scrollTop = 0;
+      return;
     }
 
     const restoreP = restorePRef.current;
@@ -830,7 +838,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         let sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
         rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < 0.0005) {
+      } else if (Math.abs(diff) < SNAP_THRESHOLD) {
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -1075,9 +1083,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
     tickRef.current = tick;
 
+    let scrollRafId = null;
     const onScroll = () => {
-      sync();
-      if (!rafId) rafId = requestAnimationFrame(tick);
+      if (scrollRafId) return;
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = null;
+        sync();
+        if (!rafId) rafId = requestAnimationFrame(tick);
+      });
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -1090,6 +1103,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => {
       el.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
+      if (scrollRafId) cancelAnimationFrame(scrollRafId);
     };
   }, [faceImages, changeBackground]);
 
@@ -1470,6 +1484,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           transform: faceTransform(face),
                           WebkitTransform: faceTransform(face),
                           isolation: "isolate",
+                          willChange: "transform",
                         }}
                       >
                         {faceImages[i] && (
