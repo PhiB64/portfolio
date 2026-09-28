@@ -148,6 +148,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const restorePRef = useRef(null);
   const faceWasVisibleRef = useRef([false, false, false, false, false, false]);
   const faceVisibilityCountRef = useRef([0, 0, 0, 0, 0, 0]);
+  const faceExposureElapsedRef = useRef([0, 0, 0, 0, 0, 0]);
   const clickLabelRefs = useRef([]);
   const clickStackRef = useRef([]);
   const allClickedRef = useRef(false);
@@ -454,8 +455,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
     if (el) el.textContent = FACE_LABELS[i];
   };
 
-  // Décodage (~1 s) déclenché dès la révélation du label : une fois déchiffré,
-  // le texte reste affiché, sans recodage.
+  // Remet le label à l'état « codé » : brouillage continu, jamais résolu.
+  // C'est l'animation visible entre deux expositions et pendant le délai
+  // d'1 s avant décodage.
+  const encodeFaceLabel = (i) => {
+    const el = clickLabelRefs.current[i];
+    if (!el) return;
+    stopScramble(faceScrambleTlRef.current[i]);
+    faceScrambleTlRef.current[i] = undefined;
+    faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
+      cipher: true,
+    });
+  };
+
+  // Décodage (~1 s) : le brouillage se résout de gauche à droite vers le
+  // texte final. Ne se déclenche qu'après une exposition continue d'1 s.
   const decodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
     if (!el) return;
@@ -1255,9 +1269,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
           wirePathRef.current.setAttribute("d", pathData);
         }
       }
-      // Le brouillage apparaît à la seconde visibilité et se décode aussitôt :
-      // une face simplement exposée (révélée) suffit, sans exiger de visée
-      // frontale.
+      // Le brouillage apparaît à la seconde visibilité : le label reste
+      // « codé » tant que la face est exposée moins d'1 s, puis se décode
+      // dès qu'elle a été présente une seconde pleine. Dès que la face n'est
+      // plus exposée, le brouillage redémarre et le cycle reprend.
       // Frozen during the auto sweep: there the labels are driven solely by the
       // gallery, otherwise they would light up mid-rotation.
       if (!skipActiveRef.current) {
@@ -1271,17 +1286,42 @@ export function HeroCube({ title, subtitle, images = [] }) {
         );
         if (nowVisible && !faceWasVisibleRef.current[i]) {
           faceVisibilityCountRef.current[i]++;
-          // À la seconde exposition : le label apparaît (brouillé) et se
-          // décode aussitôt, au même moment.
-          if (
-            faceVisibilityCountRef.current[i] === 2 &&
-            !zoomedFacesRef.current[i] &&
-            faceScrambleStateRef.current[i] !== "decoded"
-          ) {
-            if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "1";
-            decodeFaceLabel(i);
-            faceScrambleStateRef.current[i] = "decoded";
+        }
+        const revealed = faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i];
+        if (revealed) {
+          const el = clickLabelRefs.current[i];
+          if (el) el.style.opacity = "1";
+          if (nowVisible) {
+            // Exposée : on garantit un brouillage « codé » (premier passage
+            // ou retour après décodage), puis on cumule le temps d'exposition.
+            if (
+              faceScrambleStateRef.current[i] === "none" ||
+              faceScrambleStateRef.current[i] === "decoded"
+            ) {
+              encodeFaceLabel(i);
+              faceScrambleStateRef.current[i] = "encoded";
+            }
+            faceExposureElapsedRef.current[i] += dt;
+            if (
+              faceExposureElapsedRef.current[i] >= 1000 &&
+              faceScrambleStateRef.current[i] === "encoded"
+            ) {
+              decodeFaceLabel(i);
+              faceScrambleStateRef.current[i] = "decoded";
+            }
+          } else {
+            // Plus exposée : délai remis à zéro et brouillage « codé » qui
+            // redémarre s'il venait d'être déchiffré.
+            faceExposureElapsedRef.current[i] = 0;
+            if (faceScrambleStateRef.current[i] === "decoded") {
+              encodeFaceLabel(i);
+              faceScrambleStateRef.current[i] = "encoded";
+            }
           }
+        } else if (faceScrambleStateRef.current[i] !== "none") {
+          faceExposureElapsedRef.current[i] = 0;
+          stopFaceScramble(i);
+          faceScrambleStateRef.current[i] = "none";
         }
         faceWasVisibleRef.current[i] = nowVisible;
       }
