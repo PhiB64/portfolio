@@ -96,6 +96,16 @@ const isMobileDevice = () => {
   return mobileUserAgent || ((touchDevice || coarsePointer) && compactViewport);
 };
 
+// Strict mobile check, reserved for the orientation lock: real mobile UA
+// only. The looser `isMobileDevice()` (touch + compact viewport) also
+// matches touch laptops and narrow desktop windows, which produced
+// false-positive "rotate your device" locks on non-mobile screens.
+const isRealMobileDevice = () => {
+  if (typeof window === "undefined") return false;
+  const userAgent = window.navigator.userAgent || "";
+  return MOBILE_USER_AGENT.test(userAgent) || window.navigator.userAgentData?.mobile === true;
+};
+
 const sonarGeometry = (root, pointEl) => {
   const rect = root.getBoundingClientRect();
   if (!pointEl) {
@@ -143,6 +153,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [skipped, setSkipped] = useState(false);
   const [skipRevealedFaces, setSkipRevealedFaces] = useState([false, false, false, false, false, false]);
   const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
+  // Set when the user dismisses the orientation lock manually. Blocks the
+  // orientation effect from re-arming the lock until portrait comes back,
+  // otherwise the `resize`/`orientationchange` listener would immediately
+  // re-show the overlay they just closed.
+  const lockDismissedRef = useRef(false);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
   // first skip frame so the gentle rotation begins exactly where we are.
@@ -675,7 +690,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const portraitQuery = window.matchMedia?.("(orientation: portrait)");
     const updateOrientation = () => {
       const portrait = window.innerHeight >= window.innerWidth;
-      setIsMobileLandscape(isMobileDevice() && !portrait);
+      if (portrait) lockDismissedRef.current = false;
+      setIsMobileLandscape(
+        isRealMobileDevice() && !portrait && !lockDismissedRef.current,
+      );
     };
     const screenOrientation = window.screen?.orientation;
 
@@ -714,13 +732,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
   }, []);
 
+  // Screen-orientation lock attempts trap the user: `lock("portrait")`
+  // can hide/disable the UI on devices that honor it, and the transient
+  // fullscreen permission state keeps the overlay stuck after rotating
+  // back. The lock overlay already asks for portrait — no API call.
   useEffect(() => {
-    if (!isMobileLandscape) return;
-    const orientation = window.screen?.orientation;
-    if (!orientation?.lock) return;
     try {
-      const result = orientation.lock("portrait");
-      result?.catch(() => {});
+      window.screen?.orientation?.unlock?.();
     } catch {}
   }, [isMobileLandscape]);
 
@@ -2108,7 +2126,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
           aria-modal="true"
           aria-labelledby="orientation-lock-title"
           aria-describedby="orientation-lock-description"
-          style={{ touchAction: "none", overscrollBehavior: "none" }}
         >
           <div className="max-w-sm">
             <div className="relative mx-auto mb-8 h-20 w-12 rounded-[10px] border-2 border-[#00a5b0] shadow-[0_0_24px_rgba(0,165,176,0.25)]">
@@ -2120,6 +2137,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
             <p id="orientation-lock-description" className="text-sm leading-relaxed text-[#94a3b8]">
               Le portfolio est disponible en format portrait.
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                lockDismissedRef.current = true;
+                setIsMobileLandscape(false);
+              }}
+              className="mt-6 rounded-full border border-[#00a5b0]/60 px-6 py-2 text-xs font-light tracking-[0.25em] text-[#00a5b0] uppercase hover:bg-[#00a5b0]/10 transition-colors bg-transparent cursor-pointer"
+            >
+              Continuer quand même
+            </button>
           </div>
         </div>
       )}
