@@ -66,6 +66,23 @@ const LABEL_DECODE_DELAY_MS = 500;
 // que celui de `allSeenTwiceRef`, qui marque la fin de l'intro : labels et fin
 // d'intro tombent donc au même moment, par construction.
 const FACE_LABEL_REVEAL_COUNT = 2;
+// Chorégraphie du skip (balayage automatique des faces). Le label y rejoue le
+// même cycle codé -> décodé que les labels de face, mais calé sur le temps du
+// hold (1,5 s par face) et non sur le temps d'exposition : c'est la boucle rAF
+// qui tient la cadence, donc pas d'accumulateur ici, contrairement aux faces.
+// Les quatre constantes découpent un hold.
+const SKIP_HOLD_MS = 1500;
+// Fondu d'apparition : le cube doit avoir fini de se poser avant que le texte
+// se montre, sinon il apparaît pendant la rotation.
+const SKIP_LABEL_DELAY_MS = 100;
+// Phase « codée » : le label reste en brouillage continu, jamais résolu, avant de
+// partir en décodage. C'est l'état que le skip doit rendre lisible.
+const SKIP_LABEL_CIPHER_MS = 450;
+// Décodage : le brouillage se résout de gauche à droite sur cette durée.
+const SKIP_LABEL_DECODE_MS = 550;
+// Fondu de sortie avant la rotation suivante : sans lui le texte se rétrécit en
+// perspective pendant le tour, ce qui se lit comme un redimensionnement.
+const SKIP_LABEL_EXIT_MS = 200;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -152,6 +169,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const faceScrambleTlRef = useRef([]);
   const faceScrambleStateRef = useRef(["none", "none", "none", "none", "none", "none"]);
   const galleryScrambleTlRef = useRef(null);
+  // Même machine à trois états que les labels de face ("none" -> "encoded" ->
+  // "decoded"), pour que le skip rejoue exactement le même cycle.
+  const galleryScrambleStateRef = useRef("none");
+  // Temps d'exposition cumulé du label du skip, remis à zéro à chaque
+  // changement de face : c'est lui qui déclenche le passage en décodage.
+  const galleryExposureElapsedRef = useRef(0);
   const lastGalleryLabelTextRef = useRef("");
   const borderColorRef = useRef("#00a5b0");
   const strokeWidthRef = useRef(2);
@@ -492,18 +515,34 @@ export function HeroCube({ title, subtitle, images = [] }) {
     });
   };
 
-  const runGalleryScramble = (text) => {
+  // Pendant le skip, le label de la gallery rejoue le cycle des labels de face :
+  // d'abord l'état « codé » (brouillage continu qui ne se résout jamais), puis
+  // le décodage. Même rendu, même police, seule la source du temps diffère.
+  const encodeGalleryLabel = (text) => {
     const galleryLabel = galleryLabelRef.current;
     if (!galleryLabel) return;
     stopScramble(galleryScrambleTlRef.current);
     galleryScrambleTlRef.current = scrambleLabel(galleryLabel, text, {
-      duration: 0.5,
+      cipher: true,
     });
+    galleryScrambleStateRef.current = "encoded";
+  };
+
+  const decodeGalleryLabel = (text) => {
+    const galleryLabel = galleryLabelRef.current;
+    if (!galleryLabel) return;
+    stopScramble(galleryScrambleTlRef.current);
+    galleryScrambleTlRef.current = scrambleLabel(galleryLabel, text, {
+      duration: SKIP_LABEL_DECODE_MS / 1000,
+    });
+    galleryScrambleStateRef.current = "decoded";
   };
 
   const stopGalleryScramble = () => {
     stopScramble(galleryScrambleTlRef.current);
     galleryScrambleTlRef.current = null;
+    galleryScrambleStateRef.current = "none";
+    galleryExposureElapsedRef.current = 0;
     const galleryLabel = galleryLabelRef.current;
     if (galleryLabel && galleryLabel.textContent !== "") galleryLabel.textContent = "";
   };
@@ -906,16 +945,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
     const SKIP_MORPH_MS = 900;
-    const SKIP_HOLD_MS = 2000;
     const SKIP_TURN_MS = 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
     const SKIP_FINALE_MS = 3000;
-    // Label choreography within each hold: fade in only after the cube fully
-    // settles (its composited render is stable by then), and fade out before
-    // the next turn begins so the text never shrinks in perspective.
-    const SKIP_LABEL_DELAY_MS = 100;
-    const SKIP_LABEL_EXIT_MS = 360;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
@@ -1170,11 +1203,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
             galleryLabel.style.opacity = labelIdx >= 0 ? "1" : "0";
             if (wantText !== lastGalleryLabelTextRef.current) {
               lastGalleryLabelTextRef.current = wantText;
+              // Nouvelle face : le compteur repart de zéro et le label réentre en
+              // état « codé ».
+              galleryExposureElapsedRef.current = 0;
               if (wantText === "") {
                 stopGalleryScramble();
               } else {
-                runGalleryScramble(wantText);
+                encodeGalleryLabel(wantText);
               }
+            }
+          }
+          // Tant que le label est « codé », on cumule son temps d'exposition et
+          // on déclenche le décodage une fois le délai écoulé, comme pour les
+          // labels de face. Le texte est donc lisible avant le fondu de sortie.
+          if (labelIdx >= 0 && galleryScrambleStateRef.current === "encoded") {
+            galleryExposureElapsedRef.current += dt;
+            if (galleryExposureElapsedRef.current >= SKIP_LABEL_CIPHER_MS) {
+              decodeGalleryLabel(FACE_LABELS[labelIdx]);
             }
           }
           for (let i = 0; i < 6; i++) {
@@ -1961,12 +2006,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     alignItems: "center",
                     justifyContent: "center",
                     color: "#33d1c8",
-                    fontSize: "1.43rem",
+                    fontSize: "1.25rem",
                     fontFamily: "var(--font-share-tech-mono), monospace",
                     letterSpacing: "0.3em",
                     opacity: 0,
                     transition: "opacity 0.35s ease",
                     zIndex: 25,
+                    // Même échelle que le cube : le label de face est dans la
+                    // boîte mise à l'échelle (`scale(${cubeScale})` sur le
+                    // conteneur 3D), l'overlay est à côté. Sans cette
+                    // transformation les deux polices divergent dès que le cube
+                    // est réduit. `transformOrigin: center` garde le texte centré
+                    // dans la face.
+                    transform: `scale(${cubeScale})`,
+                    transformOrigin: "center",
                     textShadow: "0 0 14px rgba(51,209,200,0.5)",
                     willChange: "opacity",
                   }}
