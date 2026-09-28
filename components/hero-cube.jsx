@@ -590,7 +590,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       cubeScaleRef.current,
     );
     if (idx >= 0 && faceImages[idx] && facesVisibleRef.current) {
-      const labelShown = faceVisibilityCountRef.current[idx] >= 1;
+      const labelShown = faceVisibilityCountRef.current[idx] >= 2;
       const mediaShown = zoomedFacesRef.current[idx];
       if (labelShown || mediaShown) handleFaceClick(idx);
     }
@@ -1272,9 +1272,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
           wirePathRef.current.setAttribute("d", pathData);
         }
       }
-      // 2nd exposure => reveal the label (click affordance). Once every face has
-      // Le label se révèle et se décode à la première exposition frontale
-      // (cos ≈ 0.9) : face à l'utilisateur == décodage, systématiquement.
+      // Le brouillage (label) apparaît à la seconde visibilité ; le décodage,
+      // lui, peut se faire dès l'apparition : une face révélée qui devient
+      // frontale (cos ≈ 0.9) se décode, sans exiger d'exposition supplémentaire.
       // Frozen during the auto sweep: there the labels are driven solely by the
       // gallery, otherwise they would light up mid-rotation.
       if (!skipActiveRef.current) {
@@ -1288,9 +1288,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
         );
         if (nowVisible && !faceWasVisibleRef.current[i]) {
           faceVisibilityCountRef.current[i]++;
+          // Deuxième visibilité : le label apparaît (brouillé) et tourne sans
+          // arrêt, quelle que soit la position du cube.
+          if (faceVisibilityCountRef.current[i] === 2 && !zoomedFacesRef.current[i]) {
+            if (clickLabelRefs.current[i]) {
+              clickLabelRefs.current[i].style.opacity = "1";
+            }
+          }
         }
-        // Le brouillage « codé » démarre dès la première visibilité et tourne
-        // sans arrêt, quelle que soit la position du cube.
         const front = faceFrontAmount(
           FACE_NORMALS[i][0],
           FACE_NORMALS[i][1],
@@ -1298,11 +1303,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
           rot.rx,
           rot.ry,
         );
-        if (faceVisibilityCountRef.current[i] >= 1 && !zoomedFacesRef.current[i]) {
+        if (faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i]) {
           const state = faceScrambleStateRef.current[i];
+          // Décodage dès l'apparition : face révélée + frontale == décodée.
           if (state !== "decoded" && front >= FRONT_DECODE_COS) {
-            // Première exposition frontale : révélation + décodage systématiques.
-            if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "1";
             decodeFaceLabel(i);
             faceScrambleStateRef.current[i] = "decoded";
           } else if (state !== "encoded") {
