@@ -674,7 +674,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   useEffect(() => {
     const portraitQuery = window.matchMedia?.("(orientation: portrait)");
     const updateOrientation = () => {
-      const portrait = portraitQuery?.matches ?? window.innerHeight >= window.innerWidth;
+      const portrait = portraitQuery?.matches ?? true;
       setIsMobileLandscape(isMobileDevice() && !portrait);
     };
     const screenOrientation = window.screen?.orientation;
