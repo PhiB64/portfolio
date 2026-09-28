@@ -1271,16 +1271,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
         );
         if (nowVisible && !faceWasVisibleRef.current[i]) {
           faceVisibilityCountRef.current[i]++;
-        }
-        // Seconde visibilité (ou plus) : révélation + décodage immédiats.
-        if (
-          faceVisibilityCountRef.current[i] >= 2 &&
-          !zoomedFacesRef.current[i] &&
-          faceScrambleStateRef.current[i] !== "decoded"
-        ) {
-          if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "1";
-          decodeFaceLabel(i);
-          faceScrambleStateRef.current[i] = "decoded";
+          // À la seconde exposition : le label apparaît (brouillé) et se
+          // décode aussitôt, au même moment.
+          if (
+            faceVisibilityCountRef.current[i] === 2 &&
+            !zoomedFacesRef.current[i] &&
+            faceScrambleStateRef.current[i] !== "decoded"
+          ) {
+            if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "1";
+            decodeFaceLabel(i);
+            faceScrambleStateRef.current[i] = "decoded";
+          }
         }
         faceWasVisibleRef.current[i] = nowVisible;
       }
