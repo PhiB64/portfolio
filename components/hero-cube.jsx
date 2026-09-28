@@ -738,7 +738,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const s = Math.max(0.35, Math.min(maxScale, availW / baseSize, availH / baseSize));
       cubeScaleRef.current = s;
       setCubeScale(s);
-      setSquareSize(Math.min(343 * s, w - 8));
+      // Floor the card size: an <svg> with a negative width/height is invalid and
+      // React logs "A negative value is not valid". `w - 8` is the only term that
+      // can go negative on an extremely narrow viewport.
+      setSquareSize(Math.max(1, Math.min(343 * s, w - 8)));
       // Refresh the locked height only on a real resize (rotation, desktop
       // window) — the small jumps the URL bar causes on mobile are ignored so
       // the section and the scroll targets never move during a gesture.
@@ -1721,7 +1724,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         ref={sectionRef}
         className="relative z-10 h-[100svh] overflow-y-auto overflow-x-hidden scroll-none"
         aria-hidden={isMobileLandscape}
-        inert={isMobileLandscape ? "" : undefined}
+        inert={isMobileLandscape || undefined}
         style={{
           clipPath: "inset(0)",
           pointerEvents: isMobileLandscape ? "none" : undefined,
