@@ -1293,7 +1293,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
         let sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
         rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < SNAP_THRESHOLD) {
+      } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode) {
+        // The cube is at rest: park the loop. `pendingDecode` holds it alive for
+        // the remainder of a face's exposure delay so its label still resolves.
+        // The wait is bounded by `LABEL_DECODE_DELAY_MS`, so the loop always
+        // parks again once every pending label has resolved.
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -1673,6 +1677,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   const skipIntro = useCallback(() => {
     if (skipRef.current) return;
+    // `skipRef` n'est remis à `false` qu'à l'intérieur de la boucle `tick`
+    // (ligne ~1275). Si l'effet n'a jamais installé `tick`, verrouiller ce
+    // drapeau ici le laisserait à `true` pour toujours : `sync()` court-circuite
+    // alors sur `targetP = 1` et la section ne répond plus à rien.
+    // On refuse donc de s'engager si la boucle n'est pas vivante.
+    if (typeof tickRef.current !== "function") return;
     skipRef.current = true;
     // Unlock everything: the pin disappears and the timeline head can reach the
     // end of the sequence (names, links and CONTACT reveal) during the sweep.
