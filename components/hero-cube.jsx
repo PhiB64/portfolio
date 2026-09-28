@@ -54,6 +54,18 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.002;
+// Exposition continue requise avant qu'un label de face passe du brouillage au
+// texte lisible. Cumulée par `dt` (ms), donc à augmenter pour un délai plus long.
+const LABEL_DECODE_DELAY_MS = 500;
+// Nombre d'expositions avant qu'un label de face apparaisse et se mette à
+// brouiller. Constante partagée car trois sites en dépendent (affichage du
+// label, clic sur la face, levée du pin) et doivent rester alignés.
+// 2 = le cube fait d'abord une révolution complète « vide », face après face, sans
+// aucun label ; les labels encodés n'apparaissent qu'au second tour, quand chaque
+// face revient. 1 les ferait surgir dès la première vue. Le seuil 2 est le même
+// que celui de `allSeenTwiceRef`, qui marque la fin de l'intro : labels et fin
+// d'intro tombent donc au même moment, par construction.
+const FACE_LABEL_REVEAL_COUNT = 2;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -587,7 +599,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       cubeScaleRef.current,
     );
     if (idx >= 0 && faceImages[idx] && facesVisibleRef.current) {
-      const labelShown = faceVisibilityCountRef.current[idx] >= 2;
+      const labelShown = faceVisibilityCountRef.current[idx] >= FACE_LABEL_REVEAL_COUNT;
       const mediaShown = zoomedFacesRef.current[idx];
       if (labelShown || mediaShown) handleFaceClick(idx);
     }
@@ -999,6 +1011,76 @@ export function HeroCube({ title, subtitle, images = [] }) {
         : 16.67;
       lastTickTime = now;
       const diff = targetP - currentP;
+
+      // Le brouillage apparaît à la seconde visibilité : le label reste « codé »
+      // pendant LABEL_DECODE_DELAY_MS d'exposition, puis se résout. Dès que la
+      // face n'est plus exposée, le compte repart de zéro.
+      // Frozen during the auto sweep: there the labels are driven solely by the
+      // gallery, otherwise they would light up mid-rotation.
+      // This runs before the rotation for this frame is resolved, so it reads
+      // `lastWireRotRef` — the orientation actually applied to the cube. It
+      // trails by one frame while scrolling, and is exact once at rest. The ref
+      // starts at Infinity to force the first wireframe build, hence the guard.
+      const wireRot = lastWireRotRef.current;
+      const visRot = Number.isFinite(wireRot.rx) ? wireRot : { rx: 0, ry: 0 };
+      // Tant qu'une face attend son décodage, la boucle doit rester vivante :
+      // sans elle, le cube à l'arrêt se parke et le délai n'aboutirait jamais.
+      let pendingDecode = false;
+      if (!skipActiveRef.current) {
+        for (let i = 0; i < 6; i++) {
+          const nowVisible = isFaceVisible(
+            FACE_NORMALS[i][0],
+            FACE_NORMALS[i][1],
+            FACE_NORMALS[i][2],
+            visRot.rx,
+            visRot.ry,
+          );
+          if (nowVisible && !faceWasVisibleRef.current[i]) {
+            faceVisibilityCountRef.current[i]++;
+          }
+          const revealed = faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT && !zoomedFacesRef.current[i];
+          if (revealed) {
+            const el = clickLabelRefs.current[i];
+            if (el) el.style.opacity = "1";
+            if (nowVisible) {
+              if (
+                faceScrambleStateRef.current[i] === "none" ||
+                faceScrambleStateRef.current[i] === "decoded"
+              ) {
+                // Une seule fois par transition : `encodeFaceLabel` vide et
+                // recrée les spans du DOM, l'appeler à chaque frame pendant le
+                // compte à rebours reconstruirait le label en boucle.
+                encodeFaceLabel(i);
+                faceScrambleStateRef.current[i] = "encoded";
+              }
+              faceExposureElapsedRef.current[i] += dt;
+              if (
+                faceExposureElapsedRef.current[i] >= LABEL_DECODE_DELAY_MS &&
+                faceScrambleStateRef.current[i] === "encoded"
+              ) {
+                // `scrambleLabel` part d'un rendu entièrement aléatoire, donc le
+                // décodage démarre proprement même depuis l'état « none ».
+                decodeFaceLabel(i);
+                faceScrambleStateRef.current[i] = "decoded";
+              } else if (faceScrambleStateRef.current[i] === "encoded") {
+                pendingDecode = true;
+              }
+            } else {
+              faceExposureElapsedRef.current[i] = 0;
+              if (faceScrambleStateRef.current[i] === "decoded") {
+                encodeFaceLabel(i);
+                faceScrambleStateRef.current[i] = "encoded";
+              }
+            }
+          } else if (faceScrambleStateRef.current[i] !== "none") {
+            faceExposureElapsedRef.current[i] = 0;
+            stopFaceScramble(i);
+            faceScrambleStateRef.current[i] = "none";
+          }
+          faceWasVisibleRef.current[i] = nowVisible;
+        }
+      }
+
       if (skipRef.current) {
         // Capture the start position once, on the first skip frame.
         if (!skipActiveRef.current) {
@@ -1160,7 +1242,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         let sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
         rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < SNAP_THRESHOLD) {
+      } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode) {
+        // The cube is at rest: park the loop. `pendingDecode` holds it alive for
+        // the remainder of a face's exposure delay so its label still resolves.
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -1269,63 +1353,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
           wirePathRef.current.setAttribute("d", pathData);
         }
       }
-      // Le brouillage apparaît à la seconde visibilité : le label reste
-      // « codé » tant que la face est exposée moins d'1 s, puis se décode
-      // dès qu'elle a été présente une seconde pleine. Dès que la face n'est
-      // plus exposée, le brouillage redémarre et le cycle reprend.
-      // Frozen during the auto sweep: there the labels are driven solely by the
-      // gallery, otherwise they would light up mid-rotation.
-      if (!skipActiveRef.current) {
-      for (let i = 0; i < 6; i++) {
-        const nowVisible = isFaceVisible(
-          FACE_NORMALS[i][0],
-          FACE_NORMALS[i][1],
-          FACE_NORMALS[i][2],
-          rot.rx,
-          rot.ry,
-        );
-        if (nowVisible && !faceWasVisibleRef.current[i]) {
-          faceVisibilityCountRef.current[i]++;
-        }
-        const revealed = faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i];
-        if (revealed) {
-          const el = clickLabelRefs.current[i];
-          if (el) el.style.opacity = "1";
-          if (nowVisible) {
-            // Exposée : on garantit un brouillage « codé » (premier passage
-            // ou retour après décodage), puis on cumule le temps d'exposition.
-            if (
-              faceScrambleStateRef.current[i] === "none" ||
-              faceScrambleStateRef.current[i] === "decoded"
-            ) {
-              encodeFaceLabel(i);
-              faceScrambleStateRef.current[i] = "encoded";
-            }
-            faceExposureElapsedRef.current[i] += dt;
-            if (
-              faceExposureElapsedRef.current[i] >= 1000 &&
-              faceScrambleStateRef.current[i] === "encoded"
-            ) {
-              decodeFaceLabel(i);
-              faceScrambleStateRef.current[i] = "decoded";
-            }
-          } else {
-            // Plus exposée : délai remis à zéro et brouillage « codé » qui
-            // redémarre s'il venait d'être déchiffré.
-            faceExposureElapsedRef.current[i] = 0;
-            if (faceScrambleStateRef.current[i] === "decoded") {
-              encodeFaceLabel(i);
-              faceScrambleStateRef.current[i] = "encoded";
-            }
-          }
-        } else if (faceScrambleStateRef.current[i] !== "none") {
-          faceExposureElapsedRef.current[i] = 0;
-          stopFaceScramble(i);
-          faceScrambleStateRef.current[i] = "none";
-        }
-        faceWasVisibleRef.current[i] = nowVisible;
-      }
-      }
       // After ALL faces have been seen twice, snap to the next face-forward step boundary.
       if (!allSeenTwiceRef.current && faceVisibilityCountRef.current.every(c => c >= 2)) {
         allSeenTwiceRef.current = true;
@@ -1335,7 +1362,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       // Release the pin once every labeled face has been clicked.
       if (labelPinPRef.current !== null && !FACE_NORMALS.some((_, i) =>
-        faceVisibilityCountRef.current[i] >= 2 && !zoomedFacesRef.current[i]
+        faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT && !zoomedFacesRef.current[i]
       )) {
         labelPinPRef.current = null;
       }
