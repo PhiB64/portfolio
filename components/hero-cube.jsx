@@ -56,7 +56,12 @@ const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.0005;
 // Exposition continue requise avant qu'un label de face passe du brouillage au
 // texte lisible. Cumulée par `dt` (ms), donc à augmenter pour un délai plus long.
-const LABEL_DECODE_DELAY_MS = 300;
+const LABEL_DECODE_DELAY_MS = 200;
+// Facteur de projection perspective : une face frontale (translateZ 150px, cube
+// 300px) sous une perspective de 1200px est rendue 1200/(1200-150) = 8/7 plus
+// grande que l'overlay 2D. C'est l'échelle qu'il faut au label du skip pour
+// égaliser sa taille réelle avec celle des labels de face, mobile comme desktop.
+const CUBE_FACE_PROJECTION_SCALE = 1200 / 1050;
 // Nombre d'expositions avant qu'un label de face apparaisse et se mette à
 // brouiller. Constante partagée car trois sites en dépendent (affichage du
 // label, clic sur la face, levée du pin) et doivent rester alignés.
@@ -2037,13 +2042,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     opacity: 0,
                     transition: "opacity 0.35s ease",
                     zIndex: 25,
-                    // Même échelle que le cube : le label de face est dans la
-                    // boîte mise à l'échelle (`scale(${cubeScale})` sur le
-                    // conteneur 3D), l'overlay est à côté. Sans cette
-                    // transformation les deux polices divergent dès que le cube
-                    // est réduit. `transformOrigin: center` garde le texte centré
-                    // dans la face.
-                    transform: `scale(${cubeScale})`,
+                    // Égalise la taille réelle du label du skip avec celle des
+                    // labels de face : ceux-ci vivent dans le cube 3D, où la
+                    // projection perspective (1200px, face à 150px) les grossit
+                    // de 1200/1050 = 8/7 par rapport à cet overlay 2D. Le cube
+                    // est déjà dans le conteneur mis à l'échelle
+                    // (`scale(${cubeScale})`), il ne faut donc PAS re-multiplier
+                    // par cubeScale ici. `transformOrigin: center` garde le
+                    // texte centré.
+                    transform: `scale(${CUBE_FACE_PROJECTION_SCALE})`,
                     transformOrigin: "center",
                     textShadow: "0 0 14px rgba(51,209,200,0.5)",
                     willChange: "opacity",
