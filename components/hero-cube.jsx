@@ -1520,17 +1520,22 @@ export function HeroCube({ title, subtitle, images = [] }) {
             // de garde : au rewind sous CUBE_END, le fond se ré-vêle.
             const k = smoothstep(exitK);
             const fade = 1 - k;
+            // Après la fin (repli médias/fond verrouillé), le reverse dans cette
+            // fenêtre ne doit JAMAIS ré-exposer l'image ni la vidéo de fond : ils
+            // restent fondus à 0 (couleur de base), même si l'utilisateur repasse
+            // dans la zone de sortie.
+            const bgFade = mediaRetractedRef.current ? 0 : fade;
             if (!bgResetRef.current) {
               bgResetRef.current = true;
               if (videoBgRef.current) videoBgRef.current.pause();
             }
             if (bg) {
               bg.style.transition = "none";
-              bg.style.opacity = String(fade);
+              bg.style.opacity = String(bgFade);
             }
             if (videoBgContainerRef.current) {
               videoBgContainerRef.current.style.transition = "none";
-              videoBgContainerRef.current.style.opacity = String(fade);
+              videoBgContainerRef.current.style.opacity = String(bgFade);
             }
             if (wrapper) {
               wrapper.style.transition = "none";
