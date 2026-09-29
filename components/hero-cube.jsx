@@ -2404,7 +2404,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           <div
                             className="face-media-wrapper"
                             style={{
-                              transform: zoomedFaces[i] && !mediaRetracted ? "scale(1)" : "scale(0)",
                               transition: "transform 0.6s ease",
                               width: "100%",
                               height: "100%",
