@@ -157,6 +157,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [squareSize, setSquareSize] = useState(343);
   const [skipped, setSkipped] = useState(false);
   const [skipRevealedFaces, setSkipRevealedFaces] = useState([false, false, false, false, false, false]);
+  // Une fois la séquence finale jouée (au scroll ou via SKIP), le cube repasse
+  // en mode « exploration post-skip » : le scroll inverse rejoue un cube nu
+  // avec ses labels, fond vide — sans ré-exposer les médias zoomés ni re-révéler
+  // le fond. `zoomedFaces` reste intact (les onglets projets restent affichés) ;
+  // seul le rendu des visuels replisés change. Un nouveau clic sur une face
+  // relève le repli.
+  const [mediaRetracted, setMediaRetracted] = useState(false);
+  const mediaRetractedRef = useRef(false);
   const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
@@ -239,6 +247,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   zoomedFacesRef.current = zoomedFaces;
   skipRevealedFacesRef.current = skipRevealedFaces;
+  mediaRetractedRef.current = mediaRetracted;
   zoomedFaceRef.current = zoomedFace;
   borderColorRef.current = "#00a5b0";
   strokeWidthRef.current = 2;
@@ -606,7 +615,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // Replie définitivement les visuels une fois la fin atteinte (fin autoplay ou
+  // sweep de skip) : le reverse qui suit retrouve un cube nu comme après un skip.
+  const retractMedia = useCallback(() => {
+    if (mediaRetractedRef.current) return;
+    mediaRetractedRef.current = true;
+    setMediaRetracted(true);
+  }, []);
+
+  // Un clic sur une face relève manuellement le repli : le cube renoue avec le
+  // mode navigation classique (les médias se ré-exposent).
+  const unretractMedia = useCallback(() => {
+    if (!mediaRetractedRef.current) return;
+    mediaRetractedRef.current = false;
+    setMediaRetracted(false);
+  }, []);
+
   const handleFaceClick = useCallback((i) => {
+    unretractMedia();
     setZoomedFace(i);
     setZoomedFaces((prev) => {
       const n = [...prev];
@@ -636,7 +662,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       video.currentTime = 0;
       video.play().catch(() => {});
     }
-  }, [changeBackground, revealFaceMedia]);
+  }, [changeBackground, revealFaceMedia, unretractMedia]);
 
   // Pure hit-test: given viewport coordinates and the click zone rect, open
   // the face lying under the pointer (or do nothing). Shared by the native
@@ -1088,7 +1114,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           if (nowVisible && !faceWasVisibleRef.current[i]) {
             faceVisibilityCountRef.current[i]++;
           }
-          const revealed = faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT && !zoomedFacesRef.current[i];
+          const revealed = faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT && (!zoomedFacesRef.current[i] || mediaRetractedRef.current);
           if (revealed) {
             const el = clickLabelRefs.current[i];
             if (el) el.style.opacity = "1";
@@ -1290,6 +1316,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipFacesHiddenRef.current = false;
           galleryRot = [];
           galleryDur = 0;
+          retractMedia();
         }
         rafId = requestAnimationFrame(tick);
       } else if (autoplay) {
@@ -1299,6 +1326,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (autoplayElapsed >= AUTOPLAY_MS) {
           autoplay = false;
           currentP = Math.min(1, currentP);
+          retractMedia();
         }
         targetP = currentP;
         let sbNow = el.scrollHeight - el.offsetHeight;
@@ -1444,7 +1472,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           bgResetRef.current = true;
           resetBackground();
         }
-      } else if (bgResetRef.current && tlP < CUBE_END) {
+      } else if (bgResetRef.current && tlP < CUBE_END && !mediaRetractedRef.current) {
         bgResetRef.current = false;
         const last = clickStackRef.current[clickStackRef.current.length - 1];
         if (typeof last === "number") changeBackground(last);
@@ -1507,7 +1535,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }
             if (media) media.style.filter = `brightness(${brightness})`;
             if (faceEl.style.filter) faceEl.style.filter = "";
-          } else if (zoomedFacesRef.current[i]) {
+          } else if (zoomedFacesRef.current[i] && !mediaRetractedRef.current) {
             if (media) media.style.filter = `brightness(${brightness})`;
             if (faceEl.style.filter) faceEl.style.filter = "";
             if (wrapper) {
@@ -1567,7 +1595,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       el.removeEventListener("scroll", onScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer]);
+  }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer, retractMedia]);
 
   // Direct cube rotation: pointer drag layers an offset over the scroll-driven
   // rotation. A real drag also suppresses the click that browsers fire afterward.
@@ -1952,7 +1980,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           width: 300,
                           height: 300,
                           background: "#0a0f1c",
-                          boxShadow: zoomedFaces[i] ? "0 0 15px rgba(0,0,0,0.3)" : "none",
+                          boxShadow: zoomedFaces[i] && !mediaRetracted ? "0 0 15px rgba(0,0,0,0.3)" : "none",
                           transition: "box-shadow 0.3s ease",
                           backfaceVisibility: "hidden",
                           transform: faceTransform(face),
@@ -1965,7 +1993,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           <div
                             className="face-media-wrapper"
                             style={{
-                              transform: zoomedFaces[i] ? "scale(1)" : "scale(0)",
+                              transform: zoomedFaces[i] && !mediaRetracted ? "scale(1)" : "scale(0)",
                               transition: "transform 0.6s ease",
                               width: "100%",
                               height: "100%",
@@ -1974,13 +2002,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           >
                             {isVideoUrl(faceImages[i]) ? (
                               <video
-                                src={zoomedFaces[i] ? faceImages[i] : undefined}
+                                src={zoomedFaces[i] && !mediaRetracted ? faceImages[i] : undefined}
                                 className="w-full h-full object-cover"
                                 autoPlay
                                 muted
                                 loop
                                 playsInline
-                                preload={zoomedFaces[i] ? "metadata" : "none"}
+                                preload={zoomedFaces[i] && !mediaRetracted ? "metadata" : "none"}
                               />
                             ) : (
                               <img
