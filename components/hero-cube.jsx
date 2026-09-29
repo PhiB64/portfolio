@@ -616,11 +616,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const n = [...zoomedFacesRef.current];
     n[i] = true;
     if (n.every(Boolean)) {
+      // Dernier clic : la sortie doit être un simple fondu des faces + du fond.
+      // On évite donc les ondes sonar (révélation du média et bascule du fond)
+      // qui se superposeraient au fondu ; le média de la face s'affiche via le
+      // rendu React (scale 1) et l'ensemble s'efface d'un fondu uniforme.
       allClickedRef.current = true;
       if (tickRef.current) tickRef.current();
+    } else {
+      changeBackground(i, 380);
+      revealFaceMedia(i);
     }
-    changeBackground(i, 380);
-    revealFaceMedia(i);
     clickStackRef.current = [...clickStackRef.current.filter((idx) => idx !== i), i];
     if (clickLabelRefs.current[i]) {
       clickLabelRefs.current[i].style.opacity = "0";
