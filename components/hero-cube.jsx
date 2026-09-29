@@ -2235,14 +2235,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
               }
             `}</style>
           </div>
-          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
+          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => {
               const shown = zoomedFaces[i] || (skipped && (skipRevealedFaces[i] || contactDone));
               return (
                 <button
                   key={link.name}
                   onClick={() => openProject(i)}
-                  className="justify-self-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
+                  className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
                   style={{
                     opacity: shown ? 1 : 0,
                     transform: shown ? "translateY(0)" : "translateY(-15px)",
@@ -2335,13 +2335,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           >
                             {isVideoUrl(faceImages[i]) ? (
                               <video
-                                src={zoomedFaces[i] && !mediaRetracted ? faceImages[i] : undefined}
+                                src={faceImages[i]}
                                 className="w-full h-full object-cover"
-                                autoPlay
+                                autoPlay={zoomedFaces[i] && !mediaRetracted}
                                 muted
                                 loop
                                 playsInline
-                                preload={zoomedFaces[i] && !mediaRetracted ? "metadata" : "none"}
+                                preload="metadata"
                               />
                             ) : (
                               <img
@@ -2349,8 +2349,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
                                 alt=""
                                 className="w-full h-full object-cover"
                                 draggable={false}
-                                loading={i === 0 ? "eager" : "lazy"}
-                                fetchPriority={i === 0 ? "high" : undefined}
+                                loading="eager"
+                                fetchPriority="high"
                               />
                             )}
                           </div>
