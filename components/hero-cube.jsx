@@ -54,9 +54,9 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.0005;
-// Exposition continue requise avant qu'un label de face passe du brouillage au
-// texte lisible. Cumulée par `dt` (ms), donc à augmenter pour un délai plus long.
-const LABEL_DECODE_DELAY_MS = 200;
+// Exposition requise avant qu'un label de face passe du brouillage au texte
+// lisible. Cumulée par `dt` (ms) ; 0 = décodage immédiat dès l'exposition.
+const LABEL_DECODE_DELAY_MS = 0;
 // Facteur de projection perspective : une face frontale (translateZ 150px, cube
 // 300px) sous une perspective de 1200px est rendue 1200/(1200-150) = 8/7 plus
 // grande que l'overlay 2D. C'est l'échelle qu'il faut au label du skip pour
@@ -1057,8 +1057,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const diff = targetP - currentP;
 
       // Le brouillage apparaît à la seconde visibilité : le label reste « codé »
-      // pendant LABEL_DECODE_DELAY_MS d'exposition, puis se résout. Dès que la
-      // face n'est plus exposée, le compte repart de zéro.
+      // pendant LABEL_DECODE_DELAY_MS d'exposition, puis se résout. À 0, le
+      // décodage démarre dès la première frame. Dès que la face n'est plus
+      // exposée, le compte repart de zéro.
       // Frozen during the auto sweep: there the labels are driven solely by the
       // gallery, otherwise they would light up mid-rotation.
       // This runs before the rotation for this frame is resolved, so it reads
