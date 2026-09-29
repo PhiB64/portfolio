@@ -1590,19 +1590,29 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
-      // On the first frame after all faces are clicked, reset currentP to CUBE_END
-      // so the exit animation plays forward from there instead of jumping ahead.
-      // L'autoplay reprend ensuite la main : il patiente toutefois pendant la
-      // fenêtre de grâce d'une seconde avant de lancer le fondu de fin.
+      // Sur la première frame où les 6 faces sont cliquées, on ramène la tête
+      // de lecture à CUBE_END pour que la fin se joue depuis le bon point de
+      // départ au lieu de sauter en avant, puis on arme l'autoplay.
+      //
+      // Le verrou `wasUnlockedRef` ne doit être posé qu'ici, quand l'autoplay a
+      // réellement démarré : le poser systématiquement brûlait le latch sans
+      // lancer la fin dès que la position était sous CUBE_END, et l'autoplay ne
+      // pouvait alors plus jamais démarrer avant le bouton RETOUR. La fenêtre de
+      // grâce d'une seconde (`exitArmUntilRef`) retarde la progression, donc ce
+      // recalage n'est jamais visible.
       if (unlocked && !wasUnlockedRef.current) {
         wasUnlockedRef.current = true;
-        if (currentP > CUBE_END) {
-          currentP = CUBE_END;
-          targetP = CUBE_END;
-          autoplay = true;
-          autoplayElapsed = 0;
-          if (!rafId) rafId = requestAnimationFrame(tick);
-        }
+        currentP = CUBE_END;
+        targetP = CUBE_END;
+        autoplay = true;
+        autoplayElapsed = 0;
+        // Le scroll natif doit suivre immédiatement : sinon le prochain
+        // événement `scroll` compare la position réelle (toujours à l'ancien
+        // palier) à `currentP`, l'écart dépasse 0.02 et annule l'autoplay
+        // dès la frame suivante.
+        const sbArm = el.scrollHeight - el.offsetHeight;
+        if (sbArm > 0) el.scrollTop = currentP * sbArm;
+        if (!rafId) rafId = requestAnimationFrame(tick);
       }
       const p = currentP;
 
