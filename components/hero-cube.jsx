@@ -825,11 +825,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
       bgBaseRef.current = true;
     };
 
-    // Retour du fond : le visuel est effacé derrière une onde radiale puis
-    // basculé sur la couleur de base une fois le voile plein, sans aucun pop.
-    // `erase` réutilise le geste central → extérieur (comme à l'entrée) en
-    // inversant le masque ; par défaut l'onde se referme vers le cube.
-    const resetBackground = (erase = false) => {
+    // Retour du fond : le visuel est effacé et le fond repasse sur la couleur
+    // de base, sans aucun pop ni effet sonar — juste un fondu. L'onde radiale
+    // est réservée à l'entrée de chaque visuel ; la sortie se contente d'un
+    // simple fondu, comme le repli des faces.
+    const resetBackground = () => {
       if (videoBgContainerRef.current) videoBgContainerRef.current.style.opacity = "0";
       if (videoBgRef.current) videoBgRef.current.pause();
       if (bgSonarRef.current) {
@@ -839,16 +839,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         window.clearTimeout(bgSonarRef.current.timeout);
         bgSonarRef.current = null;
       }
-      const bgRoot = bg.parentElement;
-      const opts = sonarGeometry(bgRoot, cubeContainerRef.current);
-      const layer = buildSonarLayer(bgRoot, false, {
-        ...opts,
-        duration: EXIT_MS,
-        erase,
-        onClose: emptyBackground,
-      });
-      bgSonarRef.current = { mask: layer.mask, ring: layer.ring, anime: layer.anime };
-      layer.anime.play();
+      emptyBackground();
     };
 
     // ---- Single master timeline ----
@@ -890,10 +881,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const LINE_POS = TOTAL - (W.lineMorph + W.namesRise);
     const NAMES_START = (LINE_POS + W.lineMorph) / TOTAL;
     const NAMES_END = NAMES_START + W.namesRise / TOTAL;
-    // Fenêtre complète du repli des faces (première face → dernière). La
-    // fermeture du fond est calée dessus : les visuels disparaissent pendant
-    // que le fond se rétracte, les deux finissent ensemble.
-    const EXIT_MS = (SPIN_START - CUBE_END) * TOTAL;
     // The cube only rotates on the part of the scroll that comes after the intro.
     const CUBE_RANGE = 1 - INTRO_END;
     const ROT_END = (SPIN_END - INTRO_END) / CUBE_RANGE;
