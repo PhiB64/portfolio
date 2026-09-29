@@ -21,12 +21,12 @@ import {
 import { scrambleLabel, stopScramble } from "../lib/scramble";
 
 const PROJECT_LINKS = [
-  { name: "1.WEB", url: "/web" },
-  { name: "2.REACT", url: "/react" },
-  { name: "3.BACKEND", url: "/backend" },
-  { name: "4.DATABASE", url: "/database" },
-  { name: "5.MOBILE", url: "/mobile" },
-  { name: "6.PROJETS", url: "/projets" },
+  { name: "WEB", url: "/web" },
+  { name: "REACT", url: "/react" },
+  { name: "BACKEND", url: "/backend" },
+  { name: "DATABASE", url: "/database" },
+  { name: "MOBILE", url: "/mobile" },
+  { name: "PROJETS", url: "/projets" },
 ];
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
@@ -210,6 +210,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const clickLabelRefs = useRef([]);
   const clickStackRef = useRef([]);
   const allClickedRef = useRef(false);
+  // Fin de la fenêtre de « grâce » d'une seconde après le dernier clic :
+  // tant qu'elle court, un éventuel scroll ne démarre pas encore le fondu de
+  // fin (la tête de lecture reste retenue à CUBE_END).
+  const exitArmUntilRef = useRef(0);
   const tickRef = useRef(null);
   const clickZoneRef = useRef(null);
   const namesRef = useRef(null);
@@ -615,8 +619,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // Replie définitivement les visuels une fois la fin atteinte (fin autoplay ou
-  // sweep de skip) : le reverse qui suit retrouve un cube nu comme après un skip.
+  // Replie définitivement les visuels une fois la fin atteinte (scroll jusqu'au
+  // bout ou sweep de skip) : le reverse qui suit retrouve un cube nu comme
+  // après un skip.
   const retractMedia = useCallback(() => {
     if (mediaRetractedRef.current) return;
     mediaRetractedRef.current = true;
@@ -642,16 +647,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const n = [...zoomedFacesRef.current];
     n[i] = true;
     if (n.every(Boolean)) {
-      // Dernier clic : la sortie doit être un simple fondu des faces + du fond.
-      // On évite donc les ondes sonar (révélation du média et bascule du fond)
-      // qui se superposeraient au fondu ; le média de la face s'affiche via le
-      // rendu React (scale 1) et l'ensemble s'efface d'un fondu uniforme.
+      // Dernier clic : le fond s'affiche lui aussi avec son effet sonar, comme
+      // à chaque clic précédent. Le simple fondu de fin, lui, ne se déclenchera
+      // qu'à la poursuite du scroll, au moins une seconde après ce clic
+      // (fenêtre de grâce gérée par `exitArmUntilRef`).
       allClickedRef.current = true;
+      exitArmUntilRef.current = Date.now() + 1000;
       if (tickRef.current) tickRef.current();
-    } else {
-      changeBackground(i, 380);
-      revealFaceMedia(i);
     }
+    changeBackground(i, 380);
+    revealFaceMedia(i);
     clickStackRef.current = [...clickStackRef.current.filter((idx) => idx !== i), i];
     if (clickLabelRefs.current[i]) {
       clickLabelRefs.current[i].style.opacity = "0";
@@ -969,6 +974,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Once every face has been clicked, the end sequence plays out at a steady
     // pace (autoplay) instead of snapping to the real scroll position.
     let autoplay = false;
+    // Timer d'avancement partagé du sweep de skip et de ses galeries.
     let autoplayElapsed = 0;
     // Position (timeline units) the skip morph glides up from. On the manual
     // skip that equals the start pose, so the cube holds still while its faces
@@ -1071,6 +1077,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
           }
           targetP = pinP;
         }
+      }
+      // Fenêtre de grâce d'une seconde après le dernier clic : un scroll trop
+      // rapide ne doit pas encore lancer le fondu de fin. La tête est retenue à
+      // CUBE_END, puis le scroll reprend la main normalement.
+      if (allClickedRef.current && Date.now() < exitArmUntilRef.current && targetP > CUBE_END) {
+        const nowMs = Date.now();
+        if (nowMs - lastPinFix > 100) {
+          lastPinFix = nowMs;
+          el.scrollTo({ top: CUBE_END * sb, behavior: "smooth" });
+        }
+        targetP = CUBE_END;
       }
     };
 
@@ -1320,6 +1337,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = requestAnimationFrame(tick);
       } else if (autoplay) {
         // Steady, frame-rate independent progression through the end sequence.
+        // La fenêtre de grâce d'une seconde après le dernier clic retarde aussi
+        // l'autoplay : le fondu de fin n'avance jamais avant son expiration.
+        if (Date.now() < exitArmUntilRef.current) {
+          autoplayElapsed = 0;
+          currentP = CUBE_END;
+          targetP = CUBE_END;
+          let sbGrace = el.scrollHeight - el.offsetHeight;
+          if (sbGrace > 0) el.scrollTop = currentP * sbGrace;
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
         autoplayElapsed += dt;
         currentP = CUBE_END + (autoplayElapsed / AUTOPLAY_MS) * (1 - CUBE_END);
         if (autoplayElapsed >= AUTOPLAY_MS) {
@@ -1353,6 +1381,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const unlocked = allClickedRef.current;
       // On the first frame after all faces are clicked, reset currentP to CUBE_END
       // so the exit animation plays forward from there instead of jumping ahead.
+      // L'autoplay reprend ensuite la main : il patiente toutefois pendant la
+      // fenêtre de grâce d'une seconde avant de lancer le fondu de fin.
       if (unlocked && !wasUnlockedRef.current) {
         wasUnlockedRef.current = true;
         if (currentP > CUBE_END) {
