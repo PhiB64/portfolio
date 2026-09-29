@@ -1039,20 +1039,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let resetPlay = false;
     let resetFrom = 0;
     let resetElapsed = 0;
-    const RESET_MS = 1800;
-    // Window de réapparition de la ligne de fin, puis du morphing vers la
-    // « souris » pendant le sweep de retour. Les durées suivent le ralentissement
-    // du sweep : un retour plus lent (1800 ms) laisse respirer chaque geste.
-    const RESET_REVEAL_MS = 1200;
+    const RESET_MS = 1200;
+    // Fenêtre de réapparition douce de la « souris » (molette) et de l'invite
+    // « SCROLL DOWN » pendant la fin du sweep de retour. Sans elle, le rescrub
+    // de l'intro écrase les 200 ms de fondu de la piste en ~35 ms réels, et
+    // les deux éléments « pop » brutalement dans les dernières millisecondes.
+    const RESET_REVEAL_MS = 800;
     // Duration de disparition des noms au début du retour : ils doivent quitter
     // l'écran (fondu + glissement vers le bas) avant que la ligne de fin
     // d'animation ne se transforme en « souris ».
-    const RESET_NAMES_MS = 525;
+    const RESET_NAMES_MS = 350;
     // Morphing du retour : la ligne (carré aplati) se redéploie d'abord en carré
     // plein, puis ce carré glisse sur la silhouette de la « souris » pendant que
     // la molette refait son apparition en son centre.
-    const RESET_LINE_GROW_MS = 450;
-    const RESET_MORPH_MS = 600;
+    const RESET_LINE_GROW_MS = 300;
+    const RESET_MORPH_MS = 400;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
     // computed from where the cube is when the sweep starts.
     let galleryRot = [];
@@ -2067,7 +2068,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         </div>
         <div className="absolute inset-0 bg-[#0a0f1c]/60" />
         <button
-          onClick={() => goToStartRef.current?.()}
+          onClick={() => window.location.reload()}
           className="absolute top-3 left-3 z-30 sm:top-5 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
           aria-label="Accueil"
         >
