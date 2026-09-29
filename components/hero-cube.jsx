@@ -1027,12 +1027,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let autoplay = false;
     // Timer d'avancement partagé du sweep de skip et de ses galeries.
     let autoplayElapsed = 0;
-    // Position à laquelle l'autoplay a été armé (le cube était encore épinglé
-    // à un palier de rotation). La fin doit démarrer à CUBE_END, mais on s'y rend
-    // en glissant : teleporter la tête de lecture ferait pivoter le cube d'un
-    // coup, en biais, sans tenir compte d'où l'utilisateur l'avait cliqué.
-    let autoplayLeadFrom = null;
-    let autoplayLeadElapsed = 0;
     // Position (timeline units) the skip morph glides up from. On the manual
     // skip that equals the start pose, so the cube holds still while its faces
     // fold in; on the automatic load it is wherever the page was, so the intro
@@ -1040,12 +1034,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let skipFrom = 0;
     let skipLate = false;
     const AUTOPLAY_MS = 9000;
-    // Glissade de raccord entre la position du dernier clic et CUBE_END, où la
-    // vraie séquence de fin démarre. Elle est bornée par la distance à parcourir
-    // pour que le cube garde une vitesse angulaire régulière, quoi qu'il ait été
-    // cliqué tôt ou tard dans la rotation.
-    const AUTOPLAY_LEAD_MAX_MS = 700;
-    const AUTOPLAY_LEAD_MIN_MS = 180;
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
@@ -1563,42 +1551,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // La fenêtre de grâce d'une seconde après le dernier clic retarde aussi
         // l'autoplay : le fondu de fin n'avance jamais avant son expiration.
         if (Date.now() < exitArmUntilRef.current) {
-          // Pendant la grâce le cube ne bouge pas du tout : la position du
-          // dernier clic est laissée intacte, sinon le cube pivoterait
-          // immédiatement en biais sous les yeux de l'utilisateur.
           autoplayElapsed = 0;
-          autoplayLeadElapsed = 0;
-          autoplayLeadFrom = null;
-          targetP = currentP;
+          currentP = CUBE_END;
+          targetP = CUBE_END;
           let sbGrace = el.scrollHeight - el.offsetHeight;
           if (sbGrace > 0) el.scrollTop = currentP * sbGrace;
-          rafId = requestAnimationFrame(tick);
-          return;
-        }
-        // Raccord : glisse de la position du dernier clic jusqu'à CUBE_END, où la
-        // séquence de fin démarre pour de bon. Sans cette phase, passer directement
-        // à la rampe ci-dessous téléporterait le cube depuis le palier où il a été
-        // cliqué. La durée est proportionnelle à la distance, ce qui donne une
-        // vitesse angulaire régulière quelle que soit la position de départ.
-        if (autoplayLeadFrom !== null) {
-          const span = CUBE_END - autoplayLeadFrom;
-          const leadMs = Math.min(
-            AUTOPLAY_LEAD_MAX_MS,
-            Math.max(AUTOPLAY_LEAD_MIN_MS, Math.abs(span) * (AUTOPLAY_LEAD_MAX_MS / (CUBE_END - INTRO_END))),
-          );
-          autoplayLeadElapsed += dt;
-          if (autoplayLeadElapsed >= leadMs || span <= 0) {
-            currentP = CUBE_END;
-            autoplayLeadFrom = null;
-          } else {
-            // smoothstep : départ et arrivée sans à-coup, la vitesse angulaire
-            // monte puis redescend au lieu de sauter à la valeur cible.
-            const k = autoplayLeadElapsed / leadMs;
-            currentP = autoplayLeadFrom + span * smoothstep(k);
-          }
-          targetP = currentP;
-          let sbLead = el.scrollHeight - el.offsetHeight;
-          if (sbLead > 0) el.scrollTop = currentP * sbLead;
           rafId = requestAnimationFrame(tick);
           return;
         }
@@ -1633,24 +1590,28 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
-      // Sur la première frame où les 6 faces sont cliquées, on arme l'autoplay.
+      // Sur la première frame où les 6 faces sont cliquées, on ramène la tête
+      // de lecture à CUBE_END pour que la fin se joue depuis le bon point de
+      // départ au lieu de sauter en avant, puis on arme l'autoplay.
       //
       // Le verrou `wasUnlockedRef` ne doit être posé qu'ici, quand l'autoplay a
       // réellement démarré : le poser systématiquement brûlait le latch sans
       // lancer la fin dès que la position était sous CUBE_END, et l'autoplay ne
-      // pouvait alors plus jamais démarrer avant le bouton RETOUR.
-      //
-      // On ne replace PAS la tête de lecture sur CUBE_END ici : le cube est
-      // encore figé à l'endroit exact où l'utilisateur a cliqué la 6e face, et
-      // une affectation directe le ferait pivoter d'un coup. On retient cette
-      // position (`autoplayLeadFrom`) et la glissade de raccord ci-dessous l'amène
-      // jusqu'à CUBE_END.
+      // pouvait alors plus jamais démarrer avant le bouton RETOUR. La fenêtre de
+      // grâce d'une seconde (`exitArmUntilRef`) retarde la progression, donc ce
+      // recalage n'est jamais visible.
       if (unlocked && !wasUnlockedRef.current) {
         wasUnlockedRef.current = true;
+        currentP = CUBE_END;
+        targetP = CUBE_END;
         autoplay = true;
         autoplayElapsed = 0;
-        autoplayLeadFrom = currentP;
-        autoplayLeadElapsed = 0;
+        // Le scroll natif doit suivre immédiatement : sinon le prochain
+        // événement `scroll` compare la position réelle (toujours à l'ancien
+        // palier) à `currentP`, l'écart dépasse 0.02 et annule l'autoplay
+        // dès la frame suivante.
+        const sbArm = el.scrollHeight - el.offsetHeight;
+        if (sbArm > 0) el.scrollTop = currentP * sbArm;
         if (!rafId) rafId = requestAnimationFrame(tick);
       }
       const p = currentP;
@@ -1923,8 +1884,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     goToStartRef.current = () => {
       if (resetPlay) return;
       autoplay = false;
-      autoplayLeadFrom = null;
-      autoplayLeadElapsed = 0;
       skipRef.current = false;
       skipActiveRef.current = false;
       skipLate = false;
