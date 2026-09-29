@@ -27,24 +27,22 @@ export function ContactOverlay({ onClose }) {
     const { name, email, message } = form;
     const endpoint = process.env.NEXT_PUBLIC_CONTACT_ENDPOINT;
 
-    if (endpoint) {
-      setStatus("sending");
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({ name, email, message }),
-        });
-        const ok = res.ok || (await res.json()).ok;
-        if (ok) {
-          setStatus("sent");
-          return;
-        }
-      } catch {}
-    }
+    setStatus("sending");
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ name, email, message }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setStatus("sent");
+        return;
+      }
+    } catch {}
 
     // Repli : ouvrir le client mail avec le message pré-rempli.
     const body = encodeURIComponent(`De : ${name} (${email})\n\n${message}`);
