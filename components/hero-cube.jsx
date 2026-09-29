@@ -49,6 +49,20 @@ const smoothstep = (t) => {
   return x * x * (3 - 2 * x);
 };
 
+// Interpolation coordonnée par coordonnée entre deux chaînes de points SVG de
+// même longeur (24 sommets), utilisée pour faire glisser le carré de fin sur la
+// silhouette de la « souris » pendant le retour.
+const interpolatePoints = (from, to, t) => {
+  const a = from.split(" ").map((p) => p.split(",").map(Number));
+  const b = to.split(" ").map((p) => p.split(",").map(Number));
+  return a
+    .map((pt, i) => [
+      (pt[0] + (b[i][0] - pt[0]) * t).toFixed(1),
+      (pt[1] + (b[i][1] - pt[1]) * t).toFixed(1),
+    ].join(","))
+    .join(" ");
+};
+
 const WEB_SCROLL_SMOOTHING_MS = 80;
 const WEB_REVERSE_SCROLL_SMOOTHING_MS = 120;
 const MOBILE_SCROLL_SMOOTHING_MS = 60;
@@ -902,6 +916,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // forwards and backwards and is fully reversible.
     const SQUARE_POINTS =
       "0,0 50,0 100,0 150,0 200,0 250,0 300,0 300,50 300,100 300,150 300,200 300,250 300,300 250,300 200,300 150,300 100,300 50,300 0,300 0,250 0,200 0,150 0,100 0,50";
+    // Pose initiale de la « souris » (silhouette arrondie + molette) portée par
+    // le même polygone. Pendant le retour, la ligne de fin d'animation repart en
+    // carré puis glisse vers cette silhouette au lieu d'un simple fondu.
+    const MOUSE_POINTS =
+      "135,150 136,144 139,139 144,136 150,135 156,136 161,139 164,144 165,150 165,155 165,160 165,165 165,170 164,176 161,181 156,184 150,185 144,184 139,181 136,176 135,170 135,165 135,160 135,155";
 
     const W = {
       wheelFade: 200,
@@ -1026,10 +1045,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // de l'intro écrase les 200 ms de fondu de la piste en ~35 ms réels, et
     // les deux éléments « pop » brutalement dans les dernières millisecondes.
     const RESET_REVEAL_MS = 800;
-    // Durée de disparition des noms au début du retour : ils doivent quitter
-    // l'écran (fondu + glissement vers le bas) avant la réapparition de la
-    // « souris » et de l'invite « SCROLL DOWN ».
+    // Duration de disparition des noms au début du retour : ils doivent quitter
+    // l'écran (fondu + glissement vers le bas) avant que la ligne de fin
+    // d'animation ne se transforme en « souris ».
     const RESET_NAMES_MS = 350;
+    // Morphing du retour : la ligne (carré aplati) se redéploie d'abord en carré
+    // plein, puis ce carré glisse sur la silhouette de la « souris » pendant que
+    // la molette refait son apparition en son centre.
+    const RESET_LINE_GROW_MS = 300;
+    const RESET_MORPH_MS = 400;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
     // computed from where the cube is when the sweep starts.
     let galleryRot = [];
@@ -1179,21 +1203,36 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (sbReset > 0) el.scrollTop = currentP * sbReset;
         // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
         // dès le début du retour (fondu + glissement vers le bas), avant que la
-        // souris et le « SCROLL DOWN » ne refassent leur apparition plus bas.
+        // ligne de fin d'animation ne se rematérialise en « souris ».
         const namesK = Math.min(1, resetElapsed / RESET_NAMES_MS);
         const namesE = namesK * namesK * (3 - 2 * namesK);
         names.style.opacity = String(1 - namesE);
         sub.style.opacity = String(1 - namesE);
         names.style.transform = `translateY(${70 * namesE}px)`;
         sub.style.transform = `translateY(${-70 * namesE}px)`;
-        // Réapparition en fondu de la souris et du « SCROLL DOWN » sur la
-        // dernière portion du retour, indépendamment du rescrub de la piste.
+        // Réapparition en douceur de la « souris » par morphing : la ligne de
+        // fin d'animation (carré aplati) se redéploie en carré, puis ses points
+        // glissent jusqu'à la silhouette de la souris pendant que la molette
+        // revient en son centre. L'invite « SCROLL DOWN » refait surface juste
+        // après, sur la dernière portion du retour.
+        const growK = Math.min(1, resetElapsed / RESET_LINE_GROW_MS);
+        const growE = growK * growK * (3 - 2 * growK);
+        body.style.transform = `scale(1, ${Math.max(0.0001, growE)})`;
+        const morphK = Math.max(
+          0,
+          Math.min(1, (resetElapsed - RESET_LINE_GROW_MS) / RESET_MORPH_MS),
+        );
+        const morphE = smoothstep(morphK);
+        body.setAttribute(
+          "points",
+          interpolatePoints(SQUARE_POINTS, MOUSE_POINTS, morphE),
+        );
+        wheel.style.opacity = String(morphE);
         const revealK = Math.max(
           0,
           Math.min(1, (resetElapsed - (RESET_MS - RESET_REVEAL_MS)) / RESET_REVEAL_MS),
         );
         const revealE = 1 - (1 - revealK) * (1 - revealK) * (1 - revealK);
-        wheel.style.opacity = String(revealE);
         hint.style.opacity = String(revealE);
         if (resetElapsed >= RESET_MS) {
           resetPlay = false;
