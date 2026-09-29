@@ -1577,8 +1577,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
         setShowReturn(true);
       }
       facesVisibleRef.current = tlP < SPIN_START;
-      // Le drag manuel est inactif pendant le sweep de reset.
-      cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START && !resetPlay;
+      // Le drag manuel est inactif pendant le sweep de reset et le skip : la
+      // pose y est chorégraphiée, un offset du doigt y désyncroniserait les
+      // labels des faces réellement frontales.
+      cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START && !resetPlay && !skipActiveRef.current;
 
       // La fin est atteinte dès que les noms sont levés — que ce soit par
       // l'autoplay, le sweep de skip ou un scroll manuel jusqu'au bout. On
@@ -1624,6 +1626,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // returns to its aligned ("square") rest pose before the names appear.
       let dragRx = dragOffsetRef.current.rx;
       let dragRy = dragOffsetRef.current.ry;
+      // Pendant le skip, la pose est pilotée à la frame : un décalage de
+      // rotation encore porté par le doigt décalerait chaque exposition frontale
+      // et désynchroniserait le label (gallery ou faces) de la face réellement
+      // face au spectateur. L'offset s'éteint donc progressivement sur le morph
+      // d'entrée du skip et reste nul pendant toute la parade.
+      if (skipActiveRef.current) {
+        const k = Math.min(1, autoplayElapsed / SKIP_MORPH_MS);
+        const ease = 1 - k * k * (3 - 2 * k);
+        dragRx *= ease;
+        dragRy *= ease;
+      }
       if (tlP > SPIN_START) {
         const kSpin = Math.min(1, Math.max(0, (tlP - SPIN_START) / (SPIN_END - SPIN_START)));
         const fade = 1 - kSpin * kSpin * (3 - 2 * kSpin);
