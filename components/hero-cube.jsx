@@ -1316,7 +1316,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipFacesHiddenRef.current = false;
           galleryRot = [];
           galleryDur = 0;
-          retractMedia();
         }
         rafId = requestAnimationFrame(tick);
       } else if (autoplay) {
@@ -1326,7 +1325,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (autoplayElapsed >= AUTOPLAY_MS) {
           autoplay = false;
           currentP = Math.min(1, currentP);
-          retractMedia();
         }
         targetP = currentP;
         let sbNow = el.scrollHeight - el.offsetHeight;
@@ -1375,6 +1373,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       tl.seek(tlP * TOTAL);
       facesVisibleRef.current = tlP < SPIN_START;
       cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START;
+
+      // La fin est atteinte dès que les noms sont levés — que ce soit par
+      // l'autoplay, le sweep de skip ou un scroll manuel jusqu'au bout. On
+      // latche alors le repli des médias et du fond : le scroll inverse qui
+      // suit retrouve un cube nu avec ses labels (identique au reverse post-skip).
+      // Un simple clic sur une face relève ce repli.
+      if (!mediaRetractedRef.current && tlP >= NAMES_START) retractMedia();
 
       // Show/hide the cube only while the square is gone. The cube's own
       // opacity is driven by the timeline (complementary to the square fade).
