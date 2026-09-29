@@ -1021,6 +1021,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let resetFrom = 0;
     let resetElapsed = 0;
     const RESET_MS = 1200;
+    // Fenêtre de réapparition douce de la « souris » (molette) et de l'invite
+    // « SCROLL DOWN » pendant la fin du sweep de retour. Sans elle, le rescrub
+    // de l'intro écrase les 200 ms de fondu de la piste en ~35 ms réels, et
+    // les deux éléments « pop » brutalement dans les dernières millisecondes.
+    const RESET_REVEAL_MS = 800;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
     // computed from where the cube is when the sweep starts.
     let galleryRot = [];
@@ -1168,6 +1173,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
         targetP = currentP;
         let sbReset = el.scrollHeight - el.offsetHeight;
         if (sbReset > 0) el.scrollTop = currentP * sbReset;
+        // Réapparition en fondu de la souris et du « SCROLL DOWN » sur la
+        // dernière portion du retour, indépendamment du rescrub de la piste.
+        const revealK = Math.max(
+          0,
+          Math.min(1, (resetElapsed - (RESET_MS - RESET_REVEAL_MS)) / RESET_REVEAL_MS),
+        );
+        const revealE = 1 - (1 - revealK) * (1 - revealK) * (1 - revealK);
+        wheel.style.opacity = String(revealE);
+        hint.style.opacity = String(revealE);
         if (resetElapsed >= RESET_MS) {
           resetPlay = false;
           resetFrom = 0;
