@@ -808,7 +808,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const bg = bgRef.current;
     if (!body || !wheel || !hint || !names || !sub || !cubeContainer || !contentEl || !bg) return;
 
-    // The section is its own scroll container (height 100svh, content 700svh)
+    // The section is its own scroll container (height 100svh, content 10svh)
     // so the document itself never scrolls and the mobile browser bar stays
     // put. Scroll progress is read straight from the section's scrollTop.
 
@@ -1752,7 +1752,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           pointerEvents: isMobileLandscape ? "none" : undefined,
         }}
       >
-      <div style={{ height: "calc(700 * var(--svh))" }}>
+      <div style={{ height: "calc(10 * var(--svh))" }}>
         <div className="sticky top-0 min-h-[calc(var(--svh))] flex items-center">
         <div
           ref={bgRef}
