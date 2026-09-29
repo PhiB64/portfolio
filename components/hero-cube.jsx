@@ -2494,15 +2494,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
       </div>
 
       {showContact && (
-        <ContactOverlay
-          onClose={() => {
-            if (typeof window !== "undefined" && window.history?.state?.ufoContact) {
-              window.history.back();
-            } else {
+        <div className="fixed inset-0 z-[60]">
+          <ContactOverlay
+            onClose={() => {
               setShowContact(false);
-            }
-          }}
-        />
+              if (typeof window !== "undefined" && window.history?.state?.ufoContact) {
+                try { window.history.replaceState(null, "", window.location.href); } catch {}
+              }
+            }}
+          />
+        </div>
       )}
 
       {selectedProject !== null && (

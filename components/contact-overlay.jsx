@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, CheckCircle } from "lucide-react";
+import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, CheckCircle, AlertCircle } from "lucide-react";
 
 const IconGithub = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-[#00a5b0] shrink-0">
@@ -14,6 +14,10 @@ const IconLinkedin = () => (
   </svg>
 );
 
+const FORMSPREE_ENDPOINT =
+  process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT || "https://formspree.io/f/xbglwdny";
+const CONTACT_EMAIL = "philippebarbosa64@gmail.com";
+
 export function ContactOverlay({ onClose }) {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [status, setStatus] = useState("idle");
@@ -25,11 +29,10 @@ export function ContactOverlay({ onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const { name, email, message } = form;
-    const endpoint = process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT;
 
     setStatus("sending");
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(FORMSPREE_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -41,12 +44,12 @@ export function ContactOverlay({ onClose }) {
         setStatus("sent");
         return;
       }
-    } catch {}
+      console.error("Formspree a répondu", res.status, await res.text());
+    } catch (err) {
+      console.error("Échec de l'envoi à Formspree", err);
+    }
 
-    // Repli : ouvrir le client mail avec le message pré-rempli.
-    const body = encodeURIComponent(`De : ${name} (${email})\n\n${message}`);
-    window.location.href = `mailto:philippebarbosa64@gmail.com?subject=Contact portfolio – ${name}&body=${body}`;
-    setStatus("mailto");
+    setStatus("error");
   };
 
   return (
@@ -71,8 +74,8 @@ export function ContactOverlay({ onClose }) {
                 <Mail size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
                 <div>
                   <p className="text-[#64748b] text-xs tracking-widest uppercase mb-1">Email</p>
-                  <a href="mailto:philippebarbosa64@gmail.com" className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm break-all">
-                    philippebarbosa64@gmail.com
+                  <a href={`mailto:${CONTACT_EMAIL}`} className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm break-all">
+                    {CONTACT_EMAIL}
                   </a>
                 </div>
               </li>
@@ -128,19 +131,41 @@ export function ContactOverlay({ onClose }) {
           {/* Formulaire */}
           <div>
             <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">Envoyer un message</h2>
-            {status === "sent" || status === "mailto" ? (
+            {status === "sent" ? (
               <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
                 <div className="flex items-center gap-2 text-[#00a5b0] mb-3">
                   <CheckCircle size={16} />
-                  <p className="tracking-widest uppercase text-xs">
-                    {status === "sent" ? "Message envoyé" : "Message prêt"}
-                  </p>
+                  <p className="tracking-widest uppercase text-xs">Message envoyé</p>
                 </div>
                 <p className="text-[#94a3b8] leading-relaxed text-sm">
-                  {status === "sent"
-                    ? "Merci, votre message a bien été transmis. Je vous répondrai rapidement."
-                    : "Votre messagerie va s'ouvrir avec le message pré-rempli. Il ne vous reste qu'à l'envoyer."}
+                  Merci, votre message a bien été transmis. Je vous répondrai rapidement.
                 </p>
+              </div>
+            ) : status === "error" ? (
+              <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
+                <div className="flex items-center gap-2 text-[#f87171] mb-3">
+                  <AlertCircle size={16} />
+                  <p className="tracking-widest uppercase text-xs">Envoi impossible</p>
+                </div>
+                <p className="text-[#94a3b8] leading-relaxed text-sm mb-5">
+                  L&apos;envoi automatique n&apos;a pas abouti. Vous pouvez me écrire directement à{" "}
+                  <a href={`mailto:${CONTACT_EMAIL}`} className="text-[#00a5b0] hover:underline break-all">
+                    {CONTACT_EMAIL}
+                  </a>
+                  .
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const body = encodeURIComponent(`De : ${form.name} (${form.email})\n\n${form.message}`);
+                    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
+                      `Contact portfolio – ${form.name}`
+                    )}&body=${body}`;
+                  }}
+                  className="bg-[#00a5b0] text-white tracking-[0.2em] uppercase text-xs py-3 px-6 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0"
+                >
+                  Ouvrir ma messagerie
+                </button>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-5">
