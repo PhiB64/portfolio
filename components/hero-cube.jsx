@@ -1949,8 +1949,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (!st.moved) return;
       const dx = e.clientX - prevX;
       const dy = e.clientY - prevY;
-      dragOffsetRef.current.ry += -dx * 0.5;
-      dragOffsetRef.current.rx += dy * 0.3;
+      // A finger has a much larger visible travel for the same rotation than a
+      // mouse has, so the touch gains a stronger gain on both axes to feel as
+      // immediate as the pointer on desktop.
+      const sens =
+        st.pointerType === "touch" ? { ry: 0.9, rx: 0.55 } : { ry: 0.5, rx: 0.3 };
+      dragOffsetRef.current.ry += -dx * sens.ry;
+      dragOffsetRef.current.rx += dy * sens.rx;
       queueDragRender();
     };
 
@@ -1961,6 +1966,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const onTouchMove = (e) => {
       const st = dragStateRef.current;
       if (st && st.moved && st.pointerType === "touch") e.preventDefault();
+    };
+
+    // Le preventDefault ci-dessus peut, sur certains navigateurs mobiles,
+    // étouffer le pointerup synthétisé qui suit : on récupère donc la fin du
+    // geste sur les événements touch natifs pour ne jamais laisser le drag en
+    // cours (ce qui bloquerait le prochain).
+    const onTouchEnd = (e) => {
+      const t = e.changedTouches[0];
+      if (!t) return;
+      endDrag({ type: e.type, clientX: t.clientX, clientY: t.clientY });
     };
 
     const endDrag = (e) => {
@@ -2002,6 +2017,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
     zone.addEventListener("touchmove", onTouchMove, { passive: false });
+    zone.addEventListener("touchend", onTouchEnd);
+    zone.addEventListener("touchcancel", onTouchEnd);
 
     return () => {
       if (suppressTimer) clearTimeout(suppressTimer);
@@ -2011,6 +2028,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
       zone.removeEventListener("touchmove", onTouchMove);
+      zone.removeEventListener("touchend", onTouchEnd);
+      zone.removeEventListener("touchcancel", onTouchEnd);
     };
   }, [hitTestAndOpen]);
 
@@ -2213,7 +2232,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
               }
             `}</style>
           </div>
-          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
+          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => {
               const shown = zoomedFaces[i] || (skipped && (skipRevealedFaces[i] || contactDone));
               return (
