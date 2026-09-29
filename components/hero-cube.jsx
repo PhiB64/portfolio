@@ -1753,7 +1753,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }}
       >
       <div style={{ height: "calc(700 * var(--svh))" }}>
-        <div className="sticky top-0 min-h-[calc(var(--svh))] flex items-center overflow-hidden">
+        <div className="sticky top-0 min-h-[calc(var(--svh))] flex items-center">
         <div
           ref={bgRef}
           className="absolute inset-0 bg-cover bg-center"
