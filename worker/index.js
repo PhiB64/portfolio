@@ -38,7 +38,7 @@ export default {
         "api-key": env.BREVO_API_KEY,
       },
       body: JSON.stringify({
-        sender: { email: "noreply@philippebarbosa.dev", name: "Portfolio Contact" },
+        sender: { email: "philippebarbosa64@gmail.com", name: "Portfolio Contact" },
         to: [{ email: env.TO_EMAIL, name: env.TO_NAME }],
         replyTo: { email, name },
         subject: `Contact portfolio – ${name}`,

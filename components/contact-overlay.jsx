@@ -25,7 +25,7 @@ export function ContactOverlay({ onClose }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const { name, email, message } = form;
-    const endpoint = process.env.NEXT_PUBLIC_CONTACT_ENDPOINT;
+    const endpoint = process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT;
 
     setStatus("sending");
     try {
@@ -37,8 +37,7 @@ export function ContactOverlay({ onClose }) {
         },
         body: JSON.stringify({ name, email, message }),
       });
-      const data = await res.json();
-      if (res.ok && data.ok) {
+      if (res.ok) {
         setStatus("sent");
         return;
       }
