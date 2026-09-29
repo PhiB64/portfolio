@@ -56,7 +56,7 @@ const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.0005;
 // Exposition continue requise avant qu'un label de face passe du brouillage au
 // texte lisible. Cumulée par `dt` (ms), donc à augmenter pour un délai plus long.
-const LABEL_DECODE_DELAY_MS = 500;
+const LABEL_DECODE_DELAY_MS = 300;
 // Nombre d'expositions avant qu'un label de face apparaisse et se mette à
 // brouiller. Constante partagée car trois sites en dépendent (affichage du
 // label, clic sur la face, levée du pin) et doivent rester alignés.
