@@ -103,6 +103,11 @@ const SKIP_LABEL_DECODE_MS = 550;
 // Fondu de sortie avant la rotation suivante : sans lui le texte se rétrécit en
 // perspective pendant le tour, ce qui se lit comme un redimensionnement.
 const SKIP_LABEL_EXIT_MS = 200;
+// Instant (dans un hold) où le décodage est terminé : apparition, phase codée,
+// puis résolution. C'est exactement là que l'onglet de la face exposée se rend
+// visible pendant le skip — jamais avant, pour qu'il accompagne le label lisible.
+const SKIP_LABEL_READY_MS =
+  SKIP_LABEL_DELAY_MS + SKIP_LABEL_CIPHER_MS + SKIP_LABEL_DECODE_MS;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -1386,6 +1391,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           const SEG = SKIP_HOLD_MS + SKIP_TURN_MS;
           let galP;
           let labelIdx = -1;
+          let labelReady = false;
           if (galT < lead) {
             galP = startRot + (galleryRot[0] - startRot) * smoothstep(galT / lead);
           } else {
@@ -1399,6 +1405,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
               // while the cube rotates (which reads as the text shrinking).
               const labelOn = loc >= SKIP_LABEL_DELAY_MS && loc < SKIP_HOLD_MS - SKIP_LABEL_EXIT_MS;
               labelIdx = labelOn ? Math.round(galleryRot[j] * 12) % 6 : -1;
+              // Le label n'est « montrable » qu'une fois son décodage terminé :
+              // l'onglet correspondant ne se révèle qu'à ce moment précis.
+              labelReady = labelOn && loc >= SKIP_LABEL_READY_MS;
             } else if (j < galleryRot.length - 1) {
               const tt = smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS));
               galP = galleryRot[j] + (galleryRot[j + 1] - galleryRot[j]) * tt;
@@ -1407,7 +1416,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
               galP = galleryRot[j];
             }
           }
-          if (labelIdx >= 0 && !skipRevealedFacesRef.current[labelIdx]) {
+          if (labelReady && !skipRevealedFacesRef.current[labelIdx]) {
             const next = [...skipRevealedFacesRef.current];
             next[labelIdx] = true;
             skipRevealedFacesRef.current = next;
@@ -1921,16 +1930,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
       st.lastY = e.clientY;
       const distX = e.clientX - st.startX;
       const distY = e.clientY - st.startY;
-      // On touch a vertical sweep is the page scroll itself, not a cube drag:
-      // leave it untouched (no rotation, no click suppression) so a tap that
-      // drifts a finger vertically is never swallowed. Only a clearly
-      // horizontal sweep rotates the cube.
-      if (st.pointerType === "touch" && Math.abs(distY) > Math.abs(distX)) return;
-      // Touch gets a larger threshold: a finger drifts while tapping, and a
-      // tap that drifted beyond a small threshold used to be counted as a
-      // drag, killing the click and forcing the user to try again.
-      const threshold = st.pointerType === "touch" ? 18 : 8;
-      if (!st.moved && Math.hypot(distX, distY) > threshold) {
+      // On touch, a vertical sweep is the page scroll itself, not a cube drag:
+      // as long as the gesture has not engaged on the cube it stays the scroll,
+      // so a tap that drifts a finger vertically is never swallowed. The drag
+      // intent is only locked once a mostly-horizontal sweep crosses the
+      // threshold; from then on the finger rotates the cube on both axes exactly
+      // like the mouse does on desktop.
+      if (st.pointerType === "touch" && !st.moved) {
+        if (Math.abs(distY) > Math.abs(distX)) return;
+        if (Math.hypot(distX, distY) > 18) {
+          st.moved = true;
+          tapPointRef.current = null;
+        }
+      } else if (!st.moved && Math.hypot(distX, distY) > 8) {
         st.moved = true;
         tapPointRef.current = null;
       }
@@ -1938,10 +1950,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const dx = e.clientX - prevX;
       const dy = e.clientY - prevY;
       dragOffsetRef.current.ry += -dx * 0.5;
-      if (st.pointerType !== "touch") {
-        dragOffsetRef.current.rx += dy * 0.3;
-      }
+      dragOffsetRef.current.rx += dy * 0.3;
       queueDragRender();
+    };
+
+    // Une fois le drag tactile engagé sur le cube, on coupe le scroll natif de
+    // la page : l'essentiel du geste va à la rotation, comme le cliqué-glissé
+    // souris. Aucun preventDefault tant que l'intention n'est pas confirmée,
+    // donc un balayage vertical reste le scroll de la page.
+    const onTouchMove = (e) => {
+      const st = dragStateRef.current;
+      if (st && st.moved && st.pointerType === "touch") e.preventDefault();
     };
 
     const endDrag = (e) => {
@@ -1982,6 +2001,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
+    zone.addEventListener("touchmove", onTouchMove, { passive: false });
 
     return () => {
       if (suppressTimer) clearTimeout(suppressTimer);
@@ -1990,6 +2010,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
+      zone.removeEventListener("touchmove", onTouchMove);
     };
   }, [hitTestAndOpen]);
 
@@ -2192,7 +2213,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
               }
             `}</style>
           </div>
-          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
+          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-[auto_auto_auto] gap-2 px-2 max-w-[88vw] sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
             {PROJECT_LINKS.map((link, i) => {
               const shown = zoomedFaces[i] || (skipped && (skipRevealedFaces[i] || contactDone));
               return (
