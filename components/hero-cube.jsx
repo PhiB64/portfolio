@@ -2137,27 +2137,37 @@ export function HeroCube({ title, subtitle, images = [] }) {
             >
               CONTACT
             </button>
-            <button
-              onClick={() => goToStartRef.current?.()}
-              aria-label="Revenir au début de l'animation"
-              className="justify-self-center whitespace-nowrap bg-[#0a0f1c] border border-[#33d1c8] text-[#33d1c8] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs hover:bg-[#33d1c8]/10 cursor-pointer"
-              style={{
-                opacity: showReturn ? 1 : 0,
-                transform: showReturn ? "translateY(0)" : "translateY(-15px)",
-                transition: "opacity 0.5s ease, transform 0.5s ease",
-                pointerEvents: showReturn ? "auto" : "none",
-              }}
-            >
-              RETOUR
-            </button>
           </nav>
           <button
-            onClick={skipIntro}
-            aria-label="Passer l'animation"
-            className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs cursor-pointer transition-opacity duration-500 hover:text-white"
-            style={contactDone || skipped ? { opacity: 0, pointerEvents: "none" } : { opacity: 1 }}
+            onClick={showReturn ? () => goToStartRef.current?.() : skipIntro}
+            aria-label={showReturn ? "Revenir au début de l'animation" : "Passer l'animation"}
+            className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] transition-all duration-500 cursor-pointer hover:text-white rounded-full flex items-center justify-center"
+            style={{
+              opacity: showReturn || (!contactDone && !skipped) ? 1 : 0,
+              pointerEvents: showReturn || (!contactDone && !skipped) ? "auto" : "none",
+            }}
           >
-            SKIP
+            {showReturn ? (
+              <span className="h-10 w-10 sm:h-11 sm:w-11 rounded-full flex items-center justify-center border border-[#00a5b0] bg-[#0a0f1c]/70 hover:bg-[#00a5b0]/10">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M19 12H5" />
+                  <path d="M12 19l-7-7 7-7" />
+                </svg>
+              </span>
+            ) : (
+              <span className="tracking-[0.2em] uppercase text-[11px] sm:text-xs px-4 py-2">
+                SKIP
+              </span>
+            )}
           </button>
           <button
             onClick={onContactClick}
