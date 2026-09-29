@@ -25,6 +25,16 @@
   --secondary-foreground: #ffffff;
   --muted: #1e293b;
   --muted-foreground: #94a3b8;
+  /* Hauteur de la section = petit viewport (barre navigateur dépliée). Sans
+     `svh`, la hauteur du conteneur de scroll tomberait à `auto` et la section
+     ne défilerait plus du tout : fallback `100vh`. */
+  --svh: 100svh;
+}
+
+@supports not (height: 1svh) {
+  :root {
+    --svh: 100vh;
+  }
 }
 
 html, body {

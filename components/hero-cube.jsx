@@ -779,13 +779,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       history.scrollRestoration = "manual";
     }
 
-    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (prefersReducedMotion) {
-      const el = sectionRef.current;
-      if (el) el.scrollTop = 0;
-      return;
-    }
-
+    // Max `prefers-reduced-motion` : ne pas court-circuiter l'effet. Le défilement
+    // est un embarquement piloté par l'utilisateur (scrub), pas une animation
+    // autonome : si on retourne ici, ni le listener de scroll ni `tickRef` ne
+    // sont installés, la section reste figée sur la carte d'intro et le bouton
+    // SKIP devient totalement inerte. On laisse donc toujours le système en
+    // place ; seules les animations autonomes (skip, autoplay) sont doucement
+    // plus graduées.
     const restoreP = restorePRef.current;
     restorePRef.current = null;
 
@@ -1698,12 +1698,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   const skipIntro = useCallback(() => {
     if (skipRef.current) return;
-    // `skipRef` n'est remis à `false` qu'à l'intérieur de la boucle `tick`
-    // (ligne ~1275). Si l'effet n'a jamais installé `tick`, verrouiller ce
-    // drapeau ici le laisserait à `true` pour toujours : `sync()` court-circuite
-    // alors sur `targetP = 1` et la section ne répond plus à rien.
-    // On refuse donc de s'engager si la boucle n'est pas vivante.
-    if (typeof tickRef.current !== "function") return;
     skipRef.current = true;
     // Unlock everything: the pin disappears and the timeline head can reach the
     // end of the sequence (names, links and CONTACT reveal) during the sweep.
@@ -1722,7 +1716,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
     if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
     stopGalleryScramble();
     lastGalleryLabelTextRef.current = "";
-    if (typeof tickRef.current === "function") tickRef.current();
+    if (typeof tickRef.current === "function") {
+      tickRef.current();
+      return;
+    }
+    // La boucle d'animation n'est pas installée (effet jamais passé, JS bloqué
+    // sur ce device…) : SKIP ne doit aucunement rester un bouton silencieusement
+    // inerte. On force alors la fin du défilement en natif pour dévoiler les
+    // liens de la fin et sortir de l'intro.
+    const el = sectionRef.current;
+    if (el && el.scrollHeight > el.offsetHeight) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, []);
 
   const onContactClick = () => {
@@ -1740,15 +1745,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
     <>
       <section
         ref={sectionRef}
-        className="relative z-10 h-[100svh] overflow-y-auto overflow-x-hidden scroll-none"
+        className="relative z-10 h-[calc(var(--svh))] overflow-y-auto overflow-x-hidden scroll-none"
         aria-hidden={isMobileLandscape}
         style={{
           clipPath: "inset(0)",
           pointerEvents: isMobileLandscape ? "none" : undefined,
         }}
       >
-      <div style={{ height: "700svh" }}>
-        <div className="sticky top-0 min-h-[100svh] flex items-center overflow-hidden">
+      <div style={{ height: "calc(700 * var(--svh))" }}>
+        <div className="sticky top-0 min-h-[calc(var(--svh))] flex items-center overflow-hidden">
         <div
           ref={bgRef}
           className="absolute inset-0 bg-cover bg-center"
@@ -1936,7 +1941,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             ref={contentRef}
             className="relative mx-auto w-full opacity-0"
           >
-            <div className="min-h-[100svh] flex items-center justify-center">
+            <div className="min-h-[calc(var(--svh))] flex items-center justify-center">
               <div ref={cubeContainerRef} className="relative shrink-0" style={{ width: 300, height: 300, transform: `scale(${cubeScale})`, transformOrigin: "center" }}>
                 <div style={{ perspective: 1200, perspectiveOrigin: "50% 50%" }}>
                   <div
@@ -2121,7 +2126,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
       {isMobileLandscape && (
         <div
-          className="fixed inset-0 z-[100] flex min-h-[100svh] items-center justify-center bg-[#0a0f1c] px-8 text-center"
+          className="fixed inset-0 z-[100] flex min-h-[calc(var(--svh))] items-center justify-center bg-[#0a0f1c] px-8 text-center"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="orientation-lock-title"
