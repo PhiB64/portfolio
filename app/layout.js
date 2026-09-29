@@ -36,7 +36,7 @@ export const metadata = {
     type: "website",
     images: [
       {
-        url: "/icon.webp",
+        url: `${SITE_ROOT}/icon.webp`,
         width: 512,
         height: 512,
         alt: "Logo de Philippe Barbosa",
@@ -47,11 +47,11 @@ export const metadata = {
     card: "summary",
     title: TITLE,
     description: DESCRIPTION,
-    images: ["/icon.webp"],
+    images: [`${SITE_ROOT}/icon.webp`],
   },
   icons: {
-    icon: [{ url: "/favicon.webp", sizes: "any", type: "image/webp" }],
-    apple: "/favicon.webp",
+    icon: [{ url: `${SITE_ROOT}/favicon.webp`, sizes: "any", type: "image/webp" }],
+    apple: `${SITE_ROOT}/favicon.webp`,
   },
   appleWebApp: {
     capable: true,

@@ -1,13 +1,13 @@
 import { HeroCube } from "../components/hero-cube";
 
-// Stable reference: avoids re-running the animation useEffect on every re-render.
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const HERO_IMAGES = [
-  "/web.webm",
-  "/react.webp",
-  "/backend.webm",
-  "/database.webp",
-  "/mobile.webm",
-  "/projets.webp",
+  `${BASE}/web.webm`,
+  `${BASE}/react.webp`,
+  `${BASE}/backend.webm`,
+  `${BASE}/database.webp`,
+  `${BASE}/mobile.webm`,
+  `${BASE}/projets.webp`,
 ];
 
 export default function Home() {
