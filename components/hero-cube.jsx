@@ -2151,16 +2151,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
               <span className="h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center">
                 <svg
                   viewBox="0 0 24 24"
-                  className="h-6 w-6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                  className="h-6 w-6 sm:h-7 sm:w-7"
+                  fill="currentColor"
                   aria-hidden="true"
                 >
-                  <path d="M19 12H5" />
-                  <path d="M12 19l-7-7 7-7" />
+                  <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
                 </svg>
               </span>
             ) : (
