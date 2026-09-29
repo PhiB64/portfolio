@@ -1039,21 +1039,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let resetPlay = false;
     let resetFrom = 0;
     let resetElapsed = 0;
-    const RESET_MS = 1200;
-    // Fenêtre de réapparition douce de la « souris » (molette) et de l'invite
-    // « SCROLL DOWN » pendant la fin du sweep de retour. Sans elle, le rescrub
-    // de l'intro écrase les 200 ms de fondu de la piste en ~35 ms réels, et
-    // les deux éléments « pop » brutalement dans les dernières millisecondes.
-    const RESET_REVEAL_MS = 800;
+    const RESET_MS = 1800;
     // Duration de disparition des noms au début du retour : ils doivent quitter
     // l'écran (fondu + glissement vers le bas) avant que la ligne de fin
     // d'animation ne se transforme en « souris ».
     const RESET_NAMES_MS = 350;
-    // Morphing du retour : la ligne (carré aplati) se redéploie d'abord en carré
-    // plein, puis ce carré glisse sur la silhouette de la « souris » pendant que
-    // la molette refait son apparition en son centre.
-    const RESET_LINE_GROW_MS = 300;
-    const RESET_MORPH_MS = 400;
+    // Morphing du retour : une fois les textes partis, la ligne (carré aplati)
+    // se redéploie d'abord en carré plein, puis ce carré glisse lentement sur la
+    // silhouette de la « souris » pendant que la molette refait son apparition.
+    const RESET_LINE_GROW_MS = 350;
+    const RESET_MORPH_MS = 650;
+    // Fin du morphing, calculée à partir des phases qui le précèdent. L'invite
+    // « SCROLL DOWN » ne quitte le fondu de la piste qu'après ce point, pour
+    // n'apparaître qu'une fois la « souris » entièrement reformée. La fenêtre
+    // qui accompagne la fin du sweep de retour (RESET_REVEAL_MS) démarre donc
+    // exactement ici et s'étend jusqu'au bout du retour.
+    const RESET_MORPH_END_MS =
+      RESET_NAMES_MS + RESET_LINE_GROW_MS + RESET_MORPH_MS;
+    const RESET_REVEAL_MS = RESET_MS - RESET_MORPH_END_MS;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
     // computed from where the cube is when the sweep starts.
     let galleryRot = [];
