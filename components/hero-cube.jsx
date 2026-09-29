@@ -2148,10 +2148,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }}
           >
             {showReturn ? (
-              <span className="h-10 w-10 sm:h-11 sm:w-11 rounded-full flex items-center justify-center border border-[#00a5b0] bg-[#0a0f1c]/70 hover:bg-[#00a5b0]/10">
+              <span className="h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center">
                 <svg
                   viewBox="0 0 24 24"
-                  className="h-5 w-5"
+                  className="h-6 w-6"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={2}
