@@ -214,6 +214,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // tant qu'elle court, un éventuel scroll ne démarre pas encore le fondu de
   // fin (la tête de lecture reste retenue à CUBE_END).
   const exitArmUntilRef = useRef(0);
+  // True après un clic pendant le reverse (médias repliés) : le fondu de fin
+  // est neutralisé le temps que la face et le fond se révèlent en entier, sans
+  // être éteints par la fenêtre de sortie. Remis à false au prochain scroll.
+  const revealOverrideRef = useRef(false);
   const tickRef = useRef(null);
   const clickZoneRef = useRef(null);
   const namesRef = useRef(null);
@@ -637,6 +641,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   }, []);
 
   const handleFaceClick = useCallback((i) => {
+    // Clic pendant le reverse (médias repliés après la fin) : on relève le
+    // repli et on affiche aussitôt la face + le fond, animations sonar
+    // comprises, même si la position de scroll est encore dans la fenêtre de
+    // sortie. `revealOverrideRef` neutralise le fondu jusqu'au prochain scroll.
+    if (mediaRetractedRef.current) revealOverrideRef.current = true;
     unretractMedia();
     setZoomedFace(i);
     setZoomedFaces((prev) => {
@@ -1062,6 +1071,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         else return;
       }
       targetP = real;
+      // Tout scroll utilisateur annule l'override de révélation : le fondu de
+      // fin peut reprendre la main dès que la position le redemande.
+      revealOverrideRef.current = false;
       // Soft lock at the labelled-face pin position until the user clicks it.
       // A forced scrollTo on every scroll event fights the finger gesture on
       // mobile and visibly freezes the page; nudging back at most every 100ms
@@ -1517,6 +1529,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // Between CUBE_END and SPIN_START the six visuals plus the background
         // fade out together, over the same EXIT_MS window. Fully reversible.
         const exitK = unlocked ? Math.min(1, Math.max(0, (tlP - CUBE_END) / (SPIN_START - CUBE_END))) : 0;
+        // Après un clic en reverse, la révélation prime : le fondu de fin est
+        // suspendu le temps que la face et le fond s'affichent en entier.
+        const exitActive = exitK > 0 && !revealOverrideRef.current;
         for (let i = 0; i < 6; i++) {
           const cached = faceCache[i];
           if (!cached) continue;
@@ -1542,7 +1557,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.webkitMaskImage = "";
             }
             faceEl.style.filter = `brightness(${brightness})`;
-          } else if (exitK > 0) {
+          } else if (exitActive) {
             // Sortie : un fondu général — les six visuels, la vidéo et le fond
             // s'éteignent d'un même geste sur toute la fenêtre (EXIT_MS),
             // piloté par le scroll (totalement réversible). À l'aboutissement,
