@@ -1930,48 +1930,38 @@ export function HeroCube({ title, subtitle, images = [] }) {
       st.lastY = e.clientY;
       const distX = e.clientX - st.startX;
       const distY = e.clientY - st.startY;
-      // On touch, a vertical sweep is the page scroll itself, not a cube drag:
-      // as long as the gesture has not engaged on the cube it stays the scroll,
-      // so a tap that drifts a finger vertically is never swallowed. The drag
-      // intent is only locked once a mostly-horizontal sweep crosses the
-      // threshold; from then on the finger rotates the cube on both axes exactly
-      // like the mouse does on desktop.
-      if (st.pointerType === "touch" && !st.moved) {
-        if (Math.abs(distY) > Math.abs(distX)) return;
-        if (Math.hypot(distX, distY) > 18) {
-          st.moved = true;
-          tapPointRef.current = null;
-        }
-      } else if (!st.moved && Math.hypot(distX, distY) > 8) {
+      // Le cube interdit le pan natif (`touch-action: none` sur sa zone), donc
+      // le doigt fait tourner le cube librement sur SES DEUX AXES dès le premier
+      // léger mouvement : plus de verrou horizontal, et surtout plus de
+      // pointercancel du navigateur qui coupait la rotation au milieu du geste.
+      // Le seuil minuscule garde le tap (sans déplacement) pour le clic de face.
+      if (!st.moved && Math.hypot(distX, distY) > 10) {
         st.moved = true;
         tapPointRef.current = null;
       }
       if (!st.moved) return;
       const dx = e.clientX - prevX;
       const dy = e.clientY - prevY;
-      // A finger has a much larger visible travel for the same rotation than a
-      // mouse has, so the touch gains a stronger gain on both axes to feel as
-      // immediate as the pointer on desktop.
+      // Un doigt couvre une plus grande distance pour la même rotation qu'une
+      // souris : gain plus fort sur les deux axes pour rester aussi direct.
       const sens =
-        st.pointerType === "touch" ? { ry: 0.9, rx: 0.55 } : { ry: 0.5, rx: 0.3 };
+        st.pointerType === "touch" ? { ry: 1.0, rx: 0.6 } : { ry: 0.5, rx: 0.3 };
       dragOffsetRef.current.ry += -dx * sens.ry;
       dragOffsetRef.current.rx += dy * sens.rx;
       queueDragRender();
     };
 
-    // Une fois le drag tactile engagé sur le cube, on coupe le scroll natif de
-    // la page : l'essentiel du geste va à la rotation, comme le cliqué-glissé
-    // souris. Aucun preventDefault tant que l'intention n'est pas confirmée,
-    // donc un balayage vertical reste le scroll de la page.
+    // Le preventDefault ci-dessus ne sert plus que de ceinture-bretelles :
+    // `touch-action: none` suffit normalement à empêcher le navigateur de
+    // prendre le geste pendant un drag déjà engagé sur la zone.
     const onTouchMove = (e) => {
       const st = dragStateRef.current;
       if (st && st.moved && st.pointerType === "touch") e.preventDefault();
     };
 
-    // Le preventDefault ci-dessus peut, sur certains navigateurs mobiles,
-    // étouffer le pointerup synthétisé qui suit : on récupère donc la fin du
-    // geste sur les événements touch natifs pour ne jamais laisser le drag en
-    // cours (ce qui bloquerait le prochain).
+    // Même en filet : si un navigateur étouffait quand même le pointerup
+    // synthétisé, la fin du geste est récupérée sur les événements touch natifs
+    // pour ne jamais laisser un drag en cours bloquer le suivant.
     const onTouchEnd = (e) => {
       const t = e.changedTouches[0];
       if (!t) return;
@@ -2423,7 +2413,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                   ref={clickZoneRef}
                   onClick={handleCubeClick}
                   className="absolute cursor-grab"
-                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60, userSelect: "none", touchAction: "manipulation", WebkitUserSelect: "none" }}
+                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60, userSelect: "none", touchAction: "none", WebkitUserSelect: "none" }}
                 />
               </div>
             </div>
