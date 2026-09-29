@@ -156,6 +156,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // pour que le crossfade carré→cube reste aligné sur tous les formats.
   const [squareSize, setSquareSize] = useState(343);
   const [skipped, setSkipped] = useState(false);
+  // Le bouton RETOUR n'apparaît qu'une fois l'animation terminée (fin atteinte).
+  // Le retour au début n'est alors possible que par ce bouton : le scroll
+  // inverse est interdit partout.
+  const [showReturn, setShowReturn] = useState(false);
+  const returnShownRef = useRef(false);
+  // Fonction de reset complète, instanciée dans l'effet d'animation (elle a
+  // besoin de la timeline et du playhead) et exposée au bouton RETOUR.
+  const goToStartRef = useRef(null);
   const [skipRevealedFaces, setSkipRevealedFaces] = useState([false, false, false, false, false, false]);
   // Une fois la séquence finale jouée (au scroll ou via SKIP), le cube repasse
   // en mode « exploration post-skip » : le scroll inverse rejoue un cube nu
@@ -1002,6 +1010,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const SKIP_FINALE_MS = 3000;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
+    // Le scroll inverse est interdit : `maxReached` est le point le plus loin
+    // jamais atteint par l'utilisateur, et la tête ne peut pas repasser derrière
+    // (sauf pendant le sweep programmé de reset, `resetPlay`).
+    let maxReached = restoreP !== null ? restoreP : 0;
+    // Fondu de retour au début : un balayage programmé de CUBE_END vers 0,
+    // pendant lequel le verrou anti-reverse est suspendu.
+    let resetPlay = false;
+    let resetFrom = 0;
+    let resetElapsed = 0;
+    const RESET_MS = 1200;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
     // computed from where the cube is when the sweep starts.
     let galleryRot = [];
@@ -1070,6 +1088,27 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (Math.abs(real - currentP) > 0.02) autoplay = false;
         else return;
       }
+      // Pendant le sweep de reset, le scroll est piloté par le code : rien à verrouiller.
+      if (resetPlay) {
+        targetP = currentP;
+        return;
+      }
+      // Scroll inverse interdit : si la page essaie de reculer derrière le mur —
+      // le plus loin déjà atteint (`maxReached`) ou la tête de lecture courante
+      // (`currentP`, quand l'autoplay le sweep l'ont fait avancer) — on ramène
+      // doucement le scroll sur ce point (même astuce de nudge que le pin,
+      // throttlée à 100 ms).
+      const reverseWall = Math.max(maxReached, currentP);
+      if (real + SNAP_THRESHOLD < reverseWall) {
+        const nowMs = Date.now();
+        if (nowMs - lastPinFix > 100) {
+          lastPinFix = nowMs;
+          el.scrollTo({ top: reverseWall * sb, behavior: "smooth" });
+        }
+        targetP = reverseWall;
+        revealOverrideRef.current = false;
+        return;
+      }
       targetP = real;
       // Tout scroll utilisateur annule l'override de révélation : le fondu de
       // fin peut reprendre la main dès que la position le redemande.
@@ -1101,6 +1140,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
         targetP = CUBE_END;
       }
+      // Le verrou anti-reverse suit la progression *effective* (après pin et
+      // grâce) : on ne mémorise que ce que la scène a réellement affiché.
+      maxReached = Math.max(maxReached, targetP, currentP);
     };
 
     const tick = (now) => {
@@ -1115,6 +1157,31 @@ export function HeroCube({ title, subtitle, images = [] }) {
         : 16.67;
       lastTickTime = t;
       const diff = targetP - currentP;
+
+      // Sweep de retour au début (bouton RETOUR) : balayage programmé de
+      // CUBE_END vers 0, pendant lequel toute la logique d'intro/clic est gelée.
+      if (resetPlay) {
+        resetElapsed += dt;
+        const k = Math.min(1, resetElapsed / RESET_MS);
+        currentP = resetFrom * (1 - k);
+        targetP = currentP;
+        let sbReset = el.scrollHeight - el.offsetHeight;
+        if (sbReset > 0) el.scrollTop = currentP * sbReset;
+        if (resetElapsed >= RESET_MS) {
+          resetPlay = false;
+          resetFrom = 0;
+          resetElapsed = 0;
+          currentP = 0;
+          targetP = 0;
+          maxReached = 0;
+          if (sbReset > 0) el.scrollTop = 0;
+          mediaRetractedRef.current = false;
+          setMediaRetracted(false);
+          setShowReturn(false);
+        }
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
 
       // Le brouillage apparaît à la seconde visibilité : le label reste « codé »
       // pendant LABEL_DECODE_DELAY_MS d'exposition, puis se résout. À 0, le
@@ -1131,7 +1198,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // Tant qu'une face attend son décodage, la boucle doit rester vivante :
       // sans elle, le cube à l'arrêt se parke et le délai n'aboutirait jamais.
       let pendingDecode = false;
-      if (!skipActiveRef.current) {
+      if (!skipActiveRef.current && !resetPlay) {
         for (let i = 0; i < 6; i++) {
           const nowVisible = isFaceVisible(
             FACE_NORMALS[i][0],
@@ -1413,8 +1480,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // forward and backward and can never be skipped.
       const tlP = unlocked ? p : Math.min(p, CUBE_END);
       tl.seek(tlP * TOTAL);
+      // L'animation est terminée dès que les noms sont levés : le bouton RETOUR
+      // (seul chemin de retour, le scroll inverse étant interdit) apparaît alors.
+      if (!returnShownRef.current && unlocked && tlP >= NAMES_END && !resetPlay) {
+        returnShownRef.current = true;
+        setShowReturn(true);
+      }
       facesVisibleRef.current = tlP < SPIN_START;
-      cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START;
+      // Le drag manuel est inactif pendant le sweep de reset.
+      cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START && !resetPlay;
 
       // La fin est atteinte dès que les noms sont levés — que ce soit par
       // l'autoplay, le sweep de skip ou un scroll manuel jusqu'au bout. On
@@ -1633,6 +1707,75 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
 
     tickRef.current = tick;
+
+    // Retour au début de l'animation (bouton RETOUR) : arrête tout balayage en
+    // cours, remet l'état à neuf puis balaie CUBE_END → 0, revisitant l'intro en
+    // sens inverse pour revenir proprement au point de départ.
+    goToStartRef.current = () => {
+      if (resetPlay) return;
+      autoplay = false;
+      skipRef.current = false;
+      skipActiveRef.current = false;
+      skipLate = false;
+      skipFoldRef.current = false;
+      skipFacesHiddenRef.current = false;
+      clickStackRef.current = [];
+      allClickedRef.current = false;
+      wasUnlockedRef.current = false;
+      allSeenTwiceRef.current = false;
+      revealOverrideRef.current = false;
+      exitArmUntilRef.current = 0;
+      returnShownRef.current = false;
+      setShowReturn(false);
+      faceVisibilityCountRef.current = [0, 0, 0, 0, 0, 0];
+      faceExposureElapsedRef.current = [0, 0, 0, 0, 0, 0];
+      faceWasVisibleRef.current = [false, false, false, false, false, false];
+      faceScrambleStateRef.current = ["none", "none", "none", "none", "none", "none"];
+      labelPinPRef.current = null;
+      contactTabRevealedRef.current = false;
+      mediaRetractedRef.current = false;
+      setMediaRetracted(false);
+      setZoomedFace(-1);
+      setZoomedFaces([false, false, false, false, false, false]);
+      setContactDone(false);
+      setSkipped(false);
+      skipRevealedFacesRef.current = [false, false, false, false, false, false];
+      setSkipRevealedFaces([false, false, false, false, false, false]);
+      dragOffsetRef.current = { rx: 0, ry: 0 };
+      spinFromRef.current = null;
+      bgResetRef.current = true;
+      bgBaseRef.current = false;
+      lastWireRotRef.current = { rx: Infinity, ry: Infinity };
+      for (let i = 0; i < 6; i++) {
+        if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
+        stopFaceScramble(i);
+      }
+      if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
+      stopGalleryScramble();
+      lastGalleryLabelTextRef.current = "";
+      if (bgSonarRef.current) {
+        bgSonarRef.current.anime?.pause();
+        bgSonarRef.current.mask.remove();
+        bgSonarRef.current.ring.remove();
+        window.clearTimeout(bgSonarRef.current.timeout);
+        bgSonarRef.current = null;
+      }
+      Object.entries(faceSonarRef.current).forEach(([, s]) => {
+        s?.anime?.pause();
+        s?.layer?.mask?.remove();
+      });
+      faceSonarRef.current = {};
+      resetBackground();
+      resetPlay = true;
+      resetFrom = CUBE_END;
+      resetElapsed = 0;
+      maxReached = CUBE_END;
+      currentP = CUBE_END;
+      targetP = CUBE_END;
+      const sbReset = el.scrollHeight - el.offsetHeight;
+      if (sbReset > 0) el.scrollTop = currentP * sbReset;
+      if (!rafId) rafId = requestAnimationFrame(tick);
+    };
 
     const onScroll = () => {
       sync();
@@ -1993,6 +2136,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
               style={contactBtnStyle}
             >
               CONTACT
+            </button>
+            <button
+              onClick={() => goToStartRef.current?.()}
+              aria-label="Revenir au début de l'animation"
+              className="justify-self-center whitespace-nowrap bg-[#0a0f1c] border border-[#33d1c8] text-[#33d1c8] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-[11px] sm:text-xs hover:bg-[#33d1c8]/10 cursor-pointer"
+              style={{
+                opacity: showReturn ? 1 : 0,
+                transform: showReturn ? "translateY(0)" : "translateY(-15px)",
+                transition: "opacity 0.5s ease, transform 0.5s ease",
+                pointerEvents: showReturn ? "auto" : "none",
+              }}
+            >
+              RETOUR
             </button>
           </nav>
           <button
