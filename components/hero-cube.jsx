@@ -69,6 +69,10 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.0005;
+// Durée du fondu qui ramène l'offset de rotation du drag à zéro quand le scroll
+// reprend : assez court pour « dé-poser » le cube vite, assez long pour ne pas
+// sauter d'un coup.
+const DRAG_EASE_MS = 450;
 // Exposition requise avant qu'un label de face passe du brouillage au texte
 // lisible. Cumulée par `dt` (ms) ; 0 = décodage immédiat dès l'exposition.
 const LABEL_DECODE_DELAY_MS = 0;
@@ -267,6 +271,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const allSeenTwiceRef = useRef(false);
   // Rotation added by the user's direct drag, layered over the scroll-driven one.
   const dragOffsetRef = useRef({ rx: 0, ry: 0 });
+  // Quand le scroll reprend après un drag, l'offset s'estompe vers zéro pour
+  // redonner la main à la piste : `dragEaseResetRef` arme le fondu, qui se
+  // déroule dans `tick` pendant le défilement.
+  const dragEaseResetRef = useRef(false);
+  const dragEaseStartRef = useRef(0);
   // Active pointer-drag session: { startX, startY, lastX, lastY, pointerType, moved }.
   const dragStateRef = useRef(null);
   // True while the end-sequence spin animation is playing (drag is locked then).
@@ -1152,6 +1161,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
         return;
       }
       targetP = real;
+      // Une reprise du scroll recentre la rotation laissée par un drag : la
+      // piste redonne la main, l'offset s'éteint en fondu dans `tick` pendant
+      // le défilement, faces et labels se réalignent.
+      if (
+        !dragEaseResetRef.current &&
+        (dragOffsetRef.current.rx !== 0 || dragOffsetRef.current.ry !== 0)
+      ) {
+        dragEaseResetRef.current = true;
+        dragEaseStartRef.current = performance.now();
+      }
       // Tout scroll utilisateur annule l'override de révélation : le fondu de
       // fin peut reprendre la main dès que la position le redemande.
       revealOverrideRef.current = false;
@@ -1637,6 +1656,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
         dragRx *= ease;
         dragRy *= ease;
       }
+      // Reprise du scroll après un drag : l'offset de rotation s'estompe vers
+      // zéro pendant le défilement pour réaligner faces et labels sur la piste.
+      if (dragEaseResetRef.current) {
+        const k = Math.min(
+          1,
+          Math.max(0, (performance.now() - dragEaseStartRef.current) / DRAG_EASE_MS),
+        );
+        const ease = 1 - k * k * (3 - 2 * k);
+        dragRx *= ease;
+        dragRy *= ease;
+        if (k >= 1) {
+          dragEaseResetRef.current = false;
+          dragOffsetRef.current = { rx: 0, ry: 0 };
+        }
+      }
       if (tlP > SPIN_START) {
         const kSpin = Math.min(1, Math.max(0, (tlP - SPIN_START) / (SPIN_END - SPIN_START)));
         const fade = 1 - kSpin * kSpin * (3 - 2 * kSpin);
@@ -1845,6 +1879,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       skipRevealedFacesRef.current = [false, false, false, false, false, false];
       setSkipRevealedFaces([false, false, false, false, false, false]);
       dragOffsetRef.current = { rx: 0, ry: 0 };
+      dragEaseResetRef.current = false;
+      dragEaseStartRef.current = 0;
       spinFromRef.current = null;
       bgResetRef.current = true;
       bgBaseRef.current = false;
