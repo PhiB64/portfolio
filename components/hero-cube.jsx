@@ -1026,6 +1026,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // de l'intro écrase les 200 ms de fondu de la piste en ~35 ms réels, et
     // les deux éléments « pop » brutalement dans les dernières millisecondes.
     const RESET_REVEAL_MS = 800;
+    // Durée de disparition des noms au début du retour : ils doivent quitter
+    // l'écran (fondu + glissement vers le bas) avant la réapparition de la
+    // « souris » et de l'invite « SCROLL DOWN ».
+    const RESET_NAMES_MS = 350;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
     // computed from where the cube is when the sweep starts.
     let galleryRot = [];
@@ -1173,6 +1177,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
         targetP = currentP;
         let sbReset = el.scrollHeight - el.offsetHeight;
         if (sbReset > 0) el.scrollTop = currentP * sbReset;
+        // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
+        // dès le début du retour (fondu + glissement vers le bas), avant que la
+        // souris et le « SCROLL DOWN » ne refassent leur apparition plus bas.
+        const namesK = Math.min(1, resetElapsed / RESET_NAMES_MS);
+        const namesE = namesK * namesK * (3 - 2 * namesK);
+        names.style.opacity = String(1 - namesE);
+        sub.style.opacity = String(1 - namesE);
+        names.style.transform = `translateY(${70 * namesE}px)`;
+        sub.style.transform = `translateY(${-70 * namesE}px)`;
         // Réapparition en fondu de la souris et du « SCROLL DOWN » sur la
         // dernière portion du retour, indépendamment du rescrub de la piste.
         const revealK = Math.max(
@@ -1190,6 +1203,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
           targetP = 0;
           maxReached = 0;
           if (sbReset > 0) el.scrollTop = 0;
+          // Les noms repartent masqués (translateY bas) mais visibles pour la
+          // prochaine montée : la piste n'agit pas sur leur opacité.
+          names.style.opacity = "1";
+          sub.style.opacity = "1";
           mediaRetractedRef.current = false;
           setMediaRetracted(false);
           setShowReturn(false);
