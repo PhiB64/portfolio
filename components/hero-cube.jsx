@@ -1210,17 +1210,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
         sub.style.opacity = String(1 - namesE);
         names.style.transform = `translateY(${70 * namesE}px)`;
         sub.style.transform = `translateY(${-70 * namesE}px)`;
-        // Réapparition en douceur de la « souris » par morphing : la ligne de
-        // fin d'animation (carré aplati) se redéploie en carré, puis ses points
+        // Réapparition en douceur de la « souris » par morphing : une fois les
+        // textes entièrement disparus (RESET_NAMES_MS), la ligne de fin
+        // d'animation (carré aplati) se redéploie en carré, puis ses points
         // glissent jusqu'à la silhouette de la souris pendant que la molette
-        // revient en son centre. L'invite « SCROLL DOWN » refait surface juste
-        // après, sur la dernière portion du retour.
-        const growK = Math.min(1, resetElapsed / RESET_LINE_GROW_MS);
+        // revient en son centre. L'invite « SCROLL DOWN » refait surface sur la
+        // dernière portion du retour.
+        const growK = Math.min(
+          1,
+          Math.max(0, (resetElapsed - RESET_NAMES_MS) / RESET_LINE_GROW_MS),
+        );
         const growE = growK * growK * (3 - 2 * growK);
         body.style.transform = `scale(1, ${Math.max(0.0001, growE)})`;
         const morphK = Math.max(
           0,
-          Math.min(1, (resetElapsed - RESET_LINE_GROW_MS) / RESET_MORPH_MS),
+          Math.min(
+            1,
+            (resetElapsed - (RESET_NAMES_MS + RESET_LINE_GROW_MS)) / RESET_MORPH_MS,
+          ),
         );
         const morphE = smoothstep(morphK);
         body.setAttribute(
