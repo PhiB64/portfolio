@@ -73,6 +73,10 @@ const SNAP_THRESHOLD = 0.0005;
 // reprend : assez court pour « dé-poser » le cube vite, assez long pour ne pas
 // sauter d'un coup.
 const DRAG_EASE_MS = 450;
+// Marge (unités cube) autour de la position de révélation d'une face : tant
+// qu'on reste au-dessus, le média reste déplié ; sous cette marge (scroll
+// inverse), il se replie sans scintiller sur le bord.
+const FACE_REVEAL_TOLERANCE = 0.06;
 // Exposition requise avant qu'un label de face passe du brouillage au texte
 // lisible. Cumulée par `dt` (ms) ; 0 = décodage immédiat dès l'exposition.
 const LABEL_DECODE_DELAY_MS = 0;
@@ -276,6 +280,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // déroule dans `tick` pendant le défilement.
   const dragEaseResetRef = useRef(false);
   const dragEaseStartRef = useRef(0);
+  // Position (unités cube) à laquelle chaque face cliquée a ouvert son média :
+  // sert à replier le média quand le scroll inverse repasse en dessous, et à le
+  // rouvrir quand on redescend après. `null` = face jamais cliquée.
+  const faceRevealPRef = useRef([null, null, null, null, null, null]);
   // Active pointer-drag session: { startX, startY, lastX, lastY, pointerType, moved }.
   const dragStateRef = useRef(null);
   // True while the end-sequence spin animation is playing (drag is locked then).
@@ -692,6 +700,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     });
     const n = [...zoomedFacesRef.current];
     n[i] = true;
+    // Mémorise la pose (unités cube) de l'ouverture : le média restera déplié
+    // tant que le scroll reste à/au-delà, et se repliera dès qu'on repasse
+    // en dessous en scroll inverse.
+    faceRevealPRef.current[i] = currentPRef.current;
     if (n.every(Boolean)) {
       // Dernier clic : le fond s'affiche lui aussi avec son effet sonar, comme
       // à chaque clic précédent. Le simple fondu de fin, lui, ne se déclenchera
@@ -1144,21 +1156,26 @@ export function HeroCube({ title, subtitle, images = [] }) {
         targetP = currentP;
         return;
       }
-      // Scroll inverse interdit : si la page essaie de reculer derrière le mur —
-      // le plus loin déjà atteint (`maxReached`) ou la tête de lecture courante
-      // (`currentP`, quand l'autoplay le sweep l'ont fait avancer) — on ramène
-      // doucement le scroll sur ce point (même astuce de nudge que le pin,
-      // throttlée à 100 ms).
-      const reverseWall = Math.max(maxReached, currentP);
-      if (real + SNAP_THRESHOLD < reverseWall) {
-        const nowMs = Date.now();
-        if (nowMs - lastPinFix > 100) {
-          lastPinFix = nowMs;
-          el.scrollTo({ top: reverseWall * sb, behavior: "smooth" });
+      // Scroll inverse : PENDANT l'animation (avant la fin), il est libre. Le
+      // cube rembobine et l'état se déroule dans `tick` (médias repliés par
+      // position, labels re-codés, fond repris). Une fois la fin atteinte
+      // (noms levés, `returnShownRef` latché), le retour est verrouillé : le
+      // seul chemin en arrière est alors le bouton RETOUR.
+      if (returnShownRef.current) {
+        // Si la page essaie de reculer derrière le mur — le plus loin déjà
+        // atteint (`maxReached`) ou la tête de lecture courante (`currentP`) —
+        // on ramène doucement le scroll sur ce point (nudge, throttlé 100 ms).
+        const reverseWall = Math.max(maxReached, currentP);
+        if (real + SNAP_THRESHOLD < reverseWall) {
+          const nowMs = Date.now();
+          if (nowMs - lastPinFix > 100) {
+            lastPinFix = nowMs;
+            el.scrollTo({ top: reverseWall * sb, behavior: "smooth" });
+          }
+          targetP = reverseWall;
+          revealOverrideRef.current = false;
+          return;
         }
-        targetP = reverseWall;
-        revealOverrideRef.current = false;
-        return;
       }
       targetP = real;
       // Une reprise du scroll recentre la rotation laissée par un drag : la
@@ -1304,6 +1321,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // sans elle, le cube à l'arrêt se parke et le délai n'aboutirait jamais.
       let pendingDecode = false;
       if (!skipActiveRef.current && !resetPlay) {
+        // Rembobinage (scroll inverse) : la tête redescend, `diff` devient
+        // négatif. Les comptes d'exposition se dé-font alors en miroir — une
+        // face qui sort de vue rend un compte — pour que les labels se re-codent
+        // et soient re-découverts au prochain passage avant.
+        const rewinding = diff < 0;
         for (let i = 0; i < 6; i++) {
           const nowVisible = isFaceVisible(
             FACE_NORMALS[i][0],
@@ -1313,7 +1335,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
             visRot.ry,
           );
           if (nowVisible && !faceWasVisibleRef.current[i]) {
-            faceVisibilityCountRef.current[i]++;
+            if (!rewinding) {
+              faceVisibilityCountRef.current[i]++;
+            }
+            // Lors d'un retour, une face qui redevient frontale ne « compte »
+            // pas : seul le passage avant alimente le compte de révélation.
+          } else if (!nowVisible && faceWasVisibleRef.current[i] && rewinding) {
+            faceVisibilityCountRef.current[i] = Math.max(
+              0,
+              faceVisibilityCountRef.current[i] - 1,
+            );
           }
           const revealed = faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT && (!zoomedFacesRef.current[i] || mediaRetractedRef.current);
           if (revealed) {
@@ -1351,6 +1382,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }
           } else if (faceScrambleStateRef.current[i] !== "none") {
             faceExposureElapsedRef.current[i] = 0;
+            // Rembobinage : le compte est redescendu sous le seuil, le label
+            // redevient invisible jusqu'à la prochaine exposition avant.
+            const lblEl = clickLabelRefs.current[i];
+            if (lblEl) lblEl.style.opacity = "0";
             stopFaceScramble(i);
             faceScrambleStateRef.current[i] = "none";
           }
@@ -1801,7 +1836,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }
             if (media) media.style.filter = `brightness(${brightness})`;
             if (faceEl.style.filter) faceEl.style.filter = "";
-          } else if (zoomedFacesRef.current[i] && !mediaRetractedRef.current) {
+          } else if (
+            zoomedFacesRef.current[i] &&
+            !mediaRetractedRef.current &&
+            // Le média d'une face cliquée ne reste déplié que tant que le scroll
+            // n'est pas repassé sous sa position de révélation (scroll inverse).
+            cubeP >= (faceRevealPRef.current[i] ?? -Infinity) - FACE_REVEAL_TOLERANCE
+          ) {
             if (media) media.style.filter = `brightness(${brightness})`;
             if (faceEl.style.filter) faceEl.style.filter = "";
             if (wrapper) {
@@ -1865,6 +1906,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       returnShownRef.current = false;
       setShowReturn(false);
       faceVisibilityCountRef.current = [0, 0, 0, 0, 0, 0];
+      faceRevealPRef.current = [null, null, null, null, null, null];
       faceExposureElapsedRef.current = [0, 0, 0, 0, 0, 0];
       faceWasVisibleRef.current = [false, false, false, false, false, false];
       faceScrambleStateRef.current = ["none", "none", "none", "none", "none", "none"];
