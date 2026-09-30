@@ -1034,18 +1034,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let skipFrom = 0;
     let skipLate = false;
     const AUTOPLAY_MS = 9000;
-    // Position à laquelle l'autoplay a été armé (le cube était encore épinglé
-    // à un palier de rotation). La fin doit démarrer à CUBE_END, mais on s'y rend
-    // en glissant : teleporter la tête de lecture ferait pivoter le cube d'un
-    // coup, en biais, sans tenir compte d'où l'utilisateur l'avait cliqué.
-    let autoplayLeadFrom = null;
-    let autoplayLeadElapsed = 0;
-    // Glissade de raccord entre la position du dernier clic et CUBE_END, où la
-    // vraie séquence de fin démarre. Elle est bornée par la distance à parcourir
-    // pour que le cube garde une vitesse angulaire régulière, quoi qu'il ait été
-    // cliqué tôt ou tard dans la rotation.
-    const AUTOPLAY_LEAD_MAX_MS = 700;
-    const AUTOPLAY_LEAD_MIN_MS = 180;
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
@@ -1155,13 +1143,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // While autoplay is running the scroll is driven programmatically. Only a
       // real user scroll (position drifting away from the driven head) takes back.
       if (autoplay) {
-        if (Math.abs(real - currentP) > 0.02) {
-          autoplay = false;
-          // Abandon du raccord en cours : le scroll reprend la main, il ne
-          // faut plus retenir la tête ni garder la position du dernier clic.
-          autoplayLeadFrom = null;
-          autoplayLeadElapsed = 0;
-        } else return;
+        if (Math.abs(real - currentP) > 0.02) autoplay = false;
+        else return;
       }
       // Pendant le sweep de reset, le scroll est piloté par le code : la
       // détection de recul est suspendue.
@@ -1235,10 +1218,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       // Fenêtre de grâce d'une seconde après le dernier clic : un scroll trop
       // rapide ne doit pas encore lancer le fondu de fin. La tête est retenue à
-      // CUBE_END, puis le scroll reprend la main normalement. Un raccord
-      // (`autoplayLeadFrom`) toujours en cours signifie que le cube est encore
-      // figé au palier du dernier clic : on ne tire pas encore vers CUBE_END.
-      if (allClickedRef.current && Date.now() < exitArmUntilRef.current && targetP > CUBE_END && autoplayLeadFrom === null) {
+      // CUBE_END, puis le scroll reprend la main normalement.
+      if (allClickedRef.current && Date.now() < exitArmUntilRef.current && targetP > CUBE_END) {
         const nowMs = Date.now();
         if (nowMs - lastPinFix > 100) {
           lastPinFix = nowMs;
@@ -1587,48 +1568,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // La fenêtre de grâce d'une seconde après le dernier clic retarde aussi
         // l'autoplay : le fondu de fin n'avance jamais avant son expiration.
         if (Date.now() < exitArmUntilRef.current) {
-          // Pendant la grâce le cube ne bouge pas du tout : la position du
-          // dernier clic est laissée intacte, sinon le cube pivoterait
-          // immédiatement en biais sous les yeux de l'utilisateur. On ne touche
-          // surtout pas à `autoplayLeadFrom` : la glissade part de cette
-          // position, elle doit survivre à la grâce pour être jouée ensuite.
           autoplayElapsed = 0;
-          autoplayLeadElapsed = 0;
-          targetP = currentP;
+          currentP = CUBE_END;
+          targetP = CUBE_END;
           let sbGrace = el.scrollHeight - el.offsetHeight;
           if (sbGrace > 0) el.scrollTop = currentP * sbGrace;
           rafId = requestAnimationFrame(tick);
           return;
-        }
-        // Raccord : glisse de la position du dernier clic jusqu'à CUBE_END, où la
-        // séquence de fin démarre pour de bon. Sans cette phase, passer directement
-        // à la rampe ci-dessous téléporterait le cube depuis le palier où il a été
-        // cliqué. La durée est proportionnelle à la distance, ce qui donne une
-        // vitesse angulaire régulière quelle que soit la position de départ.
-        if (autoplayLeadFrom !== null) {
-          const span = CUBE_END - autoplayLeadFrom;
-          const leadMs = Math.min(
-            AUTOPLAY_LEAD_MAX_MS,
-            Math.max(AUTOPLAY_LEAD_MIN_MS, Math.abs(span) * (AUTOPLAY_LEAD_MAX_MS / (CUBE_END - INTRO_END))),
-          );
-          autoplayLeadElapsed += dt;
-          // Termine dès que la durée écoulée est atteinte. Le cas `span <= 0`
-          // (dernière face cliquée au-delà de CUBE_END) doit VOIR la glissade :
-          // sans elle, un clic tardif téléporterait le cube en arrière, en
-          // rembobinant tout le spin — le « saut avant les textes ».
-          if (autoplayLeadElapsed >= leadMs) {
-            currentP = CUBE_END;
-            autoplayLeadFrom = null;
-          } else {
-            // smoothstep : départ et arrivée sans à-coup, la vitesse angulaire
-            // monte puis redescend au lieu de sauter à la valeur cible.
-            const k = autoplayLeadElapsed / leadMs;
-            currentP = autoplayLeadFrom + span * smoothstep(k);
-          }
-          targetP = currentP;
-          let sbLead = el.scrollHeight - el.offsetHeight;
-          if (sbLead > 0) el.scrollTop = currentP * sbLead;
-          rafId = requestAnimationFrame(tick);
         }
         autoplayElapsed += dt;
         currentP = CUBE_END + (autoplayElapsed / AUTOPLAY_MS) * (1 - CUBE_END);
@@ -1661,25 +1607,28 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
-      // Sur la première frame où les 6 faces sont cliquées, on arme l'autoplay.
+      // Sur la première frame où les 6 faces sont cliquées, on ramène la tête
+      // de lecture à CUBE_END pour que la fin se joue depuis le bon point de
+      // départ au lieu de sauter en avant, puis on arme l'autoplay.
       //
       // Le verrou `wasUnlockedRef` ne doit être posé qu'ici, quand l'autoplay a
       // réellement démarré : le poser systématiquement brûlait le latch sans
       // lancer la fin dès que la position était sous CUBE_END, et l'autoplay ne
-      // pouvait alors plus jamais démarrer avant le bouton RETOUR.
-      //
-      // On ne replace PAS la tête de lecture sur CUBE_END ici : le cube est
-      // encore figé à l'endroit exact où l'utilisateur a cliqué la 6e face, et
-      // une affectation directe le ferait pivoter d'un coup. On retient cette
-      // position (`autoplayLeadFrom`) et la glissade de raccord ci-dessus l'amène
-      // jusqu'à CUBE_END. La fenêtre de grâce d'une seconde laisse le temps à
-      // l'utilisateur de voir sa dernière face pendant que la piste est gelée.
+      // pouvait alors plus jamais démarrer avant le bouton RETOUR. La fenêtre de
+      // grâce d'une seconde (`exitArmUntilRef`) retarde la progression, donc ce
+      // recalage n'est jamais visible.
       if (unlocked && !wasUnlockedRef.current) {
         wasUnlockedRef.current = true;
+        currentP = CUBE_END;
+        targetP = CUBE_END;
         autoplay = true;
         autoplayElapsed = 0;
-        autoplayLeadFrom = currentP;
-        autoplayLeadElapsed = 0;
+        // Le scroll natif doit suivre immédiatement : sinon le prochain
+        // événement `scroll` compare la position réelle (toujours à l'ancien
+        // palier) à `currentP`, l'écart dépasse 0.02 et annule l'autoplay
+        // dès la frame suivante.
+        const sbArm = el.scrollHeight - el.offsetHeight;
+        if (sbArm > 0) el.scrollTop = currentP * sbArm;
         if (!rafId) rafId = requestAnimationFrame(tick);
       }
       const p = currentP;
@@ -2011,8 +1960,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
       resetPlay = true;
       resetFrom = CUBE_END;
       resetElapsed = 0;
-      autoplayLeadFrom = null;
-      autoplayLeadElapsed = 0;
       reverseEffort = 0;
       reverseAnchor = CUBE_END;
       currentP = CUBE_END;
