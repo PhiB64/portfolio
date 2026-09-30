@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import anime from "animejs";
-import { Undo2 } from "lucide-react";
+import { Undo2, MousePointer2 } from "lucide-react";
 
 import { renderProjectContent } from "./cube/project-content";
 import { ContactOverlay } from "./contact-overlay";
@@ -131,6 +131,38 @@ const SKIP_LABEL_EXIT_MS = 200;
 // visible pendant le skip — jamais avant, pour qu'il accompagne le label lisible.
 const SKIP_LABEL_READY_MS =
   SKIP_LABEL_DELAY_MS + SKIP_LABEL_CIPHER_MS + SKIP_LABEL_DECODE_MS;
+// Icône de pointer : là où le texte d'accueil le demandait, le geste le montre.
+// Elle se pose sur la face dont le label se met à décoder — l'instant où le mot
+// devient lisible —, tape deux fois, puis s'efface. Un tir unique par
+// introduction (`pointerPlayedRef`), remis à zéro avec elle.
+// `POINTER_FACE` est un index, pas un libellé : le cube uncovering les faces
+// dans l'ordre de `FACE_LABELS`, la face 0 est celle dont le label se résout en
+// premier. L'icône et le déclenchement partagent cet index, faute de quoi le
+// geste pourrait apparaître sur une face qui n'est pas celle qui se décode.
+const POINTER_FACE = 0;
+const POINTER_ENTER_MS = 420;
+const POINTER_TAP_MS = 130;
+const POINTER_RELEASE_MS = 300;
+const POINTER_HOLD_MS = 700;
+const POINTER_EXIT_MS = 400;
+// Géométrie du pointer, rassemblée ici parce que les trois valeurs se répondent :
+// la pointe de la flèche, le centre de l'anneau et le décalage du glyphe. Les
+// dupliquer dans deux styles les désynchroniserait au premier ajustement.
+const POINTER_GLYPH_SIZE = 26;
+const POINTER_RING_SIZE = 72;
+// Position de la pointe, en px, depuis le centre de la face. Le geste se pose
+// dans le quart bas-droit plutôt qu'au milieu : centré, il concurrençait le mot
+// qu'il accompanyait. Ces deux valeurs servent d'origine à l'anneau comme au
+// glyphe, qui se calent dessus.
+const POINTER_TIP_X = 66;
+const POINTER_TIP_Y = 66;
+// `MousePointer2` est tracée dans une viewBox 24, pointe en haut à gauche. Sa
+// pointe est le coin arrondi qui relie le début du tracé à la première oblique,
+// à 4.14 sur chaque axe — pas 12, le milieu de la boîte. C'est ce point qui
+// doit viser le centre de l'anneau : l'onde part du contact, pas du milieu du
+// glyphe. D'où la conversion en px, pour que changer `POINTER_GLYPH_SIZE` ne
+// déplace pas la pointe.
+const POINTER_TIP = (4.14 * POINTER_GLYPH_SIZE) / 24;
 const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 
@@ -260,6 +292,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const faceVisibilityCountRef = useRef([0, 0, 0, 0, 0, 0]);
   const faceExposureElapsedRef = useRef([0, 0, 0, 0, 0, 0]);
   const clickLabelRefs = useRef([]);
+  // Icône de pointer : le conteneur porte l'entrée et la sortie, le glyphe le
+  // geste (il s'abaisse à chaque tape), l'anneau l'onde qui part du clic.
+  const pointerRef = useRef(null);
+  const pointerGlyphRef = useRef(null);
+  const pointerRippleRef = useRef(null);
+  const pointerTlRef = useRef(null);
+  const pointerPlayedRef = useRef(false);
   const clickStackRef = useRef([]);
   const allClickedRef = useRef(false);
   // Fin de la fenêtre de « grâce » d'une seconde après le dernier clic :
@@ -629,6 +668,99 @@ export function HeroCube({ title, subtitle, images = [] }) {
     });
   };
 
+  // Retrait immédiat de l'icône, sans fondu : au démontage, au clic sur une face
+  // (le cube a obéi, l'invitation n'a plus lieu d'être) et avant chaque relecture.
+  // `anime.remove` orpheline les cibles, sinon une animation encore en cours
+  // continuerait d'écrire dans un élément rendu invisible.
+  const stopPointer = useCallback(() => {
+    if (pointerTlRef.current) {
+      pointerTlRef.current.pause();
+      pointerTlRef.current = null;
+    }
+    for (const target of [pointerRef.current, pointerGlyphRef.current, pointerRippleRef.current]) {
+      if (target) anime.remove(target);
+    }
+    if (pointerRef.current) pointerRef.current.style.opacity = "0";
+  }, []);
+
+  // Le geste, pas le message : deux tapes sur le label qui vient de se résoudre,
+  // chacune suivie de son onde, puis un bref maintien et une sortie. Les instants
+  // sont absolus et dérivés des constantes, jamais comptés à la main : une seule
+  // durée à changer et les trois paliers suivent.
+  const playPointer = useCallback(() => {
+    const el = pointerRef.current;
+    if (!el) return;
+    stopPointer();
+    pointerPlayedRef.current = true;
+    const glyph = pointerGlyphRef.current;
+    const ripple = pointerRippleRef.current;
+    // Une tape et son onde sous forme de fabrique : deux fois le même geste doit
+    // être deux jeux de paramètres distincts, anime n'accepte pas qu'on réanime
+    // un objet de paramètres déjà consommé par une timeline.
+    const tap = () => ({
+      targets: glyph,
+      translateY: [
+        { value: 6, duration: POINTER_TAP_MS },
+        { value: 0, duration: POINTER_RELEASE_MS },
+      ],
+      scale: [
+        { value: 0.88, duration: POINTER_TAP_MS },
+        { value: 1, duration: POINTER_RELEASE_MS },
+      ],
+      easing: "easeInQuad",
+    });
+    const wave = () => ({
+      targets: ripple,
+      // Onde resserrée autour du glyphe : `1.7` sur un anneau de 104px le
+      // projetait hors de la face, et a fortiori hors de la face inclinée où le
+      // pointer se pose.
+      scale: [
+        { value: 0.2, duration: POINTER_TAP_MS },
+        { value: 1.2, duration: POINTER_TAP_MS + POINTER_RELEASE_MS },
+      ],
+      opacity: [
+        { value: 0.85, duration: POINTER_TAP_MS },
+        { value: 0, duration: POINTER_TAP_MS + POINTER_RELEASE_MS },
+      ],
+      easing: "easeOutQuad",
+    });
+    const tapSpan = POINTER_TAP_MS + POINTER_RELEASE_MS;
+    const t1 = POINTER_ENTER_MS;
+    const t2 = t1 + tapSpan;
+    const t3 = t2 + tapSpan + POINTER_HOLD_MS;
+    const tl = anime.timeline({
+      complete: () => {
+        pointerTlRef.current = null;
+      },
+    });
+    pointerTlRef.current = tl;
+    tl.add(
+      {
+        targets: el,
+        opacity: [0, 1],
+        translateY: [14, 0],
+        scale: [0.9, 1],
+        duration: POINTER_ENTER_MS,
+        easing: "easeOutCubic",
+      },
+      0,
+    )
+      .add(tap(), t1)
+      .add(wave(), t1)
+      .add(tap(), t2)
+      .add(wave(), t2)
+      .add(
+        {
+          targets: el,
+          opacity: 0,
+          translateY: -10,
+          duration: POINTER_EXIT_MS,
+          easing: "easeInQuad",
+        },
+        t3,
+      );
+  }, [stopPointer]);
+
   // Pendant le skip, le label de la gallery rejoue le cycle des labels de face :
   // d'abord l'état « codé » (brouillage continu qui ne se résout jamais), puis
   // le décodage. Même rendu, même police, seule la source du temps diffère.
@@ -662,6 +794,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
       galleryLabel.textContent = "";
   };
 
+  useEffect(() => () => {
+    faceScrambleTlRef.current.forEach((tl) => stopScramble(tl));
+    stopScramble(galleryScrambleTlRef.current);
+    stopPointer();
+  }, [stopPointer]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -750,12 +887,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
       clickLabelRefs.current[i].style.opacity = "0";
       stopFaceScramble(i);
     }
+    // L'icône a fait son office dès qu'une face s'ouvre : elle disparaît plutôt
+    // que de flotter au-dessus de la vidéo agrandie.
+    if (i === POINTER_FACE) stopPointer();
     const video = (cubeRef.current?.children[i] || document).querySelector("video");
     if (video) {
       video.currentTime = 0;
       video.play().catch(() => {});
     }
-  }, [changeBackground, revealFaceMedia, unretractMedia]);
+  }, [changeBackground, revealFaceMedia, unretractMedia, stopPointer]);
 
   // Pure hit-test: given viewport coordinates and the click zone rect, open
   // the face lying under the pointer (or do nothing). Shared by the native
@@ -1588,6 +1728,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 // décodage démarre proprement même depuis l'état « none ».
                 decodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "decoded";
+                // Le pointer ne se montre qu'une fois par introduction, et sur la
+                // face dont le label se résout en premier. Il attend la FIN du
+                // décodage : c'est le mot entier, résolu, qu'il vient souligner —
+                // le déclencher au départ mettrait le geste sur un brouillage.
+                // `kill()` (voir `stopScramble`) ne déclenche pas `onComplete` :
+                // une interruption laisse donc la course entière sans icône, et le
+                // décodage suivant la rejouera.
+                if (i === POINTER_FACE && !pointerPlayedRef.current) {
+                  faceScrambleTlRef.current[i]?.eventCallback("onComplete", playPointer);
+                }
+              } else if (faceScrambleStateRef.current[i] === "encoded") {
                 pendingDecode = true;
               }
             } else {
@@ -2295,6 +2446,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       faceExposureElapsedRef.current = [0, 0, 0, 0, 0, 0];
       faceWasVisibleRef.current = [false, false, false, false, false, false];
       faceScrambleStateRef.current = ["none", "none", "none", "none", "none", "none"];
+      // L'introduction repart de zéro : le pointer est rejoué au prochain
+      // décodage du premier label.
+      stopPointer();
+      pointerPlayedRef.current = false;
       labelPinPRef.current = null;
       contactTabRevealedRef.current = false;
       mediaRetractedRef.current = false;
@@ -2389,7 +2544,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       el.removeEventListener("wheel", blockManualScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer, retractMedia]);
+  }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer, retractMedia, playPointer, stopPointer]);
 
   // Direct cube rotation: pointer drag layers an offset over the scroll-driven
   // rotation. A real drag also suppresses the click that browsers fire afterward.
@@ -2922,6 +3077,82 @@ export function HeroCube({ title, subtitle, images = [] }) {
                             >
                               {FACE_LABELS[i]}
                             </div>
+                            {i === POINTER_FACE && (
+                              // Le pointer est frère du label, pas dans sa face
+                              // éclairée : le `filter` de cette dernière
+                              // l'assombrirait avec le média, exactement comme il
+                              // le ferait du texte. Il se pose sous le mot, pointe
+                              // vers lui, et son anneau part de son centre.
+                              <div
+                                ref={pointerRef}
+                                data-pointer=""
+                                className="pointer-events-none select-none"
+                                style={{
+                                  position: "absolute",
+                                  inset: 0,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  zIndex: 6,
+                                  opacity: 0,
+                                }}
+                              >
+                                <div
+                                  ref={pointerRippleRef}
+                                  style={{
+                                    position: "absolute",
+                                    left: "50%",
+                                    top: "50%",
+                                    // Assez petit pour tenir dans la face même
+                                    // inclinée (≈336×114) au moment du pointer.
+                                    width: POINTER_RING_SIZE,
+                                    height: POINTER_RING_SIZE,
+                                    // Demi-taille en moins pour centrer l'anneau sur
+                                    // `POINTER_TIP_X/Y`, pas sur le centre de la face.
+                                    marginLeft: POINTER_TIP_X - POINTER_RING_SIZE / 2,
+                                    marginTop: POINTER_TIP_Y - POINTER_RING_SIZE / 2,
+                                    borderRadius: "50%",
+                                    border: "2px solid #33d1c8",
+                                    boxShadow:
+                                      "0 0 18px rgba(0,165,176,0.85), inset 0 0 18px rgba(0,165,176,0.55)",
+                                    transform: "scale(0.35)",
+                                    opacity: 0,
+                                  }}
+                                />
+                                <div
+                                  ref={pointerGlyphRef}
+                                  data-pointer-glyph=""
+                                  style={{
+                                    position: "absolute",
+                                    left: "50%",
+                                    top: "50%",
+                                    // Décalages par marges, jamais par transform :
+                                    // la transform appartient à `anime`, qui la
+                                    // réécrit entièrement à chaque frame.
+                                    // On recule la boîte de `POINTER_TIP` — la pointe
+                                    // elle-même — au lieu de l'avancer, si bien que le
+                                    // coin du curseur, et non son axe médian, tombe au
+                                    // centre de l'anneau.
+                                    marginLeft: POINTER_TIP_X - POINTER_TIP,
+                                    marginTop: POINTER_TIP_Y - POINTER_TIP,
+                                    color: "#33d1c8",
+                                    // Même idea que le halo du label : sans lui le
+                                    // turquoise se fond dans le fond de la face.
+                                    filter: "drop-shadow(0 0 10px rgba(51,209,200,0.65))",
+                                    lineHeight: 0,
+                                  }}
+                                >
+                                  {/* La flèche seule : c'est le mouvement de tap et
+                                      l'onde qui portent le sens du clic, le glyphe
+                                      n'en a pas besoin. */}
+                                  <MousePointer2
+                                    size={POINTER_GLYPH_SIZE}
+                                    strokeWidth={2.4}
+                                    aria-hidden="true"
+                                  />
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
