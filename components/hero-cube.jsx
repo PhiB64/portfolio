@@ -1027,11 +1027,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let autoplay = false;
     // Timer d'avancement partagé du sweep de skip et de ses galeries.
     let autoplayElapsed = 0;
-    // Position atteinte par currentP au moment où l'autoplay a été armé (juste après
-    // le dernier clic). On décale `autoplayElapsed` pour que la rampe
-    // `CUBE_END + t*(1-CUBE_END)` parte exactement de `autoplayStartP` à t=0,
-    // garantissant une rotation continue (aucun saut de cube).
+    // Origine du scroll automatique de fin : la position du cube au moment où le
+    // scroll démarre. La fin de la piste EST la fin de la séquence (`p = 1`), donc
+    // ce scroll part de là où le cube se trouve réellement, sans téléportation.
+    // La grâce d'une seconde (`exitArmUntilRef`) retarde seulement son départ.
     let autoplayStartP = null;
+    // Dernière position de scroll écrite par l'autoplay, en pixels. Sert à
+    // distinguer notre propre écriture d'un geste réel de l'utilisateur.
+    let autoScrollPx = 0;
+    // `true` une fois la grâce dépassée et l'origine du scroll relevée.
+    let autoplayStarted = false;
     // Position (timeline units) the skip morph glides up from. On the manual
     // skip that equals the start pose, so the cube holds still while its faces
     // fold in; on the automatic load it is wherever the page was, so the intro
@@ -1145,13 +1150,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // getBoundingClientRect on every scroll frame — smoother on mobile.
       const pos = el.scrollTop;
       const real = sb > 0 ? Math.min(1, Math.max(0, pos / sb)) : 0;
-      // While autoplay is running the scroll is driven programmatically. Only a
-      // real user scroll (position drifting away from the driven head) takes back.
+      // L'autoplay pilote lui-même la position de scroll, exactement comme le
+      // ferait l'utilisateur : la tête doit donc continuer à suivre cette
+      // position, et le lissage de `tick` fait le reste. On compare la position
+      // lue à la dernière position écrite (`autoScrollPx`) et non à `currentP` :
+      // le lissage fait que `currentP` traîne toujours derrière la tête écrite,
+      // et le comparer ici ferait annuler l'autoplay à la première frame. Tout
+      // écart à notre propre écriture ne peut venir que d'un geste réel.
       if (autoplay) {
-        if (Math.abs(real - currentP) > 0.02) {
+        if (Math.abs(pos - autoScrollPx) > 2) {
+          // Geste de l'utilisateur : l'autoplay lâche prise, et le scroll
+          // reprend la main par le chemin habituel.
           autoplay = false;
           autoplayStartP = null;
-        } else return;
+          autoplayStarted = false;
+        } else {
+          targetP = real;
+          return;
+        }
       }
       // Pendant le sweep de reset, le scroll est piloté par le code : la
       // détection de recul est suspendue.
@@ -1223,17 +1239,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
           targetP = pinP;
         }
       }
-      // Fenêtre de grâce d'une seconde après le dernier clic : un scroll trop
-      // rapide ne doit pas encore lancer le fondu de fin. La tête est retenue à
-      // CUBE_END, puis le scroll reprend la main normalement.
-      if (allClickedRef.current && Date.now() < exitArmUntilRef.current && targetP > CUBE_END) {
-        const nowMs = Date.now();
-        if (nowMs - lastPinFix > 100) {
-          lastPinFix = nowMs;
-          el.scrollTo({ top: CUBE_END * sb, behavior: "smooth" });
-        }
-        targetP = CUBE_END;
-      }
+      // Après le dernier clic, la fin ne part qu'à la poursuite du scroll, et
+      // au plus tôt une seconde plus tard (fenêtre de grâce). Aucun verrou ici :
+      // la tête suit simplement le scroll, et c'est `tick` qui retarde son propre
+      // départ. Empêcher ici le scroll de dépasser CUBE_END revient à disputer
+      // la position à l'autoplay, qui la pilotait déjà.
     };
 
     const tick = (now) => {
@@ -1248,6 +1258,59 @@ export function HeroCube({ title, subtitle, images = [] }) {
         : 16.67;
       lastTickTime = t;
       const diff = targetP - currentP;
+
+      // L'autoplay EST un scroll automatique : il se contente d'avancer la
+      // position de scroll de la section. `sync` la relit, `targetP` la suit, et
+      // le lissage exponentiel de `currentP` fait le reste — exactement le même
+      // chemin qu'un scroll utilisateur. La fin de la séquence EST le bas de la
+      // piste (`p = 1`), donc la position d'arrivée est la même et le cube
+      // repart de là où il se trouve réellement : aucune téléportation possible.
+      //
+      // La fenêtre de grâce d'une seconde après le dernier clic (`exitArmRef`)
+      // retarde seulement le départ de ce scroll : le cube reste sur la pose qui
+      // vient d'être cliquée, le temps que le label de cette face soit lisible.
+      if (autoplay) {
+        if (Date.now() < exitArmUntilRef.current) {
+          // Grâce : on tient la tête et le scroll sur la pose cliquée.
+          autoplayElapsed = 0;
+          targetP = currentP;
+          const sbGrace = el.scrollHeight - el.offsetHeight;
+          if (sbGrace > 0) {
+            autoScrollPx = currentP * sbGrace;
+            el.scrollTop = autoScrollPx;
+          }
+        } else {
+          // L'origine est relevée au moment où le scroll démarre, pas à
+          // l'armement : un éventuel scroll de l'utilisateur pendant la grâce
+          // est alors absorbé, et le départ reste sans à-coup quelle que soit la
+          // face cliquée.
+          if (!autoplayStarted) {
+            autoplayStarted = true;
+            autoplayStartP = currentP;
+          }
+          const sbAuto = el.scrollHeight - el.offsetHeight;
+          if (sbAuto <= 0) {
+            autoplay = false;
+            autoplayStarted = false;
+          } else {
+            // Progression linéaire de la position de scroll. La courbe perçue
+            // est celle du lissage de `currentP` vers `targetP`, donc celle d'un
+            // scroll utilisateur — pas une fonction de temps maison. Un
+            // `scrollTo({behavior:"smooth"})` par frame s'empilerait et rendrait
+            // la durée non déterministe, d'où l'écriture directe de `scrollTop`.
+            autoplayElapsed += dt;
+            const k = Math.min(1, autoplayElapsed / AUTOPLAY_MS);
+            const nextP = autoplayStartP + (1 - autoplayStartP) * k;
+            autoScrollPx = nextP * sbAuto;
+            el.scrollTop = autoScrollPx;
+            if (k >= 1) {
+              autoplay = false;
+              autoplayStarted = false;
+              autoplayStartP = null;
+            }
+          }
+        }
+      }
 
       // Sweep de retour au début (bouton RETOUR) : balayage programmé de
       // CUBE_END vers 0, pendant lequel toute la logique d'intro/clic est gelée.
@@ -1410,8 +1473,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (!skipActiveRef.current) {
           skipActiveRef.current = true;
           autoplayElapsed = 0;
-          // Le skip pilote lui-même `currentP` : le décalage d'armement de la
-          // rampe de fin n'a plus lieu d'être, on repart d'une base neutre.
+          // Le skip pilote sa propre chorégraphie : l'origine de la rampe de fin
+          // n'a plus lieu d'être, on repart d'une base neutre.
           autoplayStartP = null;
           skipFrom = currentP;
           skipLate = currentP >= SPIN_START;
@@ -1573,55 +1636,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
           galleryDur = 0;
         }
         rafId = requestAnimationFrame(tick);
-      } else if (autoplay) {
-        // Steady, frame-rate independent progression through the end sequence.
-        // La fenêtre de grâce d'une seconde après le dernier clic retarde aussi
-        // l'autoplay : le fondu de fin n'avance jamais avant son expiration.
-        if (Date.now() < exitArmUntilRef.current) {
-          // Pendant la grâce, on fige currentP à la position exacte du dernier clic.
-          // On ne touche pas à `autoplayStartP` : c'est ce point de départ qu'il
-          // faut conserver pour éviter un saut quand la rampe s'engagera.
-          autoplayElapsed = 0;
-          targetP = currentP;
-          let sbGrace = el.scrollHeight - el.offsetHeight;
-          if (sbGrace > 0) el.scrollTop = currentP * sbGrace;
-          rafId = requestAnimationFrame(tick);
-          return;
-        }
-        // Décalage d'autoplayElapsed pour que la rampe parte de `autoplayStartP`
-        // au lieu de CUBE_END. On résout `CUBE_END + (e/AUTOPLAY_MS)*(1-CUBE_END) =
-        // autoplayStartP`, soit `e = AUTOPLAY_MS * (autoplayStartP - CUBE_END) /
-        // (1 - CUBE_END)`. Le terme est signé : négatif si le dernier clic a eu
-        // lieu avant CUBE_END, positif s'il a eu lieu après. La rampe démarre donc
-        // exactement sur la pose cliquée, sans téléportation, et la vitesse
-        // angulaire reste celle du trait original — la chorégraphie (durée du
-        // spin, des noms) est donc préservée à l'identique.
-        //
-        // Le décalage est borné : en pratique le dernier clic survient sur le
-        // palier de la 6e face, donc `autoplayStartP` reste proche de CUBE_END et
-        // aucune borne n'est atteinte. Les bornes ne servent qu'à empêcher les
-        // cas dégénérés (clic très tardif) de raccourcir — voire de sauter — la
-        // fin : celle-ci doit toujours disposer d'au moins 60% de sa durée, et
-        // son allongement maximal reste raisonnable si le clic était très tôt.
-        if (autoplayStartP !== null && autoplayElapsed === 0) {
-          autoplayElapsed = (AUTOPLAY_MS * (autoplayStartP - CUBE_END)) / (1 - CUBE_END);
-          autoplayElapsed = Math.min(Math.max(autoplayElapsed, -AUTOPLAY_MS * 0.6), AUTOPLAY_MS * 0.4);
-        }
-        autoplayElapsed += dt;
-        currentP = CUBE_END + (autoplayElapsed / AUTOPLAY_MS) * (1 - CUBE_END);
-        if (autoplayElapsed >= AUTOPLAY_MS) {
-          autoplay = false;
-          currentP = Math.min(1, currentP);
-        }
-        targetP = currentP;
-        let sbNow = el.scrollHeight - el.offsetHeight;
-        if (sbNow > 0) el.scrollTop = currentP * sbNow;
-        rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode) {
+      } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode && !autoplay) {
         // The cube is at rest: park the loop. `pendingDecode` holds it alive for
         // the remainder of a face's exposure delay so its label still resolves.
         // The wait is bounded by `LABEL_DECODE_DELAY_MS`, so the loop always
-        // parks again once every pending label has resolved.
+        // parks again once every pending label has resolved. `!autoplay` évite de
+        // garer pendant le scroll automatique : `targetP` y relit la position
+        // avec un frame de retard, donc `diff` peut être nul alors que la tête
+        // doit encore descendre.
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -1638,11 +1660,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
-      // Sur la première frame où les 6 faces sont cliquées, on arme l'autoplay en
-      // capturant la position exacte du cube à cet instant (point du clic). On ne
-      // replace PAS currentP : le cube reste visuellement où l'utilisateur l'a
-      // cliqué pendant la fenêtre de grâce d'une seconde (`exitArmUntilRef`), et
-      // `autoplayStartP` permet à la rampe de s'engager sans saut depuis ce point.
+      // Sur la première frame où les 6 faces sont cliquées, on arme l'autoplay.
+      // `autoplayStartP` est la position courante du cube, qui est aussi
+      // l'origine du scroll automatique : la fin part donc de la face qui vient
+      // d'être cliquée, jamais de CUBE_END, et aucune téléportation n'est
+      // possible. Le cube ne bouge pas avant l'expiration de la grâce
+      // (`exitArmUntilRef`), le temps que le label de cette face soit lisible.
       //
       // Le verrou `wasUnlockedRef` ne doit être posé qu'ici, quand l'autoplay a
       // réellement démarré : le poser systématiquement brûlait le latch sans
@@ -1653,12 +1676,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
         autoplay = true;
         autoplayElapsed = 0;
         autoplayStartP = currentP;
-        // Le scroll natif doit suivre immédiatement : sinon le prochain
-        // événement `scroll` compare la position réelle (toujours à l'ancien
-        // palier) à `currentP`, l'écart dépasse 0.02 et annule l'autoplay
-        // dès la frame suivante.
+        // On aligne tout de suite la position de scroll réelle sur la tête, et on
+        // note cette écriture : c'est elle que `sync` comparera à la position
+        // lue pour distinguer notre scroll d'un geste réel.
         const sbArm = el.scrollHeight - el.offsetHeight;
-        if (sbArm > 0) el.scrollTop = currentP * sbArm;
+        if (sbArm > 0) {
+          el.scrollTop = currentP * sbArm;
+          autoScrollPx = el.scrollTop;
+        }
         if (!rafId) rafId = requestAnimationFrame(tick);
       }
       const p = currentP;
@@ -1934,6 +1959,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (resetPlay) return;
       autoplay = false;
       autoplayStartP = null;
+      autoplayStarted = false;
       skipRef.current = false;
       skipActiveRef.current = false;
       skipLate = false;
