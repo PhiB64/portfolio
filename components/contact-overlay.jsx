@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, CheckCircle, AlertCircle } from "lucide-react";
-import { ProjectTabs } from "./cube/project-tabs";
+import { ProjectTabs, BackButton } from "./cube/project-tabs";
 
 const IconGithub = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-[#00a5b0] shrink-0">
@@ -230,6 +230,11 @@ export function ContactOverlay({ onClose, onSelectProject }) {
               </form>
             )}
           </div>
+        </div>
+
+        {/* Retour en bas de page sur mobile, où la barre d'onglets est masquée */}
+        <div className="text-center mt-20 sm:hidden">
+          <BackButton onClick={onClose} />
         </div>
       </div>
     </div>

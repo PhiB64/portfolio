@@ -37,6 +37,21 @@ const SHOW_BELOW = 0;
 // pour ne pas doubler la barre d'onglets au sommet de la page.
 const TOP_BUTTON_ABOVE = 400;
 
+// « ← RETOUR » partagé par ses deux emplacements (haut sur desktop, bas de
+// page sur mobile). Exporté pour que chaque overlay le rende à la fin de son
+// contenu, seul endroit d'où il peutouncer dans le flux en mobile.
+export function BackButton({ onClick, className = "" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer ${className}`}
+    >
+      &larr; RETOUR
+    </button>
+  );
+}
+
 export function ProjectTabs({
   activeIndex = null,
   contactActive = false,
@@ -116,18 +131,14 @@ export function ProjectTabs({
         </nav>
       </div>
 
-      {/* « ← RETOUR » sort de la barre : il reste ancré en haut à gauche, donc
-          toujours accessible même quand les onglets se sont escamotés. Plus
-          visible que la barre en `sm` : sans lui, mobile n'a aucun moyen de
-          revenir, la barre d'onglets y étant masquée. */}
+      {/* « ← RETOUR » sort de la barre pour survivre à son escamotage. Ancré en
+          haut à gauche sur desktop seulement ; en mobile la barre est masquée
+          et l'overlay le rend en fin de contenu, hors de ce composant. */}
       {onBack && (
-        <button
-          type="button"
+        <BackButton
           onClick={onBack}
-          className="fixed top-6 left-4 z-30 text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer"
-        >
-          &larr; RETOUR
-        </button>
+          className="hidden sm:inline-block fixed top-6 left-4 z-30"
+        />
       )}
 
       {showTopButton && (

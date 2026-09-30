@@ -5,7 +5,7 @@ import anime from "animejs";
 import { Undo2, MousePointer2 } from "lucide-react";
 
 import { renderProjectContent } from "./cube/project-content";
-import { ProjectTabs, PROJECT_LINKS } from "./cube/project-tabs";
+import { ProjectTabs, BackButton, PROJECT_LINKS } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
 import {
   FACE_LABELS,
@@ -3305,6 +3305,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
               {renderProjectContent(selectedProject, {
                 onContact: onContactClick,
               })}
+
+              {/* Retour en bas de page sur mobile, où la barre d'onglets est
+                  masquée et où rien d'autre n'assure le retour */}
+              <div className="text-center mt-20 sm:hidden">
+                <BackButton onClick={closeProjectOverlay} />
+              </div>
             </div>
           </div>
         )}
