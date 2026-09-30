@@ -140,6 +140,11 @@ export function ContactOverlay({ onClose, onSelectProject }) {
           {/* Formulaire */}
           <div>
             <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">Envoyer un message</h2>
+            {/* `aria-live` sur un conteneur stable : l announcements de changement
+                d'état (envoi, succès, échec) ne sont entendues que si la région
+                existe déjà au moment où son contenu change. Posé sur le `div`
+                conditionnel, il serait recréé au changement et resterait muet. */}
+            <div aria-live="polite" aria-atomic="true">
             {status === "sent" ? (
               <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
                 <div className="flex items-center gap-2 text-[#00a5b0] mb-3">
@@ -179,13 +184,18 @@ export function ContactOverlay({ onClose, onSelectProject }) {
             ) : (
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div>
-                  <label className="flex items-center gap-2 text-[#64748b] text-xs tracking-widest uppercase mb-2">
-                    <User size={13} /> Nom
+                  <label
+                    htmlFor="contact-name"
+                    className="flex items-center gap-2 text-[#64748b] text-xs tracking-widest uppercase mb-2"
+                  >
+                    <User size={13} aria-hidden="true" /> Nom
                   </label>
                   <input
+                    id="contact-name"
                     type="text"
                     name="name"
                     required
+                    autoComplete="name"
                     value={form.name}
                     onChange={handleChange}
                     placeholder="Votre nom"
@@ -193,13 +203,18 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                   />
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-[#64748b] text-xs tracking-widest uppercase mb-2">
-                    <AtSign size={13} /> Email
+                  <label
+                    htmlFor="contact-email"
+                    className="flex items-center gap-2 text-[#64748b] text-xs tracking-widest uppercase mb-2"
+                  >
+                    <AtSign size={13} aria-hidden="true" /> Email
                   </label>
                   <input
+                    id="contact-email"
                     type="email"
                     name="email"
                     required
+                    autoComplete="email"
                     value={form.email}
                     onChange={handleChange}
                     placeholder="votre@email.com"
@@ -207,10 +222,14 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                   />
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-[#64748b] text-xs tracking-widest uppercase mb-2">
-                    <MessageSquare size={13} /> Message
+                  <label
+                    htmlFor="contact-message"
+                    className="flex items-center gap-2 text-[#64748b] text-xs tracking-widest uppercase mb-2"
+                  >
+                    <MessageSquare size={13} aria-hidden="true" /> Message
                   </label>
                   <textarea
+                    id="contact-message"
                     name="message"
                     required
                     rows={5}
@@ -223,12 +242,14 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                 <button
                   type="submit"
                   disabled={status === "sending"}
+                  aria-busy={status === "sending"}
                   className="w-full bg-[#00a5b0] text-white tracking-[0.2em] uppercase text-xs py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Send size={14} /> {status === "sending" ? "Envoi..." : "Envoyer"}
+                  <Send size={14} aria-hidden="true" /> {status === "sending" ? "Envoi..." : "Envoyer"}
                 </button>
               </form>
             )}
+            </div>
           </div>
         </div>
 

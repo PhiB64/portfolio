@@ -94,6 +94,7 @@ portfolio/
 │       └── project-content.jsx
 ├── lib/                    # Utilitaires
 │   ├── cube-math.js        # Calculs géométriques du cube
+│   ├── cube-media.js       # Source unique des médias des 6 faces
 │   └── scramble.js         # Animation de brouillage de texte
 ├── public/                 # Assets statiques
 │   ├── web.webm            # Vidéo face Web
@@ -111,7 +112,14 @@ portfolio/
 
 ### Modifier les images du cube
 
-Les images sont définies dans `app/page.js` via la constante `HERO_IMAGES`. Remplacez les chemins par vos propres visuels.
+Les médias des six faces sont définis dans **`lib/cube-media.js`** (constante
+`FACE_MEDIA`), dans l'ordre de `FACE_LABELS`. Cette liste est la source unique :
+`app/page.js` la passe au cube, et `components/hero-cube.jsx` s'en sert de
+repli si la prop `images` est vide.
+
+L'appariement se fait sur le nom de fichier : correspondance exacte du nom sans
+extension d'abord (`web` → `web.webm`), puis correspondance partielle. Le nom du
+fichier doit donc rester lisible — `web.webm` et non `web-dev-2.webm`.
 
 ### Modifier les labels
 
@@ -120,6 +128,22 @@ Les labels des faces sont définis dans `lib/cube-math.js` via `FACE_LABELS`.
 ### Modifier les couleurs
 
 Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`, `--secondary`, etc.).
+
+## Accessibilité
+
+- Le cube est pilotable au clavier : la section de défilement est le conteneur
+  de scroll, donc **les flèches font défiler la piste** (qui pilote la rotation)
+  et **Entrée ouvre la face tournée vers l'observateur**. Les flèches n'ont pas
+  été captées au profit d'une rotation directe, pour ne pas supprimer le
+  défilement au clavier.
+- Les onglets projets, masqués (`opacity: 0`) avant leur révélation, **se
+  révèlent au focus** : sans cela la tabulation menait à des boutons invisibles.
+- `prefers-reduced-motion: reduce` raccourcit les animations **autonomes**
+  (autoplay de fin, skip, ondes sonar, molette). Le scrub de scroll n'est pas
+  concerné : c'est un contrôle direct de l'utilisateur, et l'annuler figerait la
+  page sur la carte d'intro.
+- Le titre de la page d'accueil est un `<text>` SVG, non exposé aux lecteurs
+  d'écran : un `<h1 class="sr-only">` est posé dans `app/page.js`.
 
 ## Licence
 

@@ -2,6 +2,53 @@ import { Globe, Layers, Code2, Smartphone, Zap, Server, Package, Wand2, Play, Cp
 
 const PAGE_ICONS = [Globe, Layers, Server, Database, Smartphone, Rocket];
 
+// Icône par compétence, déduite du libellé. Tableau plutôt que cascade de
+// `if` : l'ordre des tests devient explicite, « react native » doit être
+// évalué avant « react », et l'ajout d'une compétence se fait en une ligne.
+// Le repli `null` laisse le CPU générique.
+const ICON_SIZE = 15;
+const ICON_CLASS = "text-[#00a5b0] shrink-0";
+const SKILL_ICON_RULES = [
+  [["html"], Globe],
+  [["css", "scss"], Layers],
+  [["javascript", "ecmascript"], Code2],
+  [["responsive", "mobile-first", "react native", "flutter", "store", "synchronisation"], Smartphone],
+  [["react"], Zap],
+  [["next"], Server],
+  [["vite"], Package],
+  [["tailwind"], Wand2],
+  [["gsap", "framer", "lenis"], Play],
+  [["node", "express"], Terminal],
+  [["strapi"], Layers],
+  [["docker", "nginx"], Box],
+  [["sécurité", "jwt"], Shield],
+  [["email", "nodemailer", "resend"], Mail],
+  [["postgres", "mongo", "maria", "sql", "base"], Database],
+  [["cloudinary", "cloud"], Cloud],
+  [["leaflet", "carte"], MapPin],
+  [["pwa"], Smartphone],
+];
+
+// Résolu une seule fois : le libellé d'une compétence ne change pas pendant
+// la vie du module, et le recalcul à chaque rendu n'était jamais justifié.
+const SKILL_ICONS = new Map();
+SKILL_ICON_RULES.forEach(([tokens, Icon], priority) => {
+  tokens.forEach((token) => {
+    if (!SKILL_ICONS.has(token)) SKILL_ICONS.set(token, { Icon, priority });
+  });
+});
+
+function skillIcon(title) {
+  const t = String(title).toLowerCase();
+  let best = null;
+  SKILL_ICONS.forEach((entry, token) => {
+    if (!t.includes(token)) return;
+    if (!best || entry.priority < best.priority) best = entry;
+  });
+  const Icon = best ? best.Icon : Cpu;
+  return <Icon size={ICON_SIZE} className={ICON_CLASS} />;
+}
+
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const PROJECT_CONTENT = [
@@ -198,30 +245,6 @@ export const PROJECT_CONTENT = [
 
 export function renderProjectContent(i, { onContact } = {}) {
   const p = PROJECT_CONTENT[i];
-
-  // Map skill title keywords to a Lucide icon.
-  const skillIcon = (title) => {
-    const t = title.toLowerCase();
-    if (t.includes("html")) return <Globe size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("css") || t.includes("scss")) return <Layers size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("javascript") || t.includes("ecmascript")) return <Code2 size={15} className="text-[#00a5b0] shrink-0" />;
-if (t.includes("responsive") || t.includes("mobile-first") || t.includes("react native") || t.includes("flutter") || t.includes("store") || t.includes("synchronisation")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("react") && !t.includes("native")) return <Zap size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("next")) return <Server size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("vite")) return <Package size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("tailwind")) return <Wand2 size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("gsap") || t.includes("framer") || t.includes("lenis")) return <Play size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("node") || t.includes("express")) return <Terminal size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("strapi")) return <Layers size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("docker") || t.includes("nginx")) return <Box size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("sécurité") || t.includes("jwt")) return <Shield size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("email") || t.includes("nodemailer") || t.includes("resend")) return <Mail size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("postgres") || t.includes("mongo") || t.includes("maria") || t.includes("sql") || t.includes("base")) return <Database size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("cloudinary") || t.includes("cloud")) return <Cloud size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("leaflet") || t.includes("carte")) return <MapPin size={15} className="text-[#00a5b0] shrink-0" />;
-    if (t.includes("pwa")) return <Smartphone size={15} className="text-[#00a5b0] shrink-0" />;
-    return <Cpu size={15} className="text-[#00a5b0] shrink-0" />;
-  };
 
   const PageIcon = PAGE_ICONS[i];
   const items = [];

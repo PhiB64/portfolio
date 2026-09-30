@@ -2,13 +2,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp } from "lucide-react";
 
+// Les onglets sont pilotés par état, pas par route : l'URL `?project=N` est
+// réécrite par `openProject`, et `url` n'était jamais lu. Le conserver
+// suggérait un routage qui n'existe pas.
 export const PROJECT_LINKS = [
-  { name: "WEB", url: "/web" },
-  { name: "REACT", url: "/react" },
-  { name: "BACKEND", url: "/backend" },
-  { name: "DATABASE", url: "/database" },
-  { name: "MOBILE", url: "/mobile" },
-  { name: "PROJETS", url: "/projets" },
+  { name: "WEB" },
+  { name: "REACT" },
+  { name: "BACKEND" },
+  { name: "DATABASE" },
+  { name: "MOBILE" },
+  { name: "PROJETS" },
 ];
 
 const TAB_BASE =

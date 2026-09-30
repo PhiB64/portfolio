@@ -1,8 +1,0 @@
-name = "portfolio-contact"
-main = "index.js"
-compatibility_date = "2025-01-01"
-
-[vars]
-BREVO_API_KEY = ""
-TO_EMAIL = "philippebarbosa64@gmail.com"
-TO_NAME = "Philippe Barbosa"

@@ -13,6 +13,7 @@ import {
   FACES,
   LIGHT_DIR,
   computeWireframe,
+  faceFrontAmount,
   faceTransform,
   findClickedFace,
   getCubeRotation,
@@ -21,19 +22,15 @@ import {
   rotateVecByXY,
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
+import { FACE_MEDIA } from "../lib/cube-media";
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
-// [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS]
+// [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS].
+// La liste vit dans `lib/cube-media.js` : elle était dupliquée ici et dans
+// `app/page.js`, où seule celle de la page était réellement utilisée.
+const DEFAULT_FACE_MEDIA = FACE_MEDIA;
+// Préfixe de déploiement, encore nécessaire pour le logo (asset seul).
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-
-const DEFAULT_FACE_MEDIA = [
-  `${BASE}/web.webm`,
-  `${BASE}/react.webp`,
-  `${BASE}/backend.webm`,
-  `${BASE}/database.webp`,
-  `${BASE}/mobile.webm`,
-  `${BASE}/projets.webp`,
-];
 
 // Smoothstep easing reused by the end-sequence animations.
 const smoothstep = (t) => {
@@ -178,6 +175,17 @@ const isRealMobileDevice = () => {
   return MOBILE_USER_AGENT.test(userAgent) || window.navigator.userAgentData?.mobile === true;
 };
 
+// `prefers-reduced-motion` : ne concerne QUE les animations autonomes —
+// l'autoplay de fin, la chorégraphie du skip, les ondes sonar, la molette. Le
+// scrub de scroll n'est volontairement pas touché : c'est un pilotage direct de
+// l'utilisateur, pas une animation automatique, et le neutraliser figerait la
+// page sur la carte d'intro (cf. le commentaire de l'effet d'animation).
+// Lu à chaque appel plutôt qu'une fois au chargement, pour qu'un changement de
+// réglage système soit pris en compte sans rechargement.
+const reduceMotion = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
 const sonarGeometry = (root, pointEl) => {
   const rect = root.getBoundingClientRect();
   if (!pointEl) {
@@ -276,8 +284,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // changement de face : c'est lui qui déclenche le passage en décodage.
   const galleryExposureElapsedRef = useRef(0);
   const lastGalleryLabelTextRef = useRef("");
-  const borderColorRef = useRef("#00a5b0");
-  const strokeWidthRef = useRef(2);
   const cubeContainerRef = useRef(null);
   const contentRef = useRef(null);
   const restorePRef = useRef(null);
@@ -355,37 +361,45 @@ export function HeroCube({ title, subtitle, images = [] }) {
   skipRevealedFacesRef.current = skipRevealedFaces;
   mediaRetractedRef.current = mediaRetracted;
   zoomedFaceRef.current = zoomedFace;
-  borderColorRef.current = "#00a5b0";
-  strokeWidthRef.current = 2;
 
   const faceImages = useMemo(() => {
     const srcs = images && images.length ? images : DEFAULT_FACE_MEDIA;
 
     const tokensByLabel = FACE_LABELS.map((l) => l.toLowerCase());
 
-    const normalize = (s) => {
-      if (!s) return "";
-      try {
-        const p = s.split("/").pop().split("?")[0];
-        return p.toLowerCase();
-      } catch {
-        return s.toLowerCase();
-      }
+    // Nom de fichier (avec extension) et nom sans extension : le premier sert
+    // au appariement partiel, le second à la correspondance exacte.
+    const splitName = (s) => {
+      const file = s.split("/").pop().split("?")[0].toLowerCase();
+      return { file, stem: file.replace(/\.[^.]+$/, "") };
     };
 
-    const srcNames = srcs.map((s) => ({ src: s, name: normalize(s) }));
+    const srcNames = srcs.map((s) => {
+      const { file, stem } = splitName(s);
+      return { src: s, name: file, stem };
+    });
 
     const mapped = new Array(FACES.length).fill(null);
 
     for (let i = 0; i < tokensByLabel.length; i++) {
       const token = tokensByLabel[i];
+      // Passe 1 : correspondance exacte du nom sans extension ("web" ->
+      // web.webm). Sans elle, un asset dont le nom CONTIENT le token serait
+      // capté par la face correspondante — "mywebsite.webp" pour la face WEB.
       for (let j = 0; j < srcNames.length; j++) {
-        if (!srcNames[j]) continue;
-        if (srcNames[j].name.includes(token)) {
-          mapped[i] = srcNames[j].src;
-          srcNames[j] = null;
-          break;
-        }
+        if (!srcNames[j] || srcNames[j].stem !== token) continue;
+        mapped[i] = srcNames[j].src;
+        srcNames[j] = null;
+        break;
+      }
+      if (mapped[i]) continue;
+      // Passe 2 : correspondance partielle dans le nom de fichier, pour les
+      // libellés qui ne sont pas le nom exact de l'asset.
+      for (let j = 0; j < srcNames.length; j++) {
+        if (!srcNames[j] || !srcNames[j].name.includes(token)) continue;
+        mapped[i] = srcNames[j].src;
+        srcNames[j] = null;
+        break;
       }
     }
 
@@ -471,7 +485,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       scale: expand ? [0.02, toScale] : [toScale, 0.02],
       opacity: [0.9, 0],
       easing: "easeInOutCubic",
-      duration: duration ?? (expand ? 700 : 480),
+      // Sous `prefers-reduced-motion`, l'onde est quasi instantanée : elle fait
+      // toujours son office (le voile doit être plein avant le basculement du
+      // visuel, sinon pop), mais elle ne parcourt plus 700 ms d'anneau.
+      duration: duration ?? (reduceMotion() ? 60 : expand ? 700 : 480),
       autoplay: false,
       update: (a) => {
         const p = expand ? a.progress / 100 : 1 - a.progress / 100;
@@ -931,6 +948,44 @@ export function HeroCube({ title, subtitle, images = [] }) {
     hitTestAndOpen(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
   }, [hitTestAndOpen]);
 
+  // Équivalent clavier du clic : sans lui, la zone du cube n'est atteignable
+  // qu'au pointeur et le contenu du portfolio reste inaccessible au clavier.
+  // Seule la face la plus frontale est ouverte — celle que l'utilisateur voit.
+  // On ne capte PAS les flèches : la section est elle-même le conteneur de
+  // défilement, et les flèches doivent continuer à faire défiler la piste, qui
+  // pilote la rotation du cube. La navigation au clavier reste donc
+  // « défiler pour tourner, Entrée pour ouvrir », cohérente avec le scrub.
+  const handleCubeKeyDown = useCallback(
+    (e) => {
+      if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+      e.preventDefault();
+      if (!facesVisibleRef.current) return;
+      const baseRot = getCubeRotation(currentPRef.current);
+      const rot = {
+        rx: baseRot.rx + dragOffsetRef.current.rx,
+        ry: baseRot.ry + dragOffsetRef.current.ry,
+      };
+      let best = -1;
+      let bestAmount = 0;
+      for (let i = 0; i < 6; i++) {
+        if (!faceImages[i]) continue;
+        const n = FACE_NORMALS[i];
+        const amount = faceFrontAmount(n[0], n[1], n[2], rot.rx, rot.ry);
+        if (amount > bestAmount) {
+          bestAmount = amount;
+          best = i;
+        }
+      }
+      if (best < 0) return;
+      // Même garde que le hit-test au pointeur : une face ne s'ouvre qu'une
+      // fois son label révélé ou son média déjà exposé.
+      const labelShown = faceVisibilityCountRef.current[best] >= FACE_LABEL_REVEAL_COUNT;
+      const mediaShown = zoomedFacesRef.current[best];
+      if (labelShown || mediaShown) handleFaceClick(best);
+    },
+    [faceImages, handleFaceClick],
+  );
+
   const openProject = useCallback((i) => {
     setSelectedProject(i);
     if (typeof window !== "undefined") {
@@ -1287,7 +1342,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
     let skipLate = false;
-    const AUTOPLAY_MS = 9000;
+    // Durées des séquences autonomes. Sous `prefers-reduced-motion`, elles sont
+    // raccourcies plutôt qu'annulées : la piste doit atteindre le bout (c'est ce
+    // qui dévoile les liens et CONTACT), mais sans leDeployment de 9 secondes
+    // d'une rotation imposée. 9 s -> 2 s laisse le temps de lire les noms.
+    const AUTOPLAY_MS = reduceMotion() ? 2000 : 9000;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
     // clic : sur mobile on peut enchaîner les six tapes près de INTRO_END, et
@@ -1320,7 +1379,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // dont le placement final du cube, le plus angulaire de tous, d'où la fin de
     // spin qui partait à toute vitesse. On vise ~1,4x : assez posé pour être
     // lisible, sans alourdir le skip de deux secondes.
-    const SKIP_FINALE_MS = 4400;
+    const SKIP_FINALE_MS = reduceMotion() ? 1200 : 4400;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Effort de recul cumulé (px) depuis `reverseAnchor`, la position de
@@ -2800,14 +2859,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
             loop
             playsInline
             preload="metadata"
-            onCanPlay={() => {}}
           />
         </div>
         <div className="absolute inset-0 bg-[#0a0f1c]/60" />
         <button
-          onClick={() => window.location.reload()}
+          onClick={() => {
+            // « Accueil » : on rejoue le retour vers l'intro — le même geste que
+            // le bouton RETOUR. Un `location.reload()` était la solution
+            // précédente : il détruisait l'état, re-téléchargeait le bundle et
+            // repartait de zéro pour revenir au point de départ.
+            if (goToStartRef.current) {
+              goToStartRef.current();
+            } else if (sectionRef.current) {
+              sectionRef.current.scrollTop = 0;
+            }
+          }}
           className="absolute top-3 left-3 z-30 sm:top-5 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
-          aria-label="Accueil"
+          aria-label="Retour à l'accueil"
         >
           <img
             src={`${BASE}/icon.webp`}
@@ -2909,16 +2977,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 DOWN
               </div>
             </div>
-            <style>{`
-              @keyframes wheelScroll {
-                0%, 100% { transform: translateY(0); opacity: 1; }
-                50% { transform: translateY(8px); opacity: 0.2; }
-              }
-              .wheel-anim {
-                animation: wheelScroll 1.5s ease-in-out infinite;
-              }
-            `}</style>
-              </div>
+          </div>
               <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
                 {PROJECT_LINKS.map((link, i) => {
                   const shown =
@@ -2928,7 +2987,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     <button
                       key={link.name}
                       onClick={() => openProject(i)}
-                      className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
+                      onFocus={(e) => {
+                        // `opacity: 0` n'empêche ni le focus ni l'activation au
+                        // clavier : sans ce correctif, la tabulation menait à six
+                        // boutons invisibles. On les révèle au focus (comme un
+                        // lien d'évitement) ; le style inline est réécrit au
+                        // prochain render, qui restaure l'opacité d'origine.
+                        e.currentTarget.style.opacity = "1";
+                        e.currentTarget.style.transform = "translateY(0)";
+                        e.currentTarget.style.pointerEvents = "auto";
+                      }}
+                      className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0f1c] cursor-pointer"
                       style={{
                         opacity: shown ? 1 : 0,
                         transform: shown
@@ -3076,8 +3145,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
                                       alt=""
                                       className="w-full h-full object-cover"
                                       draggable={false}
+                                      // `eager` volontairement conservé : les faces
+                                      // sont repliées en `transform: scale(0)`, donc
+                                      // hors du viewport au sens d'IntersectionObserver
+                                      // — un `lazy` les différerait, et `revealFaceMedia`
+                                      // n'ouvrirait la face qu'au bout de son timeout de
+                                      // 1400 ms, le visuel restant vide. Le coût est
+                                      // borné (~250 Ko pour les trois .webp) et il est payé
+                                      // une fois, au premier affichage.
                                       loading="eager"
-                                      fetchPriority="high"
+                                      // Décodage hors du thread principal : évite de
+                                      // bloquer le premier rendu du cube.
+                                      decoding="async"
                                     />
                                   )}
                                 </div>
@@ -3247,6 +3326,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     <div
                       ref={clickZoneRef}
                       onClick={handleCubeClick}
+                      onKeyDown={handleCubeKeyDown}
+                      role="button"
+                      tabIndex={0}
+                      aria-label="Cube de compétences. Faites défiler pour le faire tourner, puis appuyez sur Entrée pour ouvrir la face tournée vers vous."
                       className="absolute cursor-grab"
                       style={{
                         zIndex: 10,

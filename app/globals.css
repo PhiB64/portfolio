@@ -77,3 +77,33 @@ body {
   font-family: ui-sans-serif, system-ui, sans-serif;
   line-height: 1.55;
 }
+
+/* Indicateur de focus clavier. Aucun n'existait : la navigation au clavier ne
+   donnait aucun repère sur les boutons (SKIP, onglets, RETOUR, CONTACT…).
+   `outline` ne participe pas au layout, donc aucun décalage à corriger. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Molette de la carte d'intro. Boucle infinie donc toujours autonome : c'est
+   le seul usage de `<style>` qui était resté dans le JSX, réinjecté à chaque
+   render du composant. */
+@keyframes wheelScroll {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(8px); opacity: 0.2; }
+}
+
+.wheel-anim {
+  animation: wheelScroll 1.5s ease-in-out infinite;
+}
+
+/* `prefers-reduced-motion` : on neutralise les boucles infinies et les fondus
+   ambiants. Les animations pilotées par le scroll ne sont PAS concernées — le
+   scrub est un contrôle direct de l'utilisateur, et le couper figerait la page
+   sur la carte d'intro (cf. commentaire dans hero-cube.jsx). */
+@media (prefers-reduced-motion: reduce) {
+  .wheel-anim {
+    animation: none;
+  }
+}

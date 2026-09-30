@@ -35,6 +35,11 @@ jobs:
         run: npm run build
         env:
           GITHUB_PAGES: true
+          # Valeur publique par construction : le préfixe NEXT_PUBLIC_ la lit à
+          # la compilation et elle finit dans le bundle client, où n'importe qui
+          # peut la lire. La garder dans `secrets` n'ajoute aucune
+          # confidentialité — c'est la même valeur que celle en dur par défaut
+          # dans components/contact-overlay.jsx.
           NEXT_PUBLIC_FORMSPREE_ENDPOINT: ${{ secrets.NEXT_PUBLIC_FORMSPREE_ENDPOINT }}
 
       - name: Upload Pages artifact
