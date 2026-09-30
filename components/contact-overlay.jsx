@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, CheckCircle, AlertCircle } from "lucide-react";
+import { ProjectTabs } from "./cube/project-tabs";
 
 const IconGithub = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-[#00a5b0] shrink-0">
@@ -18,7 +19,7 @@ const FORMSPREE_ENDPOINT =
   process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT || "https://formspree.io/f/xbglwdny";
 const CONTACT_EMAIL = "philippebarbosa64@gmail.com";
 
-export function ContactOverlay({ onClose }) {
+export function ContactOverlay({ onClose, onSelectProject }) {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [status, setStatus] = useState("idle");
 
@@ -53,7 +54,15 @@ export function ContactOverlay({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: "#0a0f1c" }}>
+    <div className="fixed inset-0 z-50 overflow-y-auto scroll-none" style={{ backgroundColor: "#0a0f1c" }}>
+      {typeof onSelectProject === "function" && (
+        <ProjectTabs
+          contactActive
+          onSelect={onSelectProject}
+          onContact={onClose}
+          onBack={onClose}
+        />
+      )}
       <div className="mx-auto max-w-3xl px-6 py-20">
 
         {/* En-tête */}
@@ -221,16 +230,6 @@ export function ContactOverlay({ onClose }) {
               </form>
             )}
           </div>
-        </div>
-
-        {/* Retour */}
-        <div className="text-center">
-          <button
-            onClick={onClose}
-            className="text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer"
-          >
-            &larr; RETOUR
-          </button>
         </div>
       </div>
     </div>

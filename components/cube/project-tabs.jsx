@@ -1,0 +1,145 @@
+"use client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronUp } from "lucide-react";
+
+export const PROJECT_LINKS = [
+  { name: "WEB", url: "/web" },
+  { name: "REACT", url: "/react" },
+  { name: "BACKEND", url: "/backend" },
+  { name: "DATABASE", url: "/database" },
+  { name: "MOBILE", url: "/mobile" },
+  { name: "PROJETS", url: "/projets" },
+];
+
+const TAB_BASE =
+  "text-center whitespace-nowrap tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs transition-colors duration-300 cursor-pointer border";
+const TAB_INACTIVE =
+  "bg-[#0a0f1c] border-[#00a5b0]/60 text-[#00a5b0] hover:bg-[#00a5b0]/10 hover:text-white";
+const TAB_ACTIVE = "bg-[#00a5b0] border-[#00a5b0] text-[#0a0f1c]";
+const CONTACT_BASE =
+  "text-center whitespace-nowrap tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs transition-colors duration-300 cursor-pointer border-0";
+// Fonds et couleurs sont choisis par variant, jamais empilés : deux utilitaires
+// Tailwind de même propriété (`bg-white` / `bg-[#00a5b0]`) se départagent
+// selon l'ordre du CSS généré, pas selon celui de la chaîne de classes.
+const CONTACT_INACTIVE = "bg-white text-[#0a0f1c] hover:bg-white/80";
+const CONTACT_ACTIVE = "bg-[#00a5b0] text-[#0a0f1c] hover:bg-[#00a5b0]/90";
+
+// Barre d'onglets partagée par les overlays (page projet, page contact).
+// Bureau uniquement : sur mobile le retour à la page principale se fait avec
+// le bouton « ← RETOUR » en bas de page, la barre resterait trop encombrante.
+// Seuils de la barre : masquée au moindre pixel de défilement, revenue
+// seulement une fois revenu tout en haut. `HIDE_ABOVE` minuscule pour que le
+// premier cran de molette la fasse partir ; `SHOW_BELOW` à 0 pour qu'elle
+// réapparaisse au point de repère exact, loin du seuil où elle s'est cachée.
+const HIDE_ABOVE = 1;
+const SHOW_BELOW = 0;
+// Le bouton « retour en haut » n'apparaît qu'une fois franchement descendu,
+// pour ne pas doubler la barre d'onglets au sommet de la page.
+const TOP_BUTTON_ABOVE = 400;
+
+export function ProjectTabs({
+  activeIndex = null,
+  contactActive = false,
+  onSelect,
+  onContact,
+  onBack,
+}) {
+  const barRef = useRef(null);
+  const [hidden, setHidden] = useState(false);
+  const [showTopButton, setShowTopButton] = useState(false);
+  const scrollerRef = useRef(null);
+
+  // La barre est `sticky` dans le conteneur défilant de l'overlay : on remonte
+  // la chaîne jusqu'à lui pour écouter le scroll, plutôt que la fenêtre qui
+  // ne bouge pas ici.
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    let scroller = bar.parentElement;
+    while (scroller) {
+      const overflowY = getComputedStyle(scroller).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return;
+    scrollerRef.current = scroller;
+
+    const onScroll = () => {
+      const y = scroller.scrollTop;
+      setHidden((wasHidden) =>
+        wasHidden ? y > SHOW_BELOW : y > HIDE_ABOVE,
+      );
+      setShowTopButton(y > TOP_BUTTON_ABOVE);
+    };
+    onScroll();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => scroller.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Retour animé plutôt qu'un saut sec : sur les pages longues, un `scrollTop`
+  // direct ferait basculer le contenu d'un coup.
+  const scrollToTop = useCallback(() => {
+    scrollerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  return (
+    <>
+      <div
+        ref={barRef}
+        className={`sticky top-0 z-20 hidden w-full sm:block bg-[#0a0f1c]/80 backdrop-blur-md transition-transform duration-300 ease-out ${
+          hidden ? "-translate-y-full" : "translate-y-0"
+        }`}
+      >
+        <nav className="relative flex w-full flex-wrap items-center justify-center gap-3 px-4 pt-6 pb-4">
+          {PROJECT_LINKS.map((link, i) => {
+            const active = activeIndex === i;
+            return (
+              <button
+                key={link.name}
+                type="button"
+                onClick={() => onSelect?.(i)}
+                aria-current={active ? "page" : undefined}
+                className={`${TAB_BASE} ${active ? TAB_ACTIVE : TAB_INACTIVE}`}
+              >
+                {link.name}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={onContact}
+            aria-current={contactActive ? "page" : undefined}
+            className={`${CONTACT_BASE} sm:ml-6 ${contactActive ? CONTACT_ACTIVE : CONTACT_INACTIVE}`}
+          >
+            CONTACT
+          </button>
+        </nav>
+      </div>
+
+      {/* « ← RETOUR » sort de la barre : il reste ancré en haut à gauche, donc
+          toujours accessible même quand les onglets se sont escamotés. Plus
+          visible que la barre en `sm` : sans lui, mobile n'a aucun moyen de
+          revenir, la barre d'onglets y étant masquée. */}
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="fixed top-6 left-4 z-30 text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer"
+        >
+          &larr; RETOUR
+        </button>
+      )}
+
+      {showTopButton && (
+        <button
+          type="button"
+          onClick={scrollToTop}
+          aria-label="Retour en haut de page"
+          className="fixed bottom-8 right-8 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md hover:bg-[#00a5b0]/10 hover:text-white transition-colors duration-300 cursor-pointer"
+        >
+          <ChevronUp size={20} />
+        </button>
+      )}
+    </>
+  );
+}

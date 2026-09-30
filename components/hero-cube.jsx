@@ -5,6 +5,7 @@ import anime from "animejs";
 import { Undo2, MousePointer2 } from "lucide-react";
 
 import { renderProjectContent } from "./cube/project-content";
+import { ProjectTabs, PROJECT_LINKS } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
 import {
   FACE_LABELS,
@@ -20,15 +21,6 @@ import {
   rotateVecByXY,
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
-
-const PROJECT_LINKS = [
-  { name: "WEB", url: "/web" },
-  { name: "REACT", url: "/react" },
-  { name: "BACKEND", url: "/backend" },
-  { name: "DATABASE", url: "/database" },
-  { name: "MOBILE", url: "/mobile" },
-  { name: "PROJETS", url: "/projets" },
-];
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
 // [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS]
@@ -272,6 +264,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const zoomedFaceRef = useRef(-1);
   const currentPRef = useRef(0);
   const overlayRef = useRef(null);
+  const overlayScrollRef = useRef(null);
   const galleryLabelRef = useRef(null);
   const faceScrambleTlRef = useRef([]);
   const faceScrambleStateRef = useRef(["none", "none", "none", "none", "none", "none"]);
@@ -946,6 +939,49 @@ export function HeroCube({ title, subtitle, images = [] }) {
         const url = new URL(window.location.href);
         url.searchParams.set("project", String(i + 1));
         window.history.pushState(state, "", url.pathname + url.search);
+      } catch {}
+    }
+  }, []);
+
+  // Changement d'onglet depuis un overlay : on remplace l'entrée d'historique
+  // au lieu d'en empiler une par onglet (sinon chaque onglet deviendrait un pas
+  // « retour »), et on remonte la page projet affichée.
+  const openProjectFromOverlay = useCallback(
+    (i) => {
+      if (typeof window !== "undefined" && overlayScrollRef.current) {
+        overlayScrollRef.current.scrollTop = 0;
+      }
+      setSelectedProject(i);
+      if (typeof window !== "undefined") {
+        try {
+          const state = { ufoProject: i };
+          const url = new URL(window.location.href);
+          url.searchParams.set("project", String(i + 1));
+          window.history.replaceState(state, "", url.pathname + url.search);
+        } catch {}
+      }
+    },
+    []
+  );
+
+  // Fermeture de l'overlay projet, partagée par la flèche de la barre d'onglets
+  // et le bouton « ← RETOUR » en bas de page.
+  const closeProjectOverlay = useCallback(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.history &&
+      window.history.state &&
+      typeof window.history.state.ufoProject === "number"
+    ) {
+      window.history.back();
+      return;
+    }
+    setSelectedProject(null);
+    if (typeof window !== "undefined") {
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("project");
+        window.history.replaceState(null, "", url.pathname + url.search);
       } catch {}
     }
   }, []);
@@ -3245,49 +3281,30 @@ export function HeroCube({ title, subtitle, images = [] }) {
                   } catch {}
                 }
               }}
+              onSelectProject={(i) => {
+                setShowContact(false);
+                openProjectFromOverlay(i);
+              }}
             />
           </div>
         )}
 
         {selectedProject !== null && (
           <div
-            className="fixed inset-0 z-50 overflow-y-auto"
+            ref={overlayScrollRef}
+            className="fixed inset-0 z-50 overflow-y-auto scroll-none"
             style={{ backgroundColor: "#0a0f1c" }}
           >
+            <ProjectTabs
+              activeIndex={selectedProject}
+              onSelect={openProjectFromOverlay}
+              onContact={onContactClick}
+              onBack={closeProjectOverlay}
+            />
             <div className="mx-auto max-w-4xl px-6 py-24">
               {renderProjectContent(selectedProject, {
                 onContact: onContactClick,
               })}
-              <div className="text-center mt-20">
-                <button
-                  onClick={() => {
-                    if (
-                      typeof window !== "undefined" &&
-                      window.history &&
-                      window.history.state &&
-                      typeof window.history.state.ufoProject === "number"
-                    ) {
-                      window.history.back();
-                    } else {
-                      setSelectedProject(null);
-                      if (typeof window !== "undefined") {
-                        try {
-                          const url = new URL(window.location.href);
-                          url.searchParams.delete("project");
-                          window.history.replaceState(
-                            null,
-                            "",
-                            url.pathname + url.search,
-                          );
-                        } catch {}
-                      }
-                    }
-                  }}
-                  className="text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer"
-                >
-                  &larr; RETOUR
-                </button>
-              </div>
             </div>
           </div>
         )}
