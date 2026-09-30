@@ -941,9 +941,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       morph: 1600,
       fadeIn: 120,
       idle: 5000,
+      showcase: 3200,
       facesOut: 900,
       cubeFade: 600,
-      spin: 3600,
+      spin: 3000,
       squareIn: 250,
       cubeOut: 500,
       lineMorph: 900,
@@ -954,6 +955,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       W.morph +
       W.fadeIn +
       W.idle +
+      W.showcase +
       W.facesOut +
       W.cubeFade +
       W.spin +
@@ -963,14 +965,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
       W.namesRise;
     const INTRO_END = (W.wheelFade + W.morph + W.fadeIn) / TOTAL;
     const CUBE_END = (W.wheelFade + W.morph + W.fadeIn + W.idle) / TOTAL;
-    const SPIN_START = CUBE_END + (W.facesOut + W.cubeFade) / TOTAL;
-    const SPIN_END = CUBE_END + (W.facesOut + W.cubeFade + W.spin) / TOTAL;
+    // Phase showcase : le cube fait un tour complet EN MONTRANT les six visuels,
+    // avant leur fondu. Elle est pilotée par la tête de timeline, comme le spin
+    // qui suit.
+    const SHOW_START = CUBE_END;
+    const SHOW_END = CUBE_END + W.showcase / TOTAL;
+    // La fenêtre de fondu des visuels est désormais celle qui suit la
+    // showcase, et non plus celle qui précède le spin.
+    const SPIN_START = SHOW_END + (W.facesOut + W.cubeFade) / TOTAL;
+    const SPIN_END = SPIN_START + W.spin / TOTAL;
     const LINE_POS = TOTAL - (W.lineMorph + W.namesRise);
     const NAMES_START = (LINE_POS + W.lineMorph) / TOTAL;
     const NAMES_END = NAMES_START + W.namesRise / TOTAL;
     // The cube only rotates on the part of the scroll that comes after the intro.
     const CUBE_RANGE = 1 - INTRO_END;
-    const ROT_END = (SPIN_END - INTRO_END) / CUBE_RANGE;
 
     const tl = anime.timeline({ autoplay: false });
     tl.add({
@@ -1001,6 +1009,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         easing: "easeInOutQuad",
       }, W.wheelFade + W.morph)
       .add({ duration: W.idle })
+      .add({ duration: W.showcase })
       .add({ duration: W.facesOut })
       .add({ duration: W.cubeFade })
       .add({ duration: W.spin })
@@ -1022,6 +1031,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let currentP = restoreP !== null ? restoreP : 0;
     let rafId = null;
     let lastTickTime = 0;
+    // Pose du cube au moment du déverrouillage (6e clic) : `lockedCubeP` est la
+    // position de scroll gelée, celle de la face qui vient d'être cliquée. La
+    // fin de la séquence part de là — le cube ne se replace jamais ailleurs, et
+    // la showcase démarre sur le visuel que l'utilisateur vient de choisir.
+    let lockedCubeP = 0;
     // Once every face has been clicked, the end sequence plays out at a steady
     // pace (autoplay) instead of snapping to the real scroll position.
     let autoplay = false;
@@ -1706,6 +1720,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
         autoplay = true;
         autoplayElapsed = 0;
         autoplayStartP = currentP;
+        // La pose de repos de la fin est GELÉE ici, sur la position de scroll de
+        // l'instant — celle de la face qui vient d'être cliquée. Sans cela
+        // `baseP` repartait de 0 au déverrouillage : le cube revenait d'un coup
+        // à la face « front », remplaçant le visuel choisi par un autre.
+        lockedCubeP = Math.max(0, (currentP - INTRO_END) / CUBE_RANGE);
         tlAutoplayStartP = Math.min(currentP, CUBE_END);
         // La tête de timeline est verrouillée sur cette valeur pendant toute la
         // grâce, puis avance avec le scroll automatique (voir plus haut).
@@ -1775,12 +1794,45 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
 
       const cubeP = Math.max(0, (p - INTRO_END) / CUBE_RANGE);
-      const baseP = unlocked ? Math.min(cubeP, ROT_END) : cubeP;
+      // Avant le déverrouillage, la pose suit le scroll. Après, la fin est
+      // chorégraphiée : la pose de repos est celle de la face cliquée, gelée
+      // dans `lockedCubeP`. Le clamp `Math.min(cubeP, ROT_END)` qui précédait
+      // causait un snap visible — le pin de la face cliquée peut se trouver
+      // au-delà de ROT_END (jusqu'à p = 1), et le cube reculait alors de 13 à
+      // 43 % d'une rotation à la frame du 6e clic, remplaçant le visuel de la
+      // face choisie par celui d'une autre.
+      const baseP = unlocked ? lockedCubeP : cubeP;
       let rot = getCubeRotation(baseP);
+      // `spinning` ne passe à vrai qu'au spin à vide, celui qui replie les
+      // visuels : la showcase tourne avec les images déployées et garde donc
+      // `spinning` à faux. C'est ce qui évite que le branchement de rendu plus
+      // bas (`spinning || skipFacesHiddenRef`) les replie à mi-tour.
       let spinning = false;
+      // Phase showcase : un tour COMPLET et CONTINU du cube, les six visuels
+      // restant déployés sur les faces pendant toute la rotation. Ce n'est pas
+      // une présentation face par face : rien ne s'arrête, la vitesse est
+      // constante, et les six images défilent devant le spectateur comme sur
+      // le cube muet qui les portait déjà. Le tour part de `lockedCubeP` — la
+      // pose gelée au 6e clic — donc il démarre sur le visuel choisi par
+      // l'utilisateur, sans snap, et revient à cette même pose à la fin.
+      if (unlocked && tlP > SHOW_START && tlP <= SHOW_END) {
+        const k = Math.min(1, Math.max(0, (tlP - SHOW_START) / (SHOW_END - SHOW_START)));
+        // Une révolution complète, répartie entre les deux axes comme le spin
+        // qui suit, pour que chaque face passe bien devant le spectateur.
+        // L'easing estuni : la vitesse reste constante sur tout le tour.
+        const rev = k * 2;
+        rot = {
+          rx: rot.rx + rev * 180,
+          ry: rot.ry + rev * 180,
+        };
+        // `spinning` reste faux : ici les visuels restent déployés, alors que
+        // le spin les replie. C'est `showcasing` qui distingue les deux.
+      }
       if (unlocked && tlP > SPIN_START) {
         if (spinFromRef.current === null) {
-          spinFromRef.current = getCubeRotation(baseP);
+          // Le spin part de la pose acquise (fin de showcase ou `lockedCubeP`)
+          // et non d'une valeur reventilée : la reprise est donc invisible.
+          spinFromRef.current = rot;
         }
         const from = spinFromRef.current;
         const k = Math.min(1, (tlP - SPIN_START) / (SPIN_END - SPIN_START));
@@ -1799,6 +1851,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       } else {
         spinFromRef.current = null;
       }
+      // `showcasing` couvre le tour où le cube tourne AVEC les six visuels
+      // déployés, `spinning` celui où il tourne à vide. Le rendu des faces en
+      // dépend : le premier garde les images dépliées, le second les replie.
+      const showcasing = unlocked && tlP > SHOW_START && tlP <= SHOW_END;
       spinningRef.current = spinning;
       // The direct drag adds a fixed offset over the scroll-driven orientation.
       // From the end-sequence spin onward the offset fades out so the cube
@@ -1897,9 +1953,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       // Per-face lighting: rotate face normal by current cube rotation
       if (cubeRef.current) {
-        // Between CUBE_END and SPIN_START the six visuals plus the background
-        // fade out together, over the same EXIT_MS window. Fully reversible.
-        const exitK = unlocked ? Math.min(1, Math.max(0, (tlP - CUBE_END) / (SPIN_START - CUBE_END))) : 0;
+        // Le fondu des six visuels (et du fond) est celui qui SUIT la showcase,
+        // pas celui qui la précède : les images restent entières pendant tout
+        // le tour qui les montre, puis s'éteignent ensemble sur cette fenêtre.
+        // Fenêtre entièrement réversible.
+        const exitK = unlocked ? Math.min(1, Math.max(0, (tlP - SHOW_END) / (SPIN_START - SHOW_END))) : 0;
         // Après un clic en reverse, la révélation prime : le fondu de fin est
         // suspendu le temps que la face et le fond s'affichent en entier.
         const exitActive = exitK > 0 && !revealOverrideRef.current;
@@ -1918,7 +1976,22 @@ export function HeroCube({ title, subtitle, images = [] }) {
             faceEl.style.filter = `brightness(${brightness})`;
             continue;
           }
-          if (spinning || skipFacesHiddenRef.current) {
+          if (showcasing) {
+            // Showcase : le cube tourne en gardant les six visuels déployés sur
+            // ses faces — c'est le cube lui-même, déjà porteur des six images,
+            // qui tourne, pas une présentation face par face. L'éclairage reste
+            // celui de la normale de chaque face, donc la face frontale se lit
+            // et les autres tombent naturellement dans l'ombre pendant le tour.
+            if (media) media.style.filter = "";
+            if (wrapper) {
+              wrapper.style.transition = "none";
+              wrapper.style.opacity = "1";
+              wrapper.style.transform = "scale(1)";
+              wrapper.style.maskImage = "";
+              wrapper.style.webkitMaskImage = "";
+            }
+            faceEl.style.filter = `brightness(${brightness})`;
+          } else if (spinning || skipFacesHiddenRef.current) {
             if (media) media.style.filter = "";
             if (wrapper) {
               wrapper.style.transition = "none";
