@@ -1065,6 +1065,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
     let skipFrom = 0;
     let skipLate = false;
     const AUTOPLAY_MS = 9000;
+    // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
+    // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
+    // clic : sur mobile on peut enchaîner les six tapes près de INTRO_END, et
+    // étirer toute la rampe `[tlAutoplayStartP, 1]` sur un AUTOPLAY_MS fixe
+    // comprime alors d'autant la fin écrite — la showcase et surtout le spin se
+    // jouaient jusqu'à ~46% trop vite (1,7 s au lieu de 2,49 s). Le rattrapage
+    // reçoit donc son propre budget, et `[CUBE_END, 1]` dure toujours
+    // AUTOPLAY_MS. À 1800 ms, le rattrapage ne va jamais plus vite qu'environ
+    // 1,6× ce qu'il faisait, et le budget total le plus long reste à 10,8 s.
+    // Sans rattrapage (6e clic à ou après CUBE_END, le cas desktop), le minutage
+    // est bit pour bit celui d'avant.
+    const AUTOPLAY_CATCHUP_MS = 1800;
+    let autoplayTotalMs = AUTOPLAY_MS;
+    let autoplayCatchFrac = 0;
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
@@ -1081,11 +1095,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // vers le bas remet le compteur à zéro et ré-ancrage.
     let reverseAnchor = 0;
     let reverseEffort = 0;
+    // Point le plus bas (le plus reculé) atteint depuis le dernier ré-ancrage.
+    // L'effort se mesure depuis ce point et non depuis la position courante :
+    // sur mobile, un rebond d'inertie ou de élastique fait remonter la position
+    // de quelques px en pleine descente, et un compteur remis à zéro sur le
+    // moindre `real >= reverseAnchor` perdait alors tout le recul déjà acquis —
+    // d'où un reset qui arrivait une fois sur deux selon la façon dont l'OS
+    // découpait les deltas.
+    let reverseDeepest = 0;
     // Distance de recul (en pixels de scroll, pas en pourcentage) qu'il faut
     // accumuler vers le haut pour valider le retour. Calibré pour être
     // nettement supérieur au bruit d'un trackpad et d'un tap de doigt, mais
     // franchi en un geste franc — un molettage continu ou un swipe.
     const REVERSE_TRIGGER_PX = 120;
+    // Ré-ancrage : le recul n'est annulé que si l'utilisateur revient
+    // vers le bas de plus que cette distance depuis son point le plus reculé.
+    // Un simple rebond ne l'annule pas.
+    const REVERSE_CANCEL_PX = 60;
     // Fondu de retour au début : un balayage programmé de CUBE_END vers 0,
     // pendant lequel la détection de recul est suspendue.
     let resetPlay = false;
@@ -1199,18 +1225,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // que de figer la tête au point le plus loin atteint et de contrer le
       // geste de l'utilisateur.
       if (returnShownRef.current) {
-        // Effort de recul cumulé depuis `reverseAnchor`. On l'accumule plutôt
-        // que de tester `real` brutalement : les gestes réels (molette,
-        // trackpad, doigt) produisent des rafales de petits deltas inverses —
-        // bruit et inertie — qui ne doivent pas suffire à rejouer 1,8 s de
-        // retour. Il faut un recul franc et continu.
-        if (real < reverseAnchor) {
-          reverseEffort += (reverseAnchor - real) * sb;
-        } else {
-          // Reprise du scroll vers le bas (ou simple stabilisation) : le
-          // compteur repart à zéro, l'utilisateur n'a pas confirmé le retour.
-          reverseEffort = 0;
+        // Effort de recul mesuré depuis `reverseAnchor` — le point de départ du
+        // geste — mais évalué au point le plus reculé atteint (`reverseDeepest`)
+        // et non à la position courante. On l'accumule plutôt que de tester
+        // `real` brutalement : les gestes réels (molette, trackpad, doigt)
+        // produisent des rafales de petits deltas inverses — bruit et inertie —
+        // qui ne doivent pas suffire à rejouer 1,8 s de retour. Il faut un recul
+        // franc. En partant du point le plus reculé, un rebond de quelques px
+        // (inertie, élastique) ne fait plus repartir le compteur de zéro.
+        if (real < reverseDeepest) reverseDeepest = real;
+        reverseEffort = (reverseAnchor - reverseDeepest) * sb;
+        // Annulation : l'utilisateur revient franchement vers le bas, il n'a pas
+        // confirmé le retour. On ré-ancre sur sa position et le point le plus
+        // reculé repart avec elle. Un simple rebond reste sous cette distance et
+        // conserve donc le recul déjà mesuré.
+        if ((reverseDeepest - real) * sb >= REVERSE_CANCEL_PX) {
           reverseAnchor = real;
+          reverseDeepest = real;
+          reverseEffort = 0;
         }
         if (reverseEffort >= REVERSE_TRIGGER_PX) {
           // Recul franc : on rejoue le retour, exactement comme le bouton.
@@ -1224,6 +1256,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       reverseEffort = 0;
       reverseAnchor = real;
+      reverseDeepest = real;
       targetP = real;
       // Une reprise du scroll recentre la rotation laissée par un drag : la
       // piste redonne la main, l'offset s'éteint en fondu dans `tick` pendant
@@ -1315,11 +1348,27 @@ export function HeroCube({ title, subtitle, images = [] }) {
             // rythme pour lequel elle a été écrite, au lieu d'en sauter la plus
             // grosse partie parce que le scroll était déjà loin au moment du clic.
             autoplayElapsed += dt;
-            const k = Math.min(1, autoplayElapsed / AUTOPLAY_MS);
+            const k = Math.min(1, autoplayElapsed / autoplayTotalMs);
             const nextP = autoplayStartP + (1 - autoplayStartP) * k;
             autoScrollPx = nextP * sbAuto;
             el.scrollTop = autoScrollPx;
-            tlAutoplayP = tlAutoplayStartP + (1 - tlAutoplayStartP) * k;
+            // La tête ne traverse pas `[tlAutoplayStartP, 1]` à vitesse égale :
+            // sous CUBE_END il n'y a qu'un rattrapage, bridé à son budget, et la
+            // fin écrite `[CUBE_END, 1]` garde ainsi exactement AUTOPLAY_MS quelle
+            // que soit la position du 6e clic. Sans ce partage, un clic prématuré
+            // (six tapes enchaînées sur mobile) étirait la rampe sur le même
+            // budget et compressait showcase et spin — jusqu'à 1,7 s au lieu de
+            // 2,49 s. Les deux branches se raccordent en CUBE_END et finissent
+            // en 1 : la tête reste continue, donc aucun saut. Sans rattrapage le
+            // membre de gauche est inactif et la formule est celle d'avant.
+            if (autoplayCatchFrac > 0 && k < autoplayCatchFrac) {
+              tlAutoplayP =
+                tlAutoplayStartP + (CUBE_END - tlAutoplayStartP) * (k / autoplayCatchFrac);
+            } else {
+              const finalK =
+                autoplayCatchFrac > 0 ? (k - autoplayCatchFrac) / (1 - autoplayCatchFrac) : k;
+              tlAutoplayP = CUBE_END + (1 - CUBE_END) * finalK;
+            }
             // Fin de course : la tête de timeline est épinglée à 1, et on cesse de
             // piloter le scroll. `p` converge vers 1 par lissage et la rejoint,
             // donc les deux têtes se rejoignent sans discontinuité.
@@ -1328,6 +1377,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
               autoplayStartP = null;
               tlAutoplayStartP = null;
               tlAutoplayP = 1;
+              // La mesure de recul repart de l'arrivée réelle. Sans ce
+              // ré-ancrage, `reverseAnchor` gardait la position d'avant le
+              // finale (là où le cube était au 6e clic) et le tout premier
+              // delta de recul tombait dans la branche d'annulation : il
+              // fallait parfois deux gestes là où un suffisait.
+              reverseAnchor = 1;
+              reverseDeepest = 1;
+              reverseEffort = 0;
             }
             // Une fois `p` rejoint la tête (ou si l'utilisateur a repris la
             // main), la timeline n'a plus de canal séparé à tenir : `sync` la
@@ -1501,8 +1558,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipActiveRef.current = true;
           autoplayElapsed = 0;
           // Le skip pilote sa propre chorégraphie : l'origine de la rampe de fin
-          // n'a plus lieu d'être, on repart d'une base neutre.
+          // n'a plus lieu d'être, on repart d'une base neutre. L'autoplay doit
+          // Cesser avec elle : la laissant active, `autoplayStartP` valait null
+          // et la frame suivante calculait `null + (1 - null) * k` = NaN, dont
+          // le `el.scrollTop = NaN` gelait la section à une position arbitraire.
+          autoplay = false;
           autoplayStartP = null;
+          tlAutoplayP = null;
+          tlAutoplayStartP = null;
           skipFrom = currentP;
           skipLate = currentP >= SPIN_START;
           skipStartRef.current = skipLate
@@ -1717,6 +1780,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // à la face « front », remplaçant le visuel choisi par un autre.
         lockedCubeP = Math.max(0, (currentP - INTRO_END) / CUBE_RANGE);
         tlAutoplayStartP = Math.min(currentP, CUBE_END);
+        // Répartition du budget : la fin écrite garde ses AUTOPLAY_MS, et le
+        // rattrapage entre le 6e clic et CUBE_END prend le reste, sur une part
+        // fixe du budget total. Sans rattrapage — 6e clic à ou après CUBE_END —
+        // le budget total vaut AUTOPLAY_MS et le minutage est celui d'avant.
+        const catchSpan = Math.max(0, CUBE_END - tlAutoplayStartP);
+        autoplayCatchFrac =
+          catchSpan > 0 ? AUTOPLAY_CATCHUP_MS / (AUTOPLAY_CATCHUP_MS + AUTOPLAY_MS) : 0;
+        autoplayTotalMs = catchSpan > 0 ? AUTOPLAY_CATCHUP_MS + AUTOPLAY_MS : AUTOPLAY_MS;
         // La tête de timeline est verrouillée sur cette valeur pendant toute la
         // grâce, puis avance avec le scroll automatique (voir plus haut).
         tlAutoplayP = tlAutoplayStartP;
@@ -2138,6 +2209,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       resetElapsed = 0;
       reverseEffort = 0;
       reverseAnchor = CUBE_END;
+      reverseDeepest = CUBE_END;
       currentP = CUBE_END;
       targetP = CUBE_END;
       const sbReset = el.scrollHeight - el.offsetHeight;
