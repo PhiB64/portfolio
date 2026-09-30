@@ -1035,8 +1035,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Dernière position de scroll écrite par l'autoplay, en pixels. Sert à
     // distinguer notre propre écriture d'un geste réel de l'utilisateur.
     let autoScrollPx = 0;
-    // `true` une fois la grâce dépassée et l'origine du scroll relevée.
-    let autoplayStarted = false;
+    // Tête de lecture de la timeline pendant le scroll automatique de fin, et son
+    // point de départ. C'est un DEUXIÈME canal, distinct du scroll : la timeline
+    // était verrouillée à `min(p, CUBE_END)` tant que les 6 faces n'étaient pas
+    // cliquées, alors que le scroll, lui, peut être bien plus avancé. Au moment du
+    // 6e clic, `unlocked` passe à vrai et la tête suitrait sinon le scroll d'un
+    // seul bloc, en faisant sauter le spin, le carré et la ligne. Elle repart donc
+    // d'où le verrou la tenait, et file vers 1 à la même vitesse que le scroll.
+    let tlAutoplayP = null;
+    let tlAutoplayStartP = null;
     // Position (timeline units) the skip morph glides up from. On the manual
     // skip that equals the start pose, so the cube holds still while its faces
     // fold in; on the automatic load it is wherever the page was, so the intro
@@ -1160,10 +1167,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (autoplay) {
         if (Math.abs(pos - autoScrollPx) > 2) {
           // Geste de l'utilisateur : l'autoplay lâche prise, et le scroll
-          // reprend la main par le chemin habituel.
+          // reprend la main par le chemin habituel. La tête de timeline suit
+          // alors de nouveau la position réelle, donc le scroll pilote à nouveau
+          // la fin — c'est ce qu'on veut quand l'utilisateur scroll lui-même.
           autoplay = false;
           autoplayStartP = null;
-          autoplayStarted = false;
+          tlAutoplayP = null;
+          tlAutoplayStartP = null;
         } else {
           targetP = real;
           return;
@@ -1271,7 +1281,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // vient d'être cliquée, le temps que le label de cette face soit lisible.
       if (autoplay) {
         if (Date.now() < exitArmUntilRef.current) {
-          // Grâce : on tient la tête et le scroll sur la pose cliquée.
+          // Grâce : on tient la tête et le scroll sur la pose cliquée. La tête de
+          // timeline n'est pas touchée : elle reste où le verrou la tenait, donc
+          // rien ne bouge à l'écran pendant cette seconde.
           autoplayElapsed = 0;
           targetP = currentP;
           const sbGrace = el.scrollHeight - el.offsetHeight;
@@ -1280,33 +1292,43 @@ export function HeroCube({ title, subtitle, images = [] }) {
             el.scrollTop = autoScrollPx;
           }
         } else {
-          // L'origine est relevée au moment où le scroll démarre, pas à
-          // l'armement : un éventuel scroll de l'utilisateur pendant la grâce
-          // est alors absorbé, et le départ reste sans à-coup quelle que soit la
-          // face cliquée.
-          if (!autoplayStarted) {
-            autoplayStarted = true;
-            autoplayStartP = currentP;
-          }
           const sbAuto = el.scrollHeight - el.offsetHeight;
           if (sbAuto <= 0) {
             autoplay = false;
-            autoplayStarted = false;
+            tlAutoplayP = null;
+            tlAutoplayStartP = null;
           } else {
             // Progression linéaire de la position de scroll. La courbe perçue
             // est celle du lissage de `currentP` vers `targetP`, donc celle d'un
             // scroll utilisateur — pas une fonction de temps maison. Un
             // `scrollTo({behavior:"smooth"})` par frame s'empilerait et rendrait
             // la durée non déterministe, d'où l'écriture directe de `scrollTop`.
+            //
+            // La tête de timeline n'avance PAS avec le scroll : elle part du point
+            // où le verrou la tenait (armement) et file vers 1 à la même vitesse.
+            // Ainsi la fin se rejoue en entier — spin, carré, ligne, noms — au
+            // rythme pour lequel elle a été écrite, au lieu d'en sauter la plus
+            // grosse partie parce que le scroll était déjà loin au moment du clic.
             autoplayElapsed += dt;
             const k = Math.min(1, autoplayElapsed / AUTOPLAY_MS);
             const nextP = autoplayStartP + (1 - autoplayStartP) * k;
             autoScrollPx = nextP * sbAuto;
             el.scrollTop = autoScrollPx;
+            tlAutoplayP = tlAutoplayStartP + (1 - tlAutoplayStartP) * k;
+            // Fin de course : la tête de timeline est épinglée à 1, et on cesse de
+            // piloter le scroll. `p` converge vers 1 par lissage et la rejoint,
+            // donc les deux têtes se rejoignent sans discontinuité.
             if (k >= 1) {
               autoplay = false;
-              autoplayStarted = false;
               autoplayStartP = null;
+              tlAutoplayStartP = null;
+              tlAutoplayP = 1;
+            }
+            // Une fois `p` rejoint la tête (ou si l'utilisateur a repris la
+            // main), la timeline n'a plus de canal séparé à tenir : `sync` la
+            // remet à null au premier geste, et ici dès que `p` l'a rattrapée.
+            if (tlAutoplayP !== null && !autoplay && currentP >= tlAutoplayP) {
+              tlAutoplayP = null;
             }
           }
         }
@@ -1660,12 +1682,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
         rafId = requestAnimationFrame(tick);
       }
       const unlocked = allClickedRef.current;
-      // Sur la première frame où les 6 faces sont cliquées, on arme l'autoplay.
-      // `autoplayStartP` est la position courante du cube, qui est aussi
-      // l'origine du scroll automatique : la fin part donc de la face qui vient
-      // d'être cliquée, jamais de CUBE_END, et aucune téléportation n'est
-      // possible. Le cube ne bouge pas avant l'expiration de la grâce
-      // (`exitArmUntilRef`), le temps que le label de cette face soit lisible.
+      // Sur la première frame où les 6 faces sont cliquées, on arme l'autoplay en
+      // relevant deux origines distinctes, car deux choses avancent différemment :
+      //
+      // - `autoplayStartP` : la position réelle du cube, origine du SCROLL. La fin
+      //   part donc de la face qui vient d'être cliquée, jamais de CUBE_END, donc
+      //   aucune téléportation du cube n'est possible.
+      // - `tlAutoplayStartP` : la position de la TIMELINE, qui était encore
+      //   verrouillée juste avant ce clic. La reprendre ici est ce qui évite le
+      //   saut : sans cela, `unlocked` passant à vrai, la tête de timeline aurait
+      //   suivi le scroll d'un coup jusqu'à `autoplayStartP`, et toute la fin
+      //   (spin, carré, ligne, noms) aurait été jouée instantanément.
+      //
+      // Le cube ne bouge pas avant l'expiration de la grâce (`exitArmUntilRef`),
+      // le temps que le label de la face cliquée soit lisible.
       //
       // Le verrou `wasUnlockedRef` ne doit être posé qu'ici, quand l'autoplay a
       // réellement démarré : le poser systématiquement brûlait le latch sans
@@ -1676,6 +1706,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
         autoplay = true;
         autoplayElapsed = 0;
         autoplayStartP = currentP;
+        tlAutoplayStartP = Math.min(currentP, CUBE_END);
+        // La tête de timeline est verrouillée sur cette valeur pendant toute la
+        // grâce, puis avance avec le scroll automatique (voir plus haut).
+        tlAutoplayP = tlAutoplayStartP;
         // On aligne tout de suite la position de scroll réelle sur la tête, et on
         // note cette écriture : c'est elle que `sync` comparera à la position
         // lue pour distinguer notre scroll d'un geste réel.
@@ -1688,11 +1722,31 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       const p = currentP;
 
-      // Single timeline playhead. While faces are still locked the playhead
-      // stops at the end of the idle phase; once every face has been clicked
-      // the whole end sequence is driven by the scroll position, so it plays
-      // forward and backward and can never be skipped.
-      const tlP = unlocked ? p : Math.min(p, CUBE_END);
+      // Tête de lecture de la timeline. Tant que les faces ne sont pas toutes
+      // cliquées, elle est verrouillée en fin de phase d'attente : la fin de la
+      // séquence (noms, liens, CONTACT) ne doit pas apparaître avant que
+      // l'utilisateur ait vu et cliqué les six faces.
+      //
+      // `tlAutoplayP` sert pendant le scroll automatique de fin. Le verrou
+      // ci-dessus tient la timeline en CUBE_END alors que le scroll, lui, peut
+      // déjà être bien plus loin (le pin des faces vit dans toute la plage de
+      // rotation du cube). Relâcher le verrou brutalement faisait donc passer la
+      // tête de CUBE_END à la position du clic d'un seul bloc : le spin, le
+      // carré, la ligne et les noms étaient joués instantanément — « on passe
+      // directement à la fin ». La tête reprend ici exactement au point d'où
+      // elle était arrêtée (`tlAutoplayP` part de ce même point), et avance
+      // jusqu'à 1 en même temps que le scroll, sans jamais sauter.
+      //
+      // En fin de course, `p` n'a pas encore rattrapé 1 quand l'autoplay s'arrête
+      // (il suit la tête par lissage exponentiel) : on garde donc la valeur
+      // finale tant qu'elle est en avant, pour ne pas faire reculer la timeline
+      // de ce reliquat. Dès que `p` l'a rattrapée, les deux valent 1 et la
+      // condition bascule sans discontinuité.
+      const tlP = tlAutoplayP !== null && (autoplay || tlAutoplayP > p)
+        ? tlAutoplayP
+        : unlocked
+          ? p
+          : Math.min(p, CUBE_END);
       tl.seek(tlP * TOTAL);
       // L'animation est terminée dès que les noms sont levés : le bouton RETOUR
       // apparaît alors. Ce latch sert aussi de seuil — au-delà, reculer ne
@@ -1959,7 +2013,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (resetPlay) return;
       autoplay = false;
       autoplayStartP = null;
-      autoplayStarted = false;
+      tlAutoplayP = null;
+      tlAutoplayStartP = null;
       skipRef.current = false;
       skipActiveRef.current = false;
       skipLate = false;
