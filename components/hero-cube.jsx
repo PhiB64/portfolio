@@ -1072,11 +1072,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // comprime alors d'autant la fin écrite — la showcase et surtout le spin se
     // jouaient jusqu'à ~46% trop vite (1,7 s au lieu de 2,49 s). Le rattrapage
     // reçoit donc son propre budget, et `[CUBE_END, 1]` dure toujours
-    // AUTOPLAY_MS. À 1800 ms, le rattrapage ne va jamais plus vite qu'environ
-    // 1,6× ce qu'il faisait, et le budget total le plus long reste à 10,8 s.
-    // Sans rattrapage (6e clic à ou après CUBE_END, le cas desktop), le minutage
-    // est bit pour bit celui d'avant.
-    const AUTOPLAY_CATCHUP_MS = 1800;
+    // AUTOPLAY_MS.
+    //
+    // Ce rattrapage est du temps mort, et il peut donc être minuscule : sous
+    // CUBE_END la timeline ne contient qu'un segment vide (`.add({ duration:
+    // W.idle })`), la pose de base est gelée dans `lockedCubeP` et les labels
+    // suivent `visRot`, lui aussi gelé. Rien ne bouge avant CUBE_END. On ne
+    // garde que de quoi faire voyager la tête sans à-coup, et la showcase part
+    // dès l'expiration de la grâce. Sans rattrapage (6e clic à ou après
+    // CUBE_END, le cas desktop), le minutage est celui d'avant.
+    const AUTOPLAY_CATCHUP_MS = 250;
     let autoplayTotalMs = AUTOPLAY_MS;
     let autoplayCatchFrac = 0;
     // Skipped intro: faces come back out and each one is exposed frontally for
@@ -2223,26 +2228,31 @@ export function HeroCube({ title, subtitle, images = [] }) {
     };
 
     // Scroll manuel BLOQUÉ pendant le scroll automatique. Sans cela le navigateur
-    // peut prendre la main entre deux frames (molette, trackpad, pan tactile) et
-    // se battre avec les écritures de `scrollTop` de `tick` : la section tremble
-    // et la fin se joue à contretemps. On neutralise donc les deux gestes natifs
-    // tant que `autoplay` est actif ; le gestionnaire normal reprend la main dès
-    // que l'autoplay s'arrête, donc le visiteur peut redescendre à la fin.
-    //
-    // Un drag de rotation du cube garde la priorité : preventDefault sur
-    // `touchmove` fait perdre les `pointermove` du doigt sur certains navigateurs,
-    // et le geste fait déjà partie de la zone que l'utilisateur est en train
-    // d'exploiter. L'autoplay neutralise de toute façon le drag bien plus tard
-    // dans la séquence, quand le spin démarre.
+    // peut prendre la main entre deux frames (molette, trackpad) et se battre avec
+    // les écritures de `scrollTop` de `tick` : la section tremble et la fin se
+    // joue à contretemps. On neutralise donc la molette tant que `autoplay` est
+    // actif ; le gestionnaire normal reprend la main dès que l'autoplay s'arrête.
     const blockManualScroll = (e) => {
       if (!autoplay) return;
-      if (dragStateRef.current && dragStateRef.current.moved) return;
       e.preventDefault();
     };
 
+    // Le pan tactile, lui, n'est PAS neutralisé. preventDefault sur `touchmove`
+    // ne neutralise pas le seul geste : sur iOS et Android, le navigateur décide
+    // du scroll au `touchstart` et un seul `touchmove` empêché verrouille toute
+    // la séquence tactile en mode « ne défile pas », pour toute sa durée. Comme
+    // l'autoplay tient le doigt en l'air pendant ses ~9 s, le geste de scroll
+    // qui suit la fin de l'animation était mangé : le visiteur pouvait swiper
+    // autant que voulu, la section ne bougeait pas, et le retour par scroll
+    // inverse ne se déclenchait jamais.
+    //
+    // Ce conflit n'a pas besoin d'être neutralisé côté navigateur : pendant
+    // l'autoplay, `sync` ignore la position lue et `tick` réécrit `scrollTop` à
+    // chaque frame, donc le geste ne peut que faire clignoter la position une
+    // frame, le temps que la réécriture la reprenne. Le drag de rotation garde
+    // son propre `preventDefault` plus bas, il n'en dépend pas.
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("wheel", blockManualScroll, { passive: false });
-    el.addEventListener("touchmove", blockManualScroll, { passive: false });
     if (restoreP !== null) {
       el.scrollTop = restoreP * (el.scrollHeight - el.offsetHeight);
     }
@@ -2252,7 +2262,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     return () => {
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("wheel", blockManualScroll);
-      el.removeEventListener("touchmove", blockManualScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer, retractMedia]);
