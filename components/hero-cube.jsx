@@ -261,6 +261,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // True tant que le fond est « vide » (couleur de base, sans visuel) ; remis
   // à false par toute révélation (changeBackground).
   const bgBaseRef = useRef(false);
+  // Couche de fond actuellement affichée : "image" (bgRef) ou "video"
+  // (videoBgContainerRef). Les deux couches se superposent dans le DOM, celle
+  // de la vidéo étant au-dessus : le fondu de sortie ne doit piloter que la
+  // couche affichée, sinon la dernière image de vidéo figée — qui peut dater de
+  // plusieurs clics — se superpose au visuel réellement affiché.
+  const bgIsVideoRef = useRef(false);
   const wirePathRef = useRef(null);
   // Infinity triggers wireframe computation on the very first tick.
   const lastWireRotRef = useRef({ rx: Infinity, ry: Infinity });
@@ -521,16 +527,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
     if (!isVideo) {
       if (videoContainer) videoContainer.style.opacity = "0";
       if (videoBg) videoBg.pause();
+      bgIsVideoRef.current = false;
       bg.style.transition = "none";
       bg.style.backgroundImage = `url("${url}")`;
       bg.style.opacity = "1";
       void bg.offsetHeight;
+
       if (delay > 0) {
         bgSonarRef.current.timeout = window.setTimeout(fire, delay);
       } else {
         fire();
       }
     } else if (videoBg && videoContainer) {
+      // La branche image vient de poser `transition: "none"` sur la couche
+      // image et ne la remet jamais : sans cette restauration, le fondu de
+      // sortie de l'image de fond se ferait d'un coup et le seul fondu visible
+      // resterait celui de la vidéo. On rétablit donc la transition avant de
+      // baisser l'opacité, pour que les deux couches se croisent en douceur.
+      bg.style.transition = "opacity 0.35s ease";
       bg.style.opacity = "0";
       let fired = false;
       const start = () => {
@@ -538,6 +552,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         fired = true;
         window.clearTimeout(mediaTimeout);
         videoContainer.style.opacity = "1";
+        // La vidéo ne devient la couche affichée qu'ici, une fois lisible :
+        // jusque-là c'est l'image précédente qui reste visible en fondu.
+        bgIsVideoRef.current = true;
         videoBg.play().catch(() => {});
         if (delay > 0) {
           bgSonarRef.current.timeout = window.setTimeout(fire, delay);
@@ -900,6 +917,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const emptyBackground = () => {
       if (videoBgContainerRef.current) videoBgContainerRef.current.style.opacity = "0";
       if (videoBgRef.current) videoBgRef.current.pause();
+      bgIsVideoRef.current = false;
       if (bg) {
         bg.style.transition = "none";
         bg.style.backgroundImage = "none";
@@ -2153,13 +2171,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
               bgResetRef.current = true;
               if (videoBgRef.current) videoBgRef.current.pause();
             }
+            // Le fondu ne concerne QUE la couche réellement affichée ; l'autre
+            // est épinglée à 0. Les piloter toutes les deux faisait réapparaître
+            // la dernière image de vidéo figée (couches superposées, la vidéo
+            // au-dessus) au lieu du visuel affiché — et la faisait remonter en
+            // fondu au rewind alors qu'aucun clic ne la concernait.
             if (bg) {
               bg.style.transition = "none";
-              bg.style.opacity = String(bgFade);
+              bg.style.opacity = bgIsVideoRef.current ? "0" : String(bgFade);
             }
             if (videoBgContainerRef.current) {
               videoBgContainerRef.current.style.transition = "none";
-              videoBgContainerRef.current.style.opacity = String(bgFade);
+              videoBgContainerRef.current.style.opacity = bgIsVideoRef.current
+                ? String(bgFade)
+                : "0";
             }
             if (wrapper) {
               wrapper.style.transition = "none";
@@ -2256,6 +2281,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       spinFromRef.current = null;
       bgResetRef.current = true;
       bgBaseRef.current = false;
+      bgIsVideoRef.current = false;
       lastWireRotRef.current = { rx: Infinity, ry: Infinity };
       for (let i = 0; i < 6; i++) {
         if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
