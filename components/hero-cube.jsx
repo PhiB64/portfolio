@@ -181,8 +181,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [squareSize, setSquareSize] = useState(343);
   const [skipped, setSkipped] = useState(false);
   // Le bouton RETOUR n'apparaît qu'une fois l'animation terminée (fin atteinte).
-  // Le retour au début n'est alors possible que par ce bouton : le scroll
-  // inverse est interdit partout.
+  // C'est alors aussi le seuil au-delà duquel un scroll inverse déclenche le
+  // même retour que ce bouton.
   const [showReturn, setShowReturn] = useState(false);
   const returnShownRef = useRef(false);
   // Fonction de reset complète, instanciée dans l'effet d'animation (elle a
@@ -1044,12 +1044,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const SKIP_FINALE_MS = 3000;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
-    // Le scroll inverse est interdit : `maxReached` est le point le plus loin
-    // jamais atteint par l'utilisateur, et la tête ne peut pas repasser derrière
-    // (sauf pendant le sweep programmé de reset, `resetPlay`).
-    let maxReached = restoreP !== null ? restoreP : 0;
+    // Effort de recul cumulé (px) depuis `reverseAnchor`, la position de
+    // scroll à partir de laquelle on mesure. Franchir `REVERSE_TRIGGER_PX`
+    // rejoue le même retour que le bouton. Une position de scroll qui avance
+    // vers le bas remet le compteur à zéro et ré-ancrage.
+    let reverseAnchor = 0;
+    let reverseEffort = 0;
+    // Distance de recul (en pixels de scroll, pas en pourcentage) qu'il faut
+    // accumuler vers le haut pour valider le retour. Calibré pour être
+    // nettement supérieur au bruit d'un trackpad et d'un tap de doigt, mais
+    // franchi en un geste franc — un molettage continu ou un swipe.
+    const REVERSE_TRIGGER_PX = 120;
     // Fondu de retour au début : un balayage programmé de CUBE_END vers 0,
-    // pendant lequel le verrou anti-reverse est suspendu.
+    // pendant lequel la détection de recul est suspendue.
     let resetPlay = false;
     let resetFrom = 0;
     let resetElapsed = 0;
@@ -1139,7 +1146,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (Math.abs(real - currentP) > 0.02) autoplay = false;
         else return;
       }
-      // Pendant le sweep de reset, le scroll est piloté par le code : rien à verrouiller.
+      // Pendant le sweep de reset, le scroll est piloté par le code : la
+      // détection de recul est suspendue.
       if (resetPlay) {
         targetP = currentP;
         return;
@@ -1147,24 +1155,37 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // Scroll inverse : PENDANT l'animation (avant la fin), il est libre. Le
       // cube rembobine et l'état se déroule dans `tick` (médias repliés par
       // position, labels re-codés, fond repris). Une fois la fin atteinte
-      // (noms levés, `returnShownRef` latché), le retour est verrouillé : le
-      // seul chemin en arrière est alors le bouton RETOUR.
+      // (noms levés, `returnShownRef` latché), reculer n'est plus un simple
+      // rembobinage mais un vrai retour : on déclenche exactement le même
+      // balayage programmé que le bouton RETOUR (voir `goToStartRef`), plutôt
+      // que de figer la tête au point le plus loin atteint et de contrer le
+      // geste de l'utilisateur.
       if (returnShownRef.current) {
-        // Si la page essaie de reculer derrière le mur — le plus loin déjà
-        // atteint (`maxReached`) ou la tête de lecture courante (`currentP`) —
-        // on ramène doucement le scroll sur ce point (nudge, throttlé 100 ms).
-        const reverseWall = Math.max(maxReached, currentP);
-        if (real + SNAP_THRESHOLD < reverseWall) {
-          const nowMs = Date.now();
-          if (nowMs - lastPinFix > 100) {
-            lastPinFix = nowMs;
-            el.scrollTo({ top: reverseWall * sb, behavior: "smooth" });
-          }
-          targetP = reverseWall;
-          revealOverrideRef.current = false;
+        // Effort de recul cumulé depuis `reverseAnchor`. On l'accumule plutôt
+        // que de tester `real` brutalement : les gestes réels (molette,
+        // trackpad, doigt) produisent des rafales de petits deltas inverses —
+        // bruit et inertie — qui ne doivent pas suffire à rejouer 1,8 s de
+        // retour. Il faut un recul franc et continu.
+        if (real < reverseAnchor) {
+          reverseEffort += (reverseAnchor - real) * sb;
+        } else {
+          // Reprise du scroll vers le bas (ou simple stabilisation) : le
+          // compteur repart à zéro, l'utilisateur n'a pas confirmé le retour.
+          reverseEffort = 0;
+          reverseAnchor = real;
+        }
+        if (reverseEffort >= REVERSE_TRIGGER_PX) {
+          // Recul franc : on rejoue le retour, exactement comme le bouton.
+          goToStartRef.current?.();
           return;
         }
+        // Tant que le recul n'est pas confirmé, la tête reste où elle est : on
+        // ne laisse pas la position glisser vers l'arrière en attendant.
+        targetP = currentP;
+        return;
       }
+      reverseEffort = 0;
+      reverseAnchor = real;
       targetP = real;
       // Une reprise du scroll recentre la rotation laissée par un drag : la
       // piste redonne la main, l'offset s'éteint en fondu dans `tick` pendant
@@ -1206,9 +1227,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
         targetP = CUBE_END;
       }
-      // Le verrou anti-reverse suit la progression *effective* (après pin et
-      // grâce) : on ne mémorise que ce que la scène a réellement affiché.
-      maxReached = Math.max(maxReached, targetP, currentP);
     };
 
     const tick = (now) => {
@@ -1279,7 +1297,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
           resetElapsed = 0;
           currentP = 0;
           targetP = 0;
-          maxReached = 0;
           if (sbReset > 0) el.scrollTop = 0;
           // Les noms repartent masqués (translateY bas) mais visibles pour la
           // prochaine montée : la piste n'agit pas sur leur opacité.
@@ -1623,7 +1640,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       const tlP = unlocked ? p : Math.min(p, CUBE_END);
       tl.seek(tlP * TOTAL);
       // L'animation est terminée dès que les noms sont levés : le bouton RETOUR
-      // (seul chemin de retour, le scroll inverse étant interdit) apparaît alors.
+      // apparaît alors. Ce latch sert aussi de seuil — au-delà, reculer ne
+      // rembobine plus mais déclenche le même retour (voir `sync`).
       if (!returnShownRef.current && unlocked && tlP >= NAMES_END && !resetPlay) {
         returnShownRef.current = true;
         setShowReturn(true);
@@ -1878,9 +1896,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
     tickRef.current = tick;
 
-    // Retour au début de l'animation (bouton RETOUR) : arrête tout balayage en
-    // cours, remet l'état à neuf puis balaie CUBE_END → 0, revisitant l'intro en
-    // sens inverse pour revenir proprement au point de départ.
+    // Retour au début de l'animation (bouton RETOUR, ou scroll inverse passé
+    // le seuil) : arrête tout balayage en cours, remet l'état à neuf puis balaie
+    // CUBE_END → 0, revisitant l'intro en sens inverse pour revenir proprement au
+    // point de départ.
     goToStartRef.current = () => {
       if (resetPlay) return;
       autoplay = false;
@@ -1941,7 +1960,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
       resetPlay = true;
       resetFrom = CUBE_END;
       resetElapsed = 0;
-      maxReached = CUBE_END;
+      reverseEffort = 0;
+      reverseAnchor = CUBE_END;
       currentP = CUBE_END;
       targetP = CUBE_END;
       const sbReset = el.scrollHeight - el.offsetHeight;
