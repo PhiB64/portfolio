@@ -184,6 +184,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // C'est alors aussi le seuil au-delà duquel un scroll inverse déclenche le
   // même retour que ce bouton.
   const [showReturn, setShowReturn] = useState(false);
+  const [touchLock, setTouchLock] = useState(false);
   const returnShownRef = useRef(false);
   // Fonction de reset complète, instanciée dans l'effet d'animation (elle a
   // besoin de la timeline et du playhead) et exposée au bouton RETOUR.
@@ -282,6 +283,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const spinningRef = useRef(false);
   // True while the cube is on screen and can be grabbed (after the intro, before the spin).
   const cubeDraggableRef = useRef(false);
+  // Whether the cube's hit area must swallow native touches (`touch-action: none`).
+  // Locked while the cube is grabbable, and while the code drives `scrollTop` itself.
+  const touchLockRef = useRef(false);
   // Suppresses the native click following a real drag (used by handleCubeClick).
   const suppressClickRef = useRef(false);
   // When a tap is resolved on pointerup (mobile browsers can swallow the
@@ -979,6 +983,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const NAMES_END = NAMES_START + W.namesRise / TOTAL;
     // The cube only rotates on the part of the scroll that comes after the intro.
     const CUBE_RANGE = 1 - INTRO_END;
+    // Dernière pose de rotation du cube : le spin l'emporte au-delà. Sert de
+    // borne haute à la pose de base pendant la galerie du skip, pour qu'aucune
+    // de ses six poses ne dépasse la fin du spin.
+    const ROT_END = (SPIN_END - INTRO_END) / CUBE_RANGE;
 
     const tl = anime.timeline({ autoplay: false });
     tl.add({
@@ -1091,7 +1099,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const SKIP_TURN_MS = 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
-    const SKIP_FINALE_MS = 3000;
+    // Le finale fait avancer `currentP` de SPIN_START à 1, soit
+    // `W.spin + W.squareIn + W.cubeOut + W.lineMorph + W.namesRise` = 6150ms de
+    // timeline. À 3000ms réelles, toute cette queue se jouait 2,05x trop vite —
+    // dont le placement final du cube, le plus angulaire de tous, d'où la fin de
+    // spin qui partait à toute vitesse. On vise ~1,4x : assez posé pour être
+    // lisible, sans alourdir le skip de deux secondes.
+    const SKIP_FINALE_MS = 4400;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Effort de recul cumulé (px) depuis `reverseAnchor`, la position de
@@ -1729,6 +1743,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipFacesHiddenRef.current = false;
           galleryRot = [];
           galleryDur = 0;
+          // La mesure de recul repart de l'arrivée réelle. Pendant TOUT le sweep,
+          // `sync` sort en tête (skip actif) et n'a donc jamais ré-ancré
+          // `reverseAnchor` : laissée à sa valeur initiale, elle vaut 0 et
+          // `reverseDeepest` ne peut que descendre sous 0. L'effort de recul
+          // restait alors à 0 pour toujours et le scroll inverse de la fin ne se
+          // déclenchait plus jamais — même après le bouton RETOUR.
+          reverseAnchor = 1;
+          reverseDeepest = 1;
+          reverseEffort = 0;
         }
         rafId = requestAnimationFrame(tick);
       } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode && !autoplay) {
@@ -1845,7 +1868,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // Le drag manuel est inactif pendant le sweep de reset et le skip : la
       // pose y est chorégraphiée, un offset du doigt y désyncroniserait les
       // labels des faces réellement frontales.
-      cubeDraggableRef.current = tlP > INTRO_END && tlP < SPIN_START && !resetPlay && !skipActiveRef.current;
+      const draggableNow = tlP > INTRO_END && tlP < SPIN_START && !resetPlay && !skipActiveRef.current;
+      // La zone avale le scroll natif (`touch-action: none`) quand elle a besoin du
+      // geste — la rotation — et pendant TOUS les balayages programmés (skip et
+      // reset), où `tick` réécrit `scrollTop` à chaque frame : un pan natif
+      // concurrent se battrait avec ces écritures et la chorégraphie saccaderait.
+      // Partout ailleurs (avant l'intro, pendant l'autoplay, à la fin) la zone
+      // laisse passer le pan, sinon le scroll inverse de la fin resterait mort
+      // sur la surface que le cube occupe à l'écran.
+      const touchLockNow = draggableNow || resetPlay || skipActiveRef.current;
+      if (touchLockNow !== touchLockRef.current) {
+        touchLockRef.current = touchLockNow;
+        setTouchLock(touchLockNow);
+      }
+      cubeDraggableRef.current = draggableNow;
 
       // La fin est atteinte dès que les noms sont levés — que ce soit par
       // l'autoplay, le sweep de skip ou un scroll manuel jusqu'au bout. On
@@ -1868,7 +1904,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // au-delà de ROT_END (jusqu'à p = 1), et le cube reculait alors de 13 à
       // 43 % d'une rotation à la frame du 6e clic, remplaçant le visuel de la
       // face choisie par celui d'une autre.
-      const baseP = unlocked ? lockedCubeP : cubeP;
+      //
+      // Le skip fait exception. Il n'a pas de face cliquée : `skipIntro` force
+      // `allClickedRef` pour débloquer la fin, et sa galerie écrit `currentP`
+      // pour exhiber les six poses, une par une. Geler la base y annulait
+      // complètement la parade — le cube restait figé face au spectateur pendant
+      // que les labels passaient d'une face à l'autre. Le skip retrouve donc le
+      // clamp d'origine, borné à la rotation pour qu'aucune pose de galerie ne
+      // dépasse la fin du spin.
+      const baseP = unlocked
+        ? skipRef.current
+          ? Math.min(cubeP, ROT_END)
+          : lockedCubeP
+        : cubeP;
       let rot = getCubeRotation(baseP);
       // `spinning` ne passe à vrai qu'au spin à vide, celui qui replie les
       // visuels : la showcase tourne avec les images déployées et garde donc
@@ -1882,7 +1930,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // le cube muet qui les portait déjà. Le tour part de `lockedCubeP` — la
       // pose gelée au 6e clic — donc il démarre sur le visuel choisi par
       // l'utilisateur, sans snap, et revient à cette même pose à la fin.
-      if (unlocked && tlP > SHOW_START && tlP <= SHOW_END) {
+      if (unlocked && !skipRef.current && tlP > SHOW_START && tlP <= SHOW_END) {
         const k = Math.min(1, Math.max(0, (tlP - SHOW_START) / (SHOW_END - SHOW_START)));
         // Une révolution complète, répartie entre les deux axes comme le spin
         // qui suit, pour que chaque face passe bien devant le spectateur.
@@ -1905,14 +1953,25 @@ export function HeroCube({ title, subtitle, images = [] }) {
         const k = Math.min(1, (tlP - SPIN_START) / (SPIN_END - SPIN_START));
         const easeIO = (t) => t * t * (3 - 2 * t);
         const seg = (start, end) => easeIO(Math.min(1, Math.max(0, (k - start) / (end - start))));
-        const ryTurn = seg(0, 0.2) * 180 + seg(0.4, 0.6) * 180;
-        const rxTurn = seg(0.2, 0.4) * 180 + seg(0.6, 0.8) * 180;
+        // Quatre paliers de 90° alternés Y-X-Y-X sur les 60% de la fenêtre, et
+        // non quatre paliers de 180° sur 80% : le cube fait une révolution au
+        // lieu de deux, et chaque palier est deux fois plus court.
+        const SPIN_STEP = 90;
+        const ryTurn = (seg(0, 0.15) + seg(0.3, 0.45)) * SPIN_STEP;
+        const rxTurn = (seg(0.15, 0.3) + seg(0.45, 0.6)) * SPIN_STEP;
         const ryMid = from.ry + ryTurn;
         const rxMid = from.rx + rxTurn;
+        // Le placement final ramène chaque axe sur le multiple de 360 le plus
+        // proche. Son amplitude dépend du nombre de tours qui précèdent : à quatre
+        // tours de 180°, l'écart accumulé atteignait ~450°, et il était serré
+        // dans les 20% de fenêtre les plus courts — c'est de là que venait le
+        // à-coup final. Deux choses le calment : une révolution au lieu de deux
+        // laisse l'écart bien plus faible, et il dispose maintenant des 40%
+        // restants. Les deux gardent la pose d'arrivée sur (0, 360).
         const ryMod = ((ryMid % 360) + 360) % 360;
         const rxMod = ((rxMid % 360) + 360) % 360;
-        const ry = ryMid + ((360 - ryMod) % 360) * seg(0.8, 1);
-        const rx = rxMid - rxMod * seg(0.8, 1);
+        const ry = ryMid + ((360 - ryMod) % 360) * seg(0.6, 1);
+        const rx = rxMid - rxMod * seg(0.6, 1);
         rot = { rx, ry };
         spinning = true;
       } else {
@@ -1921,7 +1980,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // `showcasing` couvre le tour où le cube tourne AVEC les six visuels
       // déployés, `spinning` celui où il tourne à vide. Le rendu des faces en
       // dépend : le premier garde les images dépliées, le second les replie.
-      const showcasing = unlocked && tlP > SHOW_START && tlP <= SHOW_END;
+      //
+      // Le sweep du skip est exclu : ses deux dernières poses de galerie tombent
+      // à l'intérieur de la fenêtre de showcase (SHOW_START < galEnd < SHOW_END).
+      // Sans cette garde, la showcase leur ajoutait sa torsion `rev * 180`, qui
+      // dénaturait deux choses : les faces 4 et 5 n'étaient plus frontales sous
+      // leur label — le texte flottait alors sur une image de côté — et la
+      // torsion apparaissait d'un coup puis disparaissait d'un autre au passage de
+      // SHOW_END, soit deux à-coups de 180° autour du spin de fin. Le skip écrit
+      // toute la chorégraphie lui-même et n'a pas de segment showcase à jouer.
+      const showcasing = unlocked && !skipRef.current && tlP > SHOW_START && tlP <= SHOW_END;
       spinningRef.current = spinning;
       // The direct drag adds a fixed offset over the scroll-driven orientation.
       // From the end-sequence spin onward the offset fades out so the cube
@@ -2793,7 +2861,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                   ref={clickZoneRef}
                   onClick={handleCubeClick}
                   className="absolute cursor-grab"
-                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60, userSelect: "none", touchAction: "none", WebkitUserSelect: "none" }}
+                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60, userSelect: "none", touchAction: touchLock ? "none" : "pan-y", WebkitUserSelect: "none" }}
                 />
               </div>
             </div>
