@@ -439,13 +439,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // depuis le centre de la face (entrée) ; en sortie, une onde identique se
   // déploie du centre vers l'extérieur en effaçant le visuel derrière elle.
   // L'animation reste en pause tant que l'appelant ne la joue pas. Chaque
-  // appel remplace le sonar en cours de la même face.
+  // appel remplace le sonar en cours de la même face : le voile ET l'anneau du
+  // sonar précédent doivent être retirés, faute de quoi chaque anneau
+  // interrompu resterait figé dans la face et s'accumulerait en cercles
+  // concentriques.
   const runFaceSonar = useCallback((wrapper, i, reveal, opts = {}) => {
     const { duration, onClose, erase } = opts;
     const prev = faceSonarRef.current[i];
     if (prev) {
       prev.anime?.pause();
       prev.layer.mask.remove();
+      prev.layer.ring.remove();
     }
     faceSonarRef.current[i] = null;
     const layer = buildSonarLayer(wrapper, reveal, { duration, onClose, erase });
@@ -2300,6 +2304,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       Object.entries(faceSonarRef.current).forEach(([, s]) => {
         s?.anime?.pause();
         s?.layer?.mask?.remove();
+        s?.layer?.ring?.remove();
       });
       faceSonarRef.current = {};
       resetBackground();
