@@ -1171,27 +1171,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // getBoundingClientRect on every scroll frame — smoother on mobile.
       const pos = el.scrollTop;
       const real = sb > 0 ? Math.min(1, Math.max(0, pos / sb)) : 0;
-      // L'autoplay pilote lui-même la position de scroll, exactement comme le
-      // ferait l'utilisateur : la tête doit donc continuer à suivre cette
-      // position, et le lissage de `tick` fait le reste. On compare la position
-      // lue à la dernière position écrite (`autoScrollPx`) et non à `currentP` :
-      // le lissage fait que `currentP` traîne toujours derrière la tête écrite,
-      // et le comparer ici ferait annuler l'autoplay à la première frame. Tout
-      // écart à notre propre écriture ne peut venir que d'un geste réel.
+      // Le scroll automatique est IMPOSÉ : la position est pilotée par l'autoplay
+      // et un geste de l'utilisateur ne doit pas pouvoir reprendre la main. On ne
+      // compare donc plus la position lue à notre dernière écriture pour y voir un
+      // geste, et on ne rend jamais la main : `targetP` suit la position que
+      // l'autoplay vient d'écrire (`autoScrollPx`), jamais celle lue. La tête de
+      // timeline reste par ailleurs pilotée par `tlAutoplayP` (voir plus bas),
+      // donc la fin se joue au rythme écrit pour elle quel que soit le geste.
       if (autoplay) {
-        if (Math.abs(pos - autoScrollPx) > 2) {
-          // Geste de l'utilisateur : l'autoplay lâche prise, et le scroll
-          // reprend la main par le chemin habituel. La tête de timeline suit
-          // alors de nouveau la position réelle, donc le scroll pilote à nouveau
-          // la fin — c'est ce qu'on veut quand l'utilisateur scroll lui-même.
-          autoplay = false;
-          autoplayStartP = null;
-          tlAutoplayP = null;
-          tlAutoplayStartP = null;
-        } else {
-          targetP = real;
-          return;
+        if (sb > 0) {
+          targetP = Math.min(1, Math.max(0, autoScrollPx / sb));
         }
+        return;
       }
       // Pendant le sweep de reset, le scroll est piloté par le code : la
       // détection de recul est suspendue.
@@ -2159,7 +2150,27 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (!rafId) rafId = requestAnimationFrame(tick);
     };
 
+    // Scroll manuel BLOQUÉ pendant le scroll automatique. Sans cela le navigateur
+    // peut prendre la main entre deux frames (molette, trackpad, pan tactile) et
+    // se battre avec les écritures de `scrollTop` de `tick` : la section tremble
+    // et la fin se joue à contretemps. On neutralise donc les deux gestes natifs
+    // tant que `autoplay` est actif ; le gestionnaire normal reprend la main dès
+    // que l'autoplay s'arrête, donc le visiteur peut redescendre à la fin.
+    //
+    // Un drag de rotation du cube garde la priorité : preventDefault sur
+    // `touchmove` fait perdre les `pointermove` du doigt sur certains navigateurs,
+    // et le geste fait déjà partie de la zone que l'utilisateur est en train
+    // d'exploiter. L'autoplay neutralise de toute façon le drag bien plus tard
+    // dans la séquence, quand le spin démarre.
+    const blockManualScroll = (e) => {
+      if (!autoplay) return;
+      if (dragStateRef.current && dragStateRef.current.moved) return;
+      e.preventDefault();
+    };
+
     el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", blockManualScroll, { passive: false });
+    el.addEventListener("touchmove", blockManualScroll, { passive: false });
     if (restoreP !== null) {
       el.scrollTop = restoreP * (el.scrollHeight - el.offsetHeight);
     }
@@ -2168,6 +2179,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
     return () => {
       el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", blockManualScroll);
+      el.removeEventListener("touchmove", blockManualScroll);
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer, retractMedia]);
