@@ -76,11 +76,30 @@ const DRAG_EASE_MS = 450;
 // Exposition requise avant qu'un label de face passe du brouillage au texte
 // lisible. Cumulée par `dt` (ms) ; 0 = décodage immédiat dès l'exposition.
 const LABEL_DECODE_DELAY_MS = 0;
+// Durée du décodage d'un label de face : le brouillage se résout de gauche à
+// droite sur ce temps. Aligné sur SKIP_LABEL_DECODE_MS — à 1 s le label mettait
+// presque deux fois plus longtemps à se résoudre que pendant le skip, pour le
+// même rendu.
+const FACE_LABEL_DECODE_MS = 500;
 // Facteur de projection perspective : une face frontale (translateZ 150px, cube
 // 300px) sous une perspective de 1200px est rendue 1200/(1200-150) = 8/7 plus
 // grande que l'overlay 2D. C'est l'échelle qu'il faut au label du skip pour
 // égaliser sa taille réelle avec celle des labels de face, mobile comme desktop.
 const CUBE_FACE_PROJECTION_SCALE = 1200 / 1050;
+// Épaisseur et taille de police des labels de face, ramenées à celle du label du
+// skip. Palette, halo et échelle rendue sont désormais identiques : ce qui
+// restait était le rendu. Le label du skip est une couche 2D, rasterisée à sa
+// taille finale et en anticrénelage LCD (le navigateur réserve l'antialiasing à
+// sous-pixels aux surfaces non transformées) ; le label de face vit dans le
+// sous-arbre `preserve-3d`, où la transform est réécrite à chaque frame. Il est
+// donc rasterisé à sa taille source puis agrandi par la perspective, en
+// anticrénelage grayscale : traits plus fins, halo dilué — d'où l'air plus petit
+// et plus terne, que les deux égalisations suivantes corrigent ensemble.
+// 100 % du facteur de projection (1.14) restore l'épaisseur de trait mais rend le
+// label franchement trop grand, car ce même facteur s'applique déjà au rendu. On
+// prend donc une compensation partielle, calée à l'œil : c'est le seul endroit
+// à toucher pour retoucher ce rendu.
+const FACE_LABEL_FONT_SCALE = 1.07;
 // Nombre d'expositions avant qu'un label de face apparaisse et se mette à
 // brouiller. Constante partagée car trois sites en dépendent (affichage du
 // label, clic sur la face, levée du pin) et doivent rester alignés.
@@ -572,6 +591,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       videoBg.addEventListener("loadeddata", start, { once: true });
       const mediaTimeout = window.setTimeout(start, 1400);
+
     }
   }, [faceImages, buildSonarLayer]);
 
@@ -597,7 +617,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     });
   };
 
-  // Décodage (~1 s) : le brouillage se résout de gauche à droite vers le
+  // Décodage (~0,55 s) : le brouillage se résout de gauche à droite vers le
   // texte final. Ne se déclenche qu'après une exposition continue d'1 s.
   const decodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
@@ -605,7 +625,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     stopScramble(faceScrambleTlRef.current[i]);
     faceScrambleTlRef.current[i] = undefined;
     faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
-      duration: 1,
+      duration: FACE_LABEL_DECODE_MS / 1000,
     });
   };
 
@@ -638,13 +658,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     galleryScrambleStateRef.current = "none";
     galleryExposureElapsedRef.current = 0;
     const galleryLabel = galleryLabelRef.current;
-    if (galleryLabel && galleryLabel.textContent !== "") galleryLabel.textContent = "";
+    if (galleryLabel && galleryLabel.textContent !== "")
+      galleryLabel.textContent = "";
   };
 
-  useEffect(() => () => {
-    faceScrambleTlRef.current.forEach((tl) => stopScramble(tl));
-    stopScramble(galleryScrambleTlRef.current);
-  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1202,6 +1219,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       if (!faceEl) return null;
       return {
         el: faceEl,
+        lit: faceEl.querySelector(".face-lit"),
         media: faceEl.querySelector("img,video"),
         wrapper: faceEl.querySelector(".face-media-wrapper"),
       };
@@ -1570,7 +1588,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 // décodage démarre proprement même depuis l'état « none ».
                 decodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "decoded";
-              } else if (faceScrambleStateRef.current[i] === "encoded") {
                 pendingDecode = true;
               }
             } else {
@@ -2013,6 +2030,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // toute la chorégraphie lui-même et n'a pas de segment showcase à jouer.
       const showcasing = unlocked && !skipRef.current && tlP > SHOW_START && tlP <= SHOW_END;
       spinningRef.current = spinning;
+
       // The direct drag adds a fixed offset over the scroll-driven orientation.
       // From the end-sequence spin onward the offset fades out so the cube
       // returns to its aligned ("square") rest pose before the names appear.
@@ -2056,6 +2074,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       };
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
       currentPRef.current = baseP;
+
       // Only recompute wireframe geometry when rotation changes by a visible amount.
       if (
         Math.abs(rot.rx - lastWireRotRef.current.rx) > 0.05 ||
@@ -2121,7 +2140,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         for (let i = 0; i < 6; i++) {
           const cached = faceCache[i];
           if (!cached) continue;
-          const { el: faceEl, media, wrapper } = cached;
+          const { el: faceEl, lit, media, wrapper } = cached;
           const n = FACE_NORMALS[i];
           const [rxn, ryn, rzn] = rotateVecByXY(n[0], n[1], n[2], rot.rx, rot.ry);
           const dot = Math.max(0, rxn * LIGHT_DIR[0] + ryn * LIGHT_DIR[1] + rzn * LIGHT_DIR[2]);
@@ -2130,7 +2149,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
           // tracking the cube rotation: the frontally exposed face always reads
           // fully lit, the others fall off naturally.
           if (skipFoldRef.current) {
-            faceEl.style.filter = `brightness(${brightness})`;
+            if (media) media.style.filter = "";
+            if (lit) lit.style.filter = `brightness(${brightness})`;
+            if (faceEl.style.filter) faceEl.style.filter = "";
             continue;
           }
           if (showcasing) {
@@ -2147,7 +2168,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.maskImage = "";
               wrapper.style.webkitMaskImage = "";
             }
-            faceEl.style.filter = `brightness(${brightness})`;
+            if (lit) lit.style.filter = `brightness(${brightness})`;
+            if (faceEl.style.filter) faceEl.style.filter = "";
           } else if (spinning || skipFacesHiddenRef.current) {
             if (media) media.style.filter = "";
             if (wrapper) {
@@ -2157,7 +2179,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.maskImage = "";
               wrapper.style.webkitMaskImage = "";
             }
-            faceEl.style.filter = `brightness(${brightness})`;
+            if (lit) lit.style.filter = `brightness(${brightness})`;
+            if (faceEl.style.filter) faceEl.style.filter = "";
           } else if (exitActive) {
             // Sortie : un fondu général — les six visuels, la vidéo et le fond
             // s'éteignent d'un même geste sur toute la fenêtre (EXIT_MS),
@@ -2197,9 +2220,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
               wrapper.style.webkitMaskImage = "";
             }
             if (media) media.style.filter = `brightness(${brightness})`;
+            if (lit) lit.style.filter = "";
             if (faceEl.style.filter) faceEl.style.filter = "";
           } else if (zoomedFacesRef.current[i] && !mediaRetractedRef.current) {
             if (media) media.style.filter = `brightness(${brightness})`;
+            if (lit) lit.style.filter = "";
             if (faceEl.style.filter) faceEl.style.filter = "";
             if (wrapper) {
               wrapper.style.transition = "transform 0.6s ease";
@@ -2210,7 +2235,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
             }
           } else {
             if (media) media.style.filter = "";
-            faceEl.style.filter = `brightness(${brightness})`;
+            if (lit) lit.style.filter = `brightness(${brightness})`;
+            if (faceEl.style.filter) faceEl.style.filter = "";
             if (wrapper) {
               wrapper.style.transition = "transform 0.6s ease";
               wrapper.style.opacity = "1";
@@ -2701,247 +2727,339 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 animation: wheelScroll 1.5s ease-in-out infinite;
               }
             `}</style>
-          </div>
-          <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
-            {PROJECT_LINKS.map((link, i) => {
-              const shown = zoomedFaces[i] || (skipped && (skipRevealedFaces[i] || contactDone));
-              return (
+              </div>
+              <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
+                {PROJECT_LINKS.map((link, i) => {
+                  const shown =
+                    zoomedFaces[i] ||
+                    (skipped && (skipRevealedFaces[i] || contactDone));
+                  return (
+                    <button
+                      key={link.name}
+                      onClick={() => openProject(i)}
+                      className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
+                      style={{
+                        opacity: shown ? 1 : 0,
+                        transform: shown
+                          ? "translateY(0)"
+                          : "translateY(-15px)",
+                        transition: `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
+                        pointerEvents: shown ? "auto" : "none",
+                      }}
+                    >
+                      {link.name}
+                    </button>
+                  );
+                })}
                 <button
-                  key={link.name}
-                  onClick={() => openProject(i)}
-                  className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 cursor-pointer"
-                  style={{
-                    opacity: shown ? 1 : 0,
-                    transform: shown ? "translateY(0)" : "translateY(-15px)",
-                    transition: `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
-                    pointerEvents: shown ? "auto" : "none",
-                  }}
+                  onClick={onContactClick}
+                  className="hidden text-center sm:inline-block bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:ml-6 hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
+                  style={contactBtnStyle}
                 >
-                  {link.name}
+                  CONTACT
                 </button>
-              );
-            })}
-            <button
-              onClick={onContactClick}
-              className="hidden text-center sm:inline-block bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:ml-6 hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
-              style={contactBtnStyle}
-            >
-              CONTACT
-            </button>
-          </nav>
-          <button
-            onClick={showReturn ? () => goToStartRef.current?.() : skipIntro}
-            aria-label={showReturn ? "Revenir au début de l'animation" : "Passer l'animation"}
-            className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] transition-all duration-500 cursor-pointer hover:text-white rounded-full flex items-center justify-center"
-            style={{
-              opacity: showReturn || (!contactDone && !skipped) ? 1 : 0,
-              pointerEvents: showReturn || (!contactDone && !skipped) ? "auto" : "none",
-            }}
-          >
-            {showReturn ? (
-              <span className="h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center">
-                <Undo2 className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
-              </span>
-            ) : (
-              <span className="tracking-[0.2em] uppercase text-[11px] sm:text-xs px-4 py-2">
-                SKIP
-              </span>
-            )}
-          </button>
-          <button
-            onClick={onContactClick}
-            className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
-            style={contactBtnStyle}
-          >
-            CONTACT
-          </button>
-          <div
-            ref={contentRef}
-            className="relative mx-auto w-full opacity-0"
-          >
-            <div className="min-h-[calc(var(--svh))] flex items-center justify-center">
-              <div ref={cubeContainerRef} className="relative shrink-0" style={{ width: 300, height: 300, transform: `scale(${cubeScale})`, transformOrigin: "center" }}>
-                <div style={{ perspective: 1200, perspectiveOrigin: "50% 50%" }}>
+              </nav>
+              <button
+                onClick={
+                  showReturn ? () => goToStartRef.current?.() : skipIntro
+                }
+                aria-label={
+                  showReturn
+                    ? "Revenir au début de l'animation"
+                    : "Passer l'animation"
+                }
+                className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] transition-all duration-500 cursor-pointer hover:text-white rounded-full flex items-center justify-center"
+                style={{
+                  opacity: showReturn || (!contactDone && !skipped) ? 1 : 0,
+                  pointerEvents:
+                    showReturn || (!contactDone && !skipped) ? "auto" : "none",
+                }}
+              >
+                {showReturn ? (
+                  <span className="h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center">
+                    <Undo2
+                      className="h-6 w-6 sm:h-7 sm:w-7"
+                      aria-hidden="true"
+                    />
+                  </span>
+                ) : (
+                  <span className="tracking-[0.2em] uppercase text-[11px] sm:text-xs px-4 py-2">
+                    SKIP
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={onContactClick}
+                className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
+                style={contactBtnStyle}
+              >
+                CONTACT
+              </button>
+              <div
+                ref={contentRef}
+                className="relative mx-auto w-full opacity-0"
+              >
+                <div className="min-h-[calc(var(--svh))] flex items-center justify-center">
                   <div
-                    ref={cubeRef}
-                    className="relative"
+                    ref={cubeContainerRef}
+                    className="relative shrink-0"
                     style={{
                       width: 300,
                       height: 300,
-                      transformStyle: "preserve-3d",
-                      willChange: "transform",
+                      transform: `scale(${cubeScale})`,
+                      transformOrigin: "center",
                     }}
                   >
-                    {FACES.map((face, i) => (
+                    <div
+                      style={{
+                        perspective: 1200,
+                        perspectiveOrigin: "50% 50%",
+                      }}
+                    >
                       <div
-                        key={face}
-                        className="absolute overflow-hidden box-border"
+                        ref={cubeRef}
+                        className="relative"
                         style={{
                           width: 300,
                           height: 300,
-                          background: "#0a0f1c",
-                          boxShadow: zoomedFaces[i] && !mediaRetracted ? "0 0 15px rgba(0,0,0,0.3)" : "none",
-                          transition: "box-shadow 0.3s ease",
-                          backfaceVisibility: "hidden",
-                          transform: faceTransform(face),
-                          WebkitTransform: faceTransform(face),
-                          isolation: "isolate",
+                          transformStyle: "preserve-3d",
                           willChange: "transform",
                         }}
                       >
-                        {faceImages[i] && (
+                        {FACES.map((face, i) => (
                           <div
-                            className="face-media-wrapper"
+                            key={face}
+                            className="absolute overflow-hidden box-border"
                             style={{
-                              transition: "transform 0.6s ease",
-                              width: "100%",
-                              height: "100%",
-                              pointerEvents: "none",
+                              width: 300,
+                              height: 300,
+                              background: "#0a0f1c",
+                              boxShadow:
+                                zoomedFaces[i] && !mediaRetracted
+                                  ? "0 0 15px rgba(0,0,0,0.3)"
+                                  : "none",
+                              transition: "box-shadow 0.3s ease",
+                              backfaceVisibility: "hidden",
+                              transform: faceTransform(face),
+                              WebkitTransform: faceTransform(face),
+                              isolation: "isolate",
+                              willChange: "transform",
                             }}
                           >
-                            {isVideoUrl(faceImages[i]) ? (
-                              <video
-                                src={faceImages[i]}
-                                className="w-full h-full object-cover"
-                                autoPlay={zoomedFaces[i] && !mediaRetracted}
-                                muted
-                                loop
-                                playsInline
-                                preload="metadata"
-                              />
-                            ) : (
-                              <img
-                                src={faceImages[i]}
-                                alt=""
-                                className="w-full h-full object-cover"
-                                draggable={false}
-                                loading="eager"
-                                fetchPriority="high"
-                              />
-                            )}
+                            {/* Couche éclairée : elle porte le fond ET le filtre
+                            d'éclairage. Le label reste frère au-dessus, hors de
+                            cette couche — sinon le `filter` de la face
+                            l'assombrirait avec l'image. */}
+                            <div
+                              className="face-lit"
+                              style={{
+                                position: "absolute",
+                                inset: 0,
+                                background: "#0a0f1c",
+                                overflow: "hidden",
+                              }}
+                            >
+                              {faceImages[i] && (
+                                <div
+                                  className="face-media-wrapper"
+                                  style={{
+                                    transition: "transform 0.6s ease",
+                                    width: "100%",
+                                    height: "100%",
+                                    pointerEvents: "none",
+                                  }}
+                                >
+                                  {isVideoUrl(faceImages[i]) ? (
+                                    <video
+                                      src={faceImages[i]}
+                                      className="w-full h-full object-cover"
+                                      autoPlay={zoomedFaces[i] && !mediaRetracted}
+                                      muted
+                                      loop
+                                      playsInline
+                                      preload="metadata"
+                                    />
+                                  ) : (
+                                    <img
+                                      src={faceImages[i]}
+                                      alt=""
+                                      className="w-full h-full object-cover"
+                                      draggable={false}
+                                      loading="eager"
+                                      fetchPriority="high"
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div
+                              ref={(el) => {
+                                clickLabelRefs.current[i] = el;
+                              }}
+                              className="pointer-events-none select-none"
+                              style={{
+                                position: "absolute",
+                                inset: 0,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "#33d1c8",
+                                // Compense le rendu grayscale de la face pour rejoindre
+                                // l'épaisseur du label du skip — voir
+                                // `FACE_LABEL_FONT_SCALE`.
+                                fontSize: `${1.25 * FACE_LABEL_FONT_SCALE}rem`,
+                                fontFamily:
+                                  "var(--font-share-tech-mono), monospace",
+                                letterSpacing: "0.3em",
+                                // Même halo que l'overlay du skip : sans lui, le
+                                // turquoise se fond dans le fond et le label paraît
+                                // terne par rapport au label du skip.
+                                textShadow: "0 0 14px rgba(51,209,200,0.5)",
+                                opacity: 0,
+                                transition: "opacity 0.35s ease",
+                                zIndex: 5,
+                              }}
+                            >
+                              {FACE_LABELS[i]}
+                            </div>
                           </div>
-                        )}
-                        <div
-                          ref={(el) => { clickLabelRefs.current[i] = el; }}
-                          className="pointer-events-none select-none"
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "#33d1c8",
-                            fontSize: "1.25rem",
-                            fontFamily: "var(--font-share-tech-mono), monospace",
-                            letterSpacing: "0.3em",
-                            opacity: 0,
-                            transition: "opacity 0.35s ease",
-                            zIndex: 5,
-                          }}
-                        >
-                          {FACE_LABELS[i]}
-                        </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+                    <div
+                      ref={galleryLabelRef}
+                      data-gallery-label=""
+                      className="pointer-events-none select-none"
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#33d1c8",
+                        fontSize: "1.25rem",
+                        fontFamily: "var(--font-share-tech-mono), monospace",
+                        letterSpacing: "0.3em",
+                        opacity: 0,
+                        transition: "opacity 0.35s ease",
+                        zIndex: 25,
+                        // Égalise la taille réelle du label du skip avec celle des
+                        // labels de face : ceux-ci vivent dans le cube 3D, où la
+                        // projection perspective (1200px, face à 150px) les grossit
+                        // de 1200/1050 = 8/7 par rapport à cet overlay 2D. Le cube
+                        // est déjà dans le conteneur mis à l'échelle
+                        // (`scale(${cubeScale})`), il ne faut donc PAS re-multiplier
+                        // par cubeScale ici. `transformOrigin: center` garde le
+                        // texte centré.
+                        transform: `scale(${CUBE_FACE_PROJECTION_SCALE})`,
+                        transformOrigin: "center",
+                        textShadow: "0 0 14px rgba(51,209,200,0.5)",
+                        willChange: "opacity",
+                      }}
+                    />
+                    <svg
+                      ref={wireRef}
+                      className="absolute inset-0 pointer-events-none"
+                      width={300}
+                      height={300}
+                      viewBox="0 0 300 300"
+                      style={{ zIndex: 5, overflow: "visible" }}
+                    />
+                    <div
+                      ref={overlayRef}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        zIndex: 20,
+                        background: "#0a0f1c",
+                        pointerEvents: "none",
+                        opacity: 0,
+                        transition: "opacity 0.12s linear",
+                      }}
+                    />
+                    <div
+                      ref={clickZoneRef}
+                      onClick={handleCubeClick}
+                      className="absolute cursor-grab"
+                      style={{
+                        zIndex: 10,
+                        background: "transparent",
+                        top: -60,
+                        left: -60,
+                        right: -60,
+                        bottom: -60,
+                        userSelect: "none",
+                        touchAction: touchLock ? "none" : "pan-y",
+                        WebkitUserSelect: "none",
+                      }}
+                    />
                   </div>
                 </div>
-                <div
-                  ref={galleryLabelRef}
-                  data-gallery-label=""
-                  className="pointer-events-none select-none"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#33d1c8",
-                    fontSize: "1.25rem",
-                    fontFamily: "var(--font-share-tech-mono), monospace",
-                    letterSpacing: "0.3em",
-                    opacity: 0,
-                    transition: "opacity 0.35s ease",
-                    zIndex: 25,
-                    // Égalise la taille réelle du label du skip avec celle des
-                    // labels de face : ceux-ci vivent dans le cube 3D, où la
-                    // projection perspective (1200px, face à 150px) les grossit
-                    // de 1200/1050 = 8/7 par rapport à cet overlay 2D. Le cube
-                    // est déjà dans le conteneur mis à l'échelle
-                    // (`scale(${cubeScale})`), il ne faut donc PAS re-multiplier
-                    // par cubeScale ici. `transformOrigin: center` garde le
-                    // texte centré.
-                    transform: `scale(${CUBE_FACE_PROJECTION_SCALE})`,
-                    transformOrigin: "center",
-                    textShadow: "0 0 14px rgba(51,209,200,0.5)",
-                    willChange: "opacity",
-                  }}
-                />
-                <svg
-                  ref={wireRef}
-                  className="absolute inset-0 pointer-events-none"
-                  width={300}
-                  height={300}
-                  viewBox="0 0 300 300"
-                  style={{ zIndex: 5, overflow: "visible" }}
-                />
-                <div
-                  ref={overlayRef}
-                  style={{ position: "absolute", inset: 0, zIndex: 20, background: "#0a0f1c", pointerEvents: "none", opacity: 0, transition: "opacity 0.12s linear" }}
-                />
-                <div
-                  ref={clickZoneRef}
-                  onClick={handleCubeClick}
-                  className="absolute cursor-grab"
-                  style={{ zIndex: 10, background: "transparent", top: -60, left: -60, right: -60, bottom: -60, userSelect: "none", touchAction: touchLock ? "none" : "pan-y", WebkitUserSelect: "none" }}
-                />
               </div>
             </div>
           </div>
         </div>
-      </div>
-      </div>
 
-      {showContact && (
-        <div className="fixed inset-0 z-[60]">
-          <ContactOverlay
-            onClose={() => {
-              setShowContact(false);
-              if (typeof window !== "undefined" && window.history?.state?.ufoContact) {
-                try { window.history.replaceState(null, "", window.location.href); } catch {}
-              }
-            }}
-          />
-        </div>
-      )}
+        {showContact && (
+          <div className="fixed inset-0 z-[60]">
+            <ContactOverlay
+              onClose={() => {
+                setShowContact(false);
+                if (
+                  typeof window !== "undefined" &&
+                  window.history?.state?.ufoContact
+                ) {
+                  try {
+                    window.history.replaceState(null, "", window.location.href);
+                  } catch {}
+                }
+              }}
+            />
+          </div>
+        )}
 
-      {selectedProject !== null && (
-        <div className="fixed inset-0 z-50 overflow-y-auto" style={{ backgroundColor: "#0a0f1c" }}>
-          <div className="mx-auto max-w-4xl px-6 py-24">
-            {renderProjectContent(selectedProject, { onContact: onContactClick })}
-            <div className="text-center mt-20">
-              <button
-                onClick={() => {
-                  if (typeof window !== "undefined" && window.history && window.history.state && typeof window.history.state.ufoProject === "number") {
-                    window.history.back();
-                  } else {
-                    setSelectedProject(null);
-                    if (typeof window !== "undefined") {
-                      try {
-                        const url = new URL(window.location.href);
-                        url.searchParams.delete("project");
-                        window.history.replaceState(null, "", url.pathname + url.search);
-                      } catch {}
+        {selectedProject !== null && (
+          <div
+            className="fixed inset-0 z-50 overflow-y-auto"
+            style={{ backgroundColor: "#0a0f1c" }}
+          >
+            <div className="mx-auto max-w-4xl px-6 py-24">
+              {renderProjectContent(selectedProject, {
+                onContact: onContactClick,
+              })}
+              <div className="text-center mt-20">
+                <button
+                  onClick={() => {
+                    if (
+                      typeof window !== "undefined" &&
+                      window.history &&
+                      window.history.state &&
+                      typeof window.history.state.ufoProject === "number"
+                    ) {
+                      window.history.back();
+                    } else {
+                      setSelectedProject(null);
+                      if (typeof window !== "undefined") {
+                        try {
+                          const url = new URL(window.location.href);
+                          url.searchParams.delete("project");
+                          window.history.replaceState(
+                            null,
+                            "",
+                            url.pathname + url.search,
+                          );
+                        } catch {}
+                      }
                     }
-                  }
-                }}
-                className="text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer"
-              >
-                &larr; RETOUR
-              </button>
+                  }}
+                  className="text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer"
+                >
+                  &larr; RETOUR
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
       </section>
 
       {isMobileLandscape && (
