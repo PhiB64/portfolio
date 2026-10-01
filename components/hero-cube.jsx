@@ -1387,15 +1387,25 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Sur mobile, la même finale se lit trop vite : le cube y occupe une fraction
     // plus petite de l'écran, et la fin (showcase + spin + placement) se joue
     // entièrement pendant ces 9 s. On lui donne un budget plus long côté mobile.
-    const AUTOPLAY_MS = reduceMotion() ? 2000 : mobileScroll ? 35000 : 9000;
+    // Budgets de la fin écrite, segment par segment, et non plus un total unique.
+    // La tête de timeline traversait `[CUBE_END, 1]` à vitesse égale, si bien que
+    // le spin n'en recevait que 27,6 % (48,8 % sur le chemin du skip) et la
+    // révolution que les 60 % premiers de cette fenêtre — soit 1,4 s par tour à
+    // SKIP_FINALE_MS = 15000, donc 353 ms par palier de 90°. Gonfler le total de
+    // 3,4x ne déplaçait donc presque rien : c'est ce que.payait la demi-douzeaine
+    // de commits « ralentit les rotations finales » qui se sont succédé sans effet
+    // visible. Chaque segment porte maintenant son budget, et la révolution se lit
+    // sur SPIN_MS quel que soit le coût de la showcase et de la queue.
+    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 7000 : 3400;
+    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 9000 : 5000;
+    const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 6000 : 2800;
+    const FINALE_MS = SHOW_MS + SPIN_MS + TAIL_MS;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
     // clic : sur mobile on peut enchaîner les six tapes près de INTRO_END, et
-    // étirer toute la rampe `[tlAutoplayStartP, 1]` sur un AUTOPLAY_MS fixe
-    // comprime alors d'autant la fin écrite — la showcase et surtout le spin se
-    // jouaient jusqu'à ~46% trop vite (1,7 s au lieu de 2,49 s). Le rattrapage
-    // reçoit donc son propre budget, et `[CUBE_END, 1]` dure toujours
-    // AUTOPLAY_MS.
+    // étirer toute la rampe `[tlAutoplayStartP, 1]` sur un total fixe
+    // comprime alors d'autant la fin écrite. Le rattrapage reçoit donc son propre
+    // budget, et `[CUBE_END, 1]` garde exactement le budget de la fin écrite.
     //
     // Ce rattrapage est du temps mort, et il peut donc être minuscule : sous
     // CUBE_END la timeline ne contient qu'un segment vide (`.add({ duration:
@@ -1405,8 +1415,25 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // dès l'expiration de la grâce. Sans rattrapage (6e clic à ou après
     // CUBE_END, le cas desktop), le minutage est celui d'avant.
     const AUTOPLAY_CATCHUP_MS = 250;
-    let autoplayTotalMs = AUTOPLAY_MS;
-    let autoplayCatchFrac = 0;
+    // Budget du rattrapage, en ms réelles, décidé à l'armement (0 si le 6e clic
+    // est déjà à CUBE_END). `autoplayTotalMs` vaut alors ce rattrapage plus la
+    // fin écrite : le scroll garde ainsi sa rampe d'origine, et seule la tête de
+    // timeline reçoit les budgets par segment.
+    let autoplayTotalMs = FINALE_MS;
+    let autoplayCatchMs = 0;
+    // Marche la fin écrite depuis `fromP`, en donnant à chaque segment son
+    // budget. Un `fromP` déjà passé SPIN_START (6e clic tardif, ou skip pressé
+    // pendant le spin) saute la showcase et part tout de suite sur SPIN_MS : la
+    // révolution n'est plus comprimée par ce qui la précède.
+    const runFinale = (fromP, elapsed) => {
+      if (fromP < SPIN_START) {
+        if (elapsed < SHOW_MS) return fromP + (SPIN_START - fromP) * (elapsed / SHOW_MS);
+        elapsed -= SHOW_MS;
+      }
+      if (elapsed < SPIN_MS) return SPIN_START + (SPIN_END - SPIN_START) * (elapsed / SPIN_MS);
+      elapsed -= SPIN_MS;
+      return SPIN_END + (1 - SPIN_END) * Math.min(1, elapsed / TAIL_MS);
+    };
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
@@ -1417,13 +1444,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const SKIP_TURN_MS = isMobileDevice() ? 800 : 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
-    // Le finale fait avancer `currentP` de SPIN_START à 1, soit
-    // `W.spin + W.squareIn + W.cubeOut + W.lineMorph + W.namesRise` = 6150ms de
-    // timeline. À 3000ms réelles, toute cette queue se jouait 2,05x trop vite —
-    // dont le placement final du cube, le plus angulaire de tous, d'où la fin de
-    // spin qui partait à toute vitesse. On vise ~1,4x : assez posé pour être
-    // lisible, sans alourdir le skip de deux secondes.
-    const SKIP_FINALE_MS = reduceMotion() ? 1200 : isMobileDevice() ? 15000 : 4400;
+    // Durée totale du finale de skip. Elle ne sert plus qu'àborner la séquence
+    // entière : le minutage lui-même est porté par `runFinale`, qui donne au spin
+    // son budget propre. SPIN_START + 1 est atteint en SPIN_MS + TAIL_MS.
+    const SKIP_FINALE_MS = SPIN_MS + TAIL_MS;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Effort de recul cumulé (px) depuis `reverseAnchor`, la position de
@@ -1692,21 +1716,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
             el.scrollTop = autoScrollPx;
             // La tête ne traverse pas `[tlAutoplayStartP, 1]` à vitesse égale :
             // sous CUBE_END il n'y a qu'un rattrapage, bridé à son budget, et la
-            // fin écrite `[CUBE_END, 1]` garde ainsi exactement AUTOPLAY_MS quelle
-            // que soit la position du 6e clic. Sans ce partage, un clic prématuré
-            // (six tapes enchaînées sur mobile) étirait la rampe sur le même
-            // budget et compressait showcase et spin — jusqu'à 1,7 s au lieu de
-            // 2,49 s. Les deux branches se raccordent en CUBE_END et finissent
-            // en 1 : la tête reste continue, donc aucun saut. Sans rattrapage le
-            // membre de gauche est inactif et la formule est celle d'avant.
-            if (autoplayCatchFrac > 0 && k < autoplayCatchFrac) {
-              tlAutoplayP =
-                tlAutoplayStartP + (CUBE_END - tlAutoplayStartP) * (k / autoplayCatchFrac);
-            } else {
-              const finalK =
-                autoplayCatchFrac > 0 ? (k - autoplayCatchFrac) / (1 - autoplayCatchFrac) : k;
-              tlAutoplayP = CUBE_END + (1 - CUBE_END) * finalK;
-            }
+            // fin écrite garde ensuite ses budgets par segment. Sans ce partage,
+            // un clic prématuré (six tapes enchaînées sur mobile) étirait la rampe
+            // sur le même budget et compressait la fin écrite. Les deux branches
+            // se raccordent en CUBE_END et finissent en 1 : la tête reste
+            // continue, donc aucun saut.
+            tlAutoplayP =
+              autoplayElapsed < autoplayCatchMs
+                ? tlAutoplayStartP +
+                  (CUBE_END - tlAutoplayStartP) * (autoplayElapsed / autoplayCatchMs)
+                : runFinale(CUBE_END, autoplayElapsed - autoplayCatchMs);
             // Fin de course : la tête de timeline est épinglée à 1, et on cesse de
             // piloter le scroll. `p` converge vers 1 par lissage et la rejoint,
             // donc les deux têtes se rejoignent sans discontinuité.
@@ -1946,7 +1965,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         if (skipLate) {
           skipFoldRef.current = false;
           skipFacesHiddenRef.current = true;
-          currentP = skipFrom + (1 - skipFrom) * smoothstep(autoplayElapsed / SKIP_FINALE_MS);
+          currentP = runFinale(skipFrom, autoplayElapsed);
         } else if (autoplayElapsed < SKIP_MORPH_MS) {
           // Morphing first: glide from the current position up to the cube pose
           // while the faces unfold, so the sweep is never a visual jump.
@@ -2054,7 +2073,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           // Finale (spin, line, name) at its own steady pace on the blank cube.
           skipFacesHiddenRef.current = true;
           skipFoldRef.current = false;
-          currentP = SPIN_START + (1 - SPIN_START) * Math.min(1, (autoplayElapsed - SKIP_MORPH_MS - galleryDur - SKIP_GAP_MS) / SKIP_FINALE_MS);
+          currentP = runFinale(SPIN_START, autoplayElapsed - SKIP_MORPH_MS - galleryDur - SKIP_GAP_MS);
         }
         const sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
@@ -2137,14 +2156,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // à la face « front », remplaçant le visuel choisi par un autre.
         lockedCubeP = Math.max(0, (currentP - INTRO_END) / CUBE_RANGE);
         tlAutoplayStartP = Math.min(currentP, CUBE_END);
-        // Répartition du budget : la fin écrite garde ses AUTOPLAY_MS, et le
-        // rattrapage entre le 6e clic et CUBE_END prend le reste, sur une part
-        // fixe du budget total. Sans rattrapage — 6e clic à ou après CUBE_END —
-        // le budget total vaut AUTOPLAY_MS et le minutage est celui d'avant.
+        // Répartition du budget : la fin écrite garde ses budgets par segment, et
+        // le rattrapage entre le 6e clic et CUBE_END prend le reste. Sans
+        // rattrapage — 6e clic à ou après CUBE_END — il n'y a rien à rattraper.
         const catchSpan = Math.max(0, CUBE_END - tlAutoplayStartP);
-        autoplayCatchFrac =
-          catchSpan > 0 ? AUTOPLAY_CATCHUP_MS / (AUTOPLAY_CATCHUP_MS + AUTOPLAY_MS) : 0;
-        autoplayTotalMs = catchSpan > 0 ? AUTOPLAY_CATCHUP_MS + AUTOPLAY_MS : AUTOPLAY_MS;
+        autoplayCatchMs = catchSpan > 0 ? AUTOPLAY_CATCHUP_MS : 0;
+        autoplayTotalMs = autoplayCatchMs + FINALE_MS;
         // La tête de timeline est verrouillée sur cette valeur pendant toute la
         // grâce, puis avance avec le scroll automatique (voir plus haut).
         tlAutoplayP = tlAutoplayStartP;
@@ -2280,8 +2297,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
         const from = spinFromRef.current;
         const k = Math.min(1, (tlP - SPIN_START) / (SPIN_END - SPIN_START));
-        const easeIO = (t) => t * t * (3 - 2 * t);
-        const seg = (start, end) => easeIO(Math.min(1, Math.max(0, (k - start) / (end - start))));
+        // Vitesse CONSTANTE dans chaque palier, sans `smoothstep`. L'easing par
+        // palier était la vraie cause du « toujours trop rapide » : il repart de
+        // zéro à chaque frontière de segment, donc le cube accélère, décélère,
+        // repart — quatre fois de suite. Le mouvement se lisait comme une suite
+        // de à-coups quelle que soit la durée totale, ce qui explique que les
+        // quatre commits « ralentit les rotations finales » n'aient rien changé
+        // de visible : ils allongeaient un budget sans toucher à ce profil.
+        // Ici la dérivée est plate : la seule sensation de vitesse est celle de
+        // `SPIN_MS`.
+        const seg = (start, end) => Math.min(1, Math.max(0, (k - start) / (end - start)));
         // Quatre paliers de 90° alternés Y-X-Y-X sur les 60% de la fenêtre, et
         // non quatre paliers de 180° sur 80% : le cube fait une révolution au
         // lieu de deux, et chaque palier est deux fois plus court.
