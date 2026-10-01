@@ -3031,8 +3031,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
                   const shown =
                     zoomedFaces[i] ||
                     (skipped && (skipRevealedFaces[i] || contactDone));
-                  const isSkipRevealed =
-                    skipped && skipRevealedFaces[i] && !zoomedFaces[i];
                   return (
                     <button
                       key={link.name}
@@ -3053,9 +3051,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
                         transform: shown
                           ? "translateY(0)"
                           : "translateY(-15px)",
-                        transition: isSkipRevealed
-                          ? `opacity 0.9s ease ${0.6 + i * 0.2}s, transform 0.9s ease ${0.6 + i * 0.2}s`
-                          : `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
+                        transition: `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
                         pointerEvents: shown ? "auto" : "none",
                       }}
                     >
