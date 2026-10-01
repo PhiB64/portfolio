@@ -1423,7 +1423,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // dont le placement final du cube, le plus angulaire de tous, d'où la fin de
     // spin qui partait à toute vitesse. On vise ~1,4x : assez posé pour être
     // lisible, sans alourdir le skip de deux secondes.
-    const SKIP_FINALE_MS = reduceMotion() ? 1200 : 4400;
+    const SKIP_FINALE_MS = reduceMotion() ? 1200 : isMobileDevice() ? 7000 : 4400;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Effort de recul cumulé (px) depuis `reverseAnchor`, la position de
