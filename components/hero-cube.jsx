@@ -22,7 +22,7 @@ import {
   rotateVecByXY,
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
-import { FACE_MEDIA } from "../lib/cube-media";
+import { FACE_MEDIA, faceSrcSet } from "../lib/cube-media";
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
 // [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS].
@@ -3142,6 +3142,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
                                   ) : (
                                     <img
                                       src={faceImages[i]}
+                                      srcSet={faceSrcSet(faceImages[i])}
+                                      // `sizes` suit l'état de zoom : la face mesure 343 px
+                                      // au repos (300 × 8/7 de projection perspective, cf.
+                                      // CUBE_FACE_PROJECTION_SCALE) et occupe le viewport une
+                                      // fois ouverte. Sans cette bascule, le navigateur
+                                      // figerait son choix de variante sur la petite et le
+                                      // plein écran serait flou. La variante d'origine
+                                      // Referme le `srcset`, donc la qualité d'aujourd'hui est
+                                      // garantie même si ce dimensionnement évolue.
+                                      sizes={
+                                        zoomedFaces[i] && !mediaRetracted
+                                          ? "100vw"
+                                          : "343px"
+                                      }
                                       alt=""
                                       className="w-full h-full object-cover"
                                       draggable={false}
@@ -3150,9 +3164,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
                                       // hors du viewport au sens d'IntersectionObserver
                                       // — un `lazy` les différerait, et `revealFaceMedia`
                                       // n'ouvrirait la face qu'au bout de son timeout de
-                                      // 1400 ms, le visuel restant vide. Le coût est
-                                      // borné (~250 Ko pour les trois .webp) et il est payé
-                                      // une fois, au premier affichage.
+                                      // 1400 ms, le visuel restant vide. Le coût initial
+                                      // est mesuré : 31 Ko en DPR1, 57 Ko en DPR2 (contre
+                                      // ~248 Ko avant) — le `srcset` ne télécharge que la
+                                      // variante utile au repos, la grande étant réservée
+                                      // au zoom.
                                       loading="eager"
                                       // Décodage hors du thread principal : évite de
                                       // bloquer le premier rendu du cube.
