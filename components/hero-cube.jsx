@@ -1387,7 +1387,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Sur mobile, la même finale se lit trop vite : le cube y occupe une fraction
     // plus petite de l'écran, et la fin (showcase + spin + placement) se joue
     // entièrement pendant ces 9 s. On lui donne un budget plus long côté mobile.
-    const AUTOPLAY_MS = reduceMotion() ? 2000 : mobileScroll ? 26000 : 9000;
+    const AUTOPLAY_MS = reduceMotion() ? 2000 : mobileScroll ? 35000 : 9000;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
     // clic : sur mobile on peut enchaîner les six tapes près de INTRO_END, et
@@ -1423,7 +1423,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // dont le placement final du cube, le plus angulaire de tous, d'où la fin de
     // spin qui partait à toute vitesse. On vise ~1,4x : assez posé pour être
     // lisible, sans alourdir le skip de deux secondes.
-    const SKIP_FINALE_MS = reduceMotion() ? 1200 : isMobileDevice() ? 10000 : 4400;
+    const SKIP_FINALE_MS = reduceMotion() ? 1200 : isMobileDevice() ? 15000 : 4400;
     // Timestamp of the last scroll nudge back to the labelled-face pin.
     let lastPinFix = 0;
     // Effort de recul cumulé (px) depuis `reverseAnchor`, la position de
