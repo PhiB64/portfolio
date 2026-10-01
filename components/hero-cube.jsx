@@ -2702,8 +2702,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // souris : gain plus fort sur les deux axes pour rester aussi direct.
       const sens =
         st.pointerType === "touch" ? { ry: 1.0, rx: 0.6 } : { ry: 0.5, rx: 0.3 };
-      dragOffsetRef.current.ry += -dx * sens.ry;
-      dragOffsetRef.current.rx += dy * sens.rx;
+      // Sens du pilotage inversé : ces deux signes commandent la correspondance
+      // écran -> rotation, et rien d'autre. Les deux lignes serveant la souris
+      // comme le doigt, l'inversion est.ipso facto la même sur le web et le
+      // mobile — les garder opposés entre les deux aurait fait diverger les
+      // plateformes. Les gains de `sens` restent positifs : ce sont des
+      // sensibilités, pas des directions, et l'amortissement qui suit est
+      // multiplicatif, donc indifferent au signe.
+      dragOffsetRef.current.ry += dx * sens.ry;
+      dragOffsetRef.current.rx += -dy * sens.rx;
       queueDragRender();
     };
 
