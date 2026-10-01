@@ -182,11 +182,11 @@ const isRealMobileDevice = () => {
 // scrub de scroll n'est volontairement pas touché : c'est un pilotage direct de
 // l'utilisateur, pas une animation automatique, et le neutraliser figerait la
 // page sur la carte d'intro (cf. le commentaire de l'effet d'animation).
-// Lu à chaque appel plutôt qu'une fois au chargement, pour qu'un changement de
-// réglage système soit pris en compte sans rechargement.
-const reduceMotion = () =>
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+// Neutralisé volontairement : les durées mobiles (autoplay 35 s, finale 15 s)
+// sont trop longues pour rester sous ce plafond, et l'utilisateur peut déjà
+// couper les animations au niveau système (Android > Accessibilité > Retirer
+// les animations). Point de restauration : retourner `matchMedia(...).matches`.
+const reduceMotion = () => false;
 
 const sonarGeometry = (root, pointEl) => {
   const rect = root.getBoundingClientRect();
