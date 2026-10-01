@@ -1387,7 +1387,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Sur mobile, la même finale se lit trop vite : le cube y occupe une fraction
     // plus petite de l'écran, et la fin (showcase + spin + placement) se joue
     // entièrement pendant ces 9 s. On lui donne un budget plus long côté mobile.
-    const AUTOPLAY_MS = reduceMotion() ? 2000 : mobileScroll ? 13000 : 9000;
+    const AUTOPLAY_MS = reduceMotion() ? 2000 : mobileScroll ? 18000 : 9000;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
     // clic : sur mobile on peut enchaîner les six tapes près de INTRO_END, et
