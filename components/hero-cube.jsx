@@ -1411,7 +1411,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
     const SKIP_MORPH_MS = 900;
-    const SKIP_TURN_MS = 400;
+    // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
+    // bascule trop vite après l'apposition des onglets : la transition est
+    // allongée pour rester lisible sur un écran tactile.
+    const SKIP_TURN_MS = isMobileDevice() ? 800 : 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
     // Le finale fait avancer `currentP` de SPIN_START à 1, soit
