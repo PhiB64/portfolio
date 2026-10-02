@@ -21,7 +21,7 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { PROJECT_CONTENT, CAREER_CONTENT } from "../lib/portfolio-content.js";
+import { PROJECT_CONTENT, CAREER_CONTENT, USAGE_CONTENT } from "../lib/portfolio-content.js";
 
 const DIST = path.resolve(import.meta.dirname, "..", "dist");
 const OUT = path.join(DIST, "content.json");
@@ -73,7 +73,11 @@ function sectionLines(section) {
 
   if (section.profile) {
     lines.push(`CV : ${section.profile.cvUrl}`);
-    for (const bio of section.profile.bio ?? []) lines.push(bio);
+    // `profile.bio` n'est volontairement pas publié ici, bien qu'il soit rendu
+    // sur la face « Projets » du cube : c'est la même chose que la section
+    // « Identité », en première personne. Le digest la publie deux fois donc,
+    // et la version utile est celle de la tête, à la troisième personne — celle
+    // que l'assistant doit reprendre. Le lien du CV, lui, n'existe qu'ici.
   }
 
   for (const project of section.projects ?? []) {
@@ -113,6 +117,14 @@ function careerLines() {
     // prompt, « je suis l'assistant de Philippe » — devenait sa réponse.
     "## Identité",
     ...c.identite,
+    "",
+    // « Utiliser ce site » vient avant le parcours et avant les projets. C'est
+    // la réponse à la question que se pose le visiteur qui vient d'arriver
+    // devant le cube et ne sait pas quoi faire, donc elle est lue pendant qu'il
+    // regarde la page. Elle ne pouvait pas être écrite plus bas : à 85 % du
+    // digest, le modèle ne l'aurait pas atteinte, comme le parcours avant elle.
+    "## Utiliser ce site",
+    ...USAGE_CONTENT,
     "",
     "## Parcours professionnel",
     c.reconversion,

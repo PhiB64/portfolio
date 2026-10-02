@@ -176,6 +176,52 @@ prompt ne la duplique pas.
 Le digest pèse 12 732 caractères après ces ajouts, contre 12 362 avant, sous le
 plafond de 15 000 : il n'est donc pas tronqué.
 
+#### La section « Utiliser ce site »
+
+Une section de douze lignes, et c'est la réponse à « je suis perdu », « je n'arrive
+pas à défiler », « où sont les onglets ? », « comment on écrit à Philippe ? ».
+
+Le digest ne décrivait que Philippe et ses projets. La navigation du site n'y
+était pas, et aucune autre source ne pouvait y répondre : le digest est la seule
+source de vérité, le Worker ne lit pas le dépôt. L'assistant disait donc qu'il
+n'avait pas l'information sous les yeux — à raison, elle n'y était pas.
+
+La section vit dans `USAGE_CONTENT`, dans `lib/portfolio-content.js`, et comme
+`CAREER_CONTENT` elle n'est rendue nulle part sur le site : son seul destinataire
+est le digest. Elle est publiée en deuxième position, après l'Identité — c'est la
+question que se pose le visiteur qui vient d'arriver devant le cube.
+
+Chaque ligne décrit un comportement lu dans le code, pas une intention. Les
+points qui ressemblent à des bugs sont donc écrits comme des règles, jamais
+comme des choix :
+
+- les étiquettes sont floues pendant la première révolution parce que
+  `FACE_LABEL_REVEAL_COUNT` vaut 2 dans `hero-cube.jsx` ;
+- le cube se bloque après le second tour parce que `labelPinPRef` est armé quand
+  les six faces ont été vues deux fois, et libéré seulement quand les six faces
+  étiquetées ont été cliquées ;
+- les onglets sont masqués tant que la rubrique n'a pas été ouverte, et `SKIP`
+  les révèle sans qu'aucun clic sur une face soit nécessaire.
+
+Deux choses apprises en testant, qui ne se devinaient pas. Le system prompt
+interdit d'inventer un geste non décrit, et d'expliquer un effet du cube par une
+intention — le modèle Workers AI invoquait quand même « l'expérience immersive »
+et « la préparation mentale », pour un comportement qui n'a pas d'explication
+documentée. Et une consigne de rédaction placée dans le digest (« résume en deux
+ou trois phrases, n'énumère pas les dix lignes suivantes ») a produit une réponse
+en dix points numérotés : elle n'a rien changé. Ces limites sont notées dans
+`USAGE_CONTENT`, et une hypothèse reste ouverte — que la réponse « SKIP » seule,
+à « je suis bloqué », devienne une phrase sur `openrouter/free`. À vérifier en
+production ; sinon il faudra porter cette consigne dans le system prompt.
+
+Le digest pèse 14 640 caractères, contre 12 732 avant cette section, sous le
+plafond de 15 000 : marge de 360 caractères, pas tronqué. Pour la faire tenir, deux
+réductions ont été nécessaires. `profile.bio` n'est plus publié dans la section
+« Projets » : c'est la même chose que `CAREER_CONTENT.identite`, en première
+personne, et le digest la disait deux fois. Et le system prompt a ceased de
+réciter les diplômes, les langues, les permis et les 35 collaborateurs — ils sont
+dans le digest, il n'en reste qu'un renvoi.
+
 #### La section « Parcours professionnel »
 
 Le digest a deux sources. La première est `PROJECT_CONTENT`, c'est-à-dire
