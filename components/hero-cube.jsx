@@ -8,6 +8,7 @@ import { renderProjectContent } from "./cube/project-content";
 import { ProjectTabs, BackButton, PROJECT_LINKS } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
 import {
+  CUBE_STEP_BOUNDS,
   FACE_LABELS,
   FACE_NORMALS,
   FACES,
@@ -19,6 +20,7 @@ import {
   getCubeRotation,
   isFaceVisible,
   isVideoUrl,
+  nextCubeStepBound,
   rotateVecByXY,
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
@@ -1396,9 +1398,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // de commits « ralentit les rotations finales » qui se sont succédé sans effet
     // visible. Chaque segment porte maintenant son budget, et la révolution se lit
     // sur SPIN_MS quel que soit le coût de la showcase et de la queue.
-    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 7000 : 3400;
-    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 9000 : 5000;
-    const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 6000 : 2800;
+    // Ces budgets ont été une fois de trop. La suppression du `smoothstep` a
+    // supprimé les à-coups — c'est elle qui réglait la vitesse perçue, pas la
+    // durée — et une fois le profil plat, 9 s de spin donnaient 5,4 s par
+    // révolution : trop lent. On redescend à mi-chemin entre la sensation
+    // d'origine (trop rapide, ~1,4 s par tour) et ce plafond, soit 3,3 s par
+    // révolution sur mobile et 1,9 s sur desktop. La queue raccourcit d'autant :
+    // elle ne fait que poser le carré, la ligne et les noms.
+    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 4500 : 2600;
+    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 5500 : 3200;
+    const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 3500 : 1800;
     const FINALE_MS = SHOW_MS + SPIN_MS + TAIL_MS;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
@@ -1497,18 +1506,26 @@ export function HeroCube({ title, subtitle, images = [] }) {
       RESET_NAMES_MS + RESET_LINE_GROW_MS + RESET_MORPH_MS;
     const RESET_REVEAL_MS = RESET_MS - RESET_MORPH_END_MS;
     // Poses (rotation units) the skip gallery lingers on, one per exposed face,
-    // computed from where the cube is when the sweep starts.
+    // computed from where the cube is when the sweep starts. `galleryFace` holds the
+    // matching face index: the palier boundaries are no longer evenly spaced (they
+    // follow the rotation arc), so a face can no longer be recovered by multiplying
+    // the position by 12 and taking the remainder.
     let galleryRot = [];
+    let galleryFace = [];
     let galleryDur = 0;
     const gallerySetup = (start) => {
       galleryRot = [];
+      galleryFace = [];
       galleryDur = 0;
       lastGalleryLabelTextRef.current = "";
       stopGalleryScramble();
       const startRot = Math.max(0, (start - INTRO_END) / CUBE_RANGE);
-      if (startRot <= 5 / 12 + 1e-9) {
+      if (startRot <= CUBE_STEP_BOUNDS[5] + 1e-9) {
         for (let k = 0; k < 6; k++) {
-          if (k / 12 >= startRot - 1e-9) galleryRot.push(k / 12);
+          if (CUBE_STEP_BOUNDS[k] >= startRot - 1e-9) {
+            galleryRot.push(CUBE_STEP_BOUNDS[k]);
+            galleryFace.push(k);
+          }
         }
       }
       if (galleryRot.length === 0) return;
@@ -1993,7 +2010,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
               // fades out again before the next turn so it never stays visible
               // while the cube rotates (which reads as the text shrinking).
               const labelOn = loc >= SKIP_LABEL_DELAY_MS && loc < SKIP_HOLD_MS - SKIP_LABEL_EXIT_MS;
-              labelIdx = labelOn ? Math.round(galleryRot[j] * 12) % 6 : -1;
+              labelIdx = labelOn ? galleryFace[j] : -1;
               // Le label n'est « montrable » qu'une fois son décodage terminé :
               // l'onglet correspondant ne se révèle qu'à ce moment précis.
               labelReady = labelOn && loc >= SKIP_LABEL_READY_MS;
@@ -2090,6 +2107,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipFoldRef.current = false;
           skipFacesHiddenRef.current = false;
           galleryRot = [];
+          galleryFace = [];
           galleryDur = 0;
           // La mesure de recul repart de l'arrivée réelle. Pendant TOUT le sweep,
           // `sync` sort en tête (skip actif) et n'a donc jamais ré-ancré
@@ -2413,8 +2431,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // After ALL faces have been seen twice, snap to the next face-forward step boundary.
       if (!allSeenTwiceRef.current && faceVisibilityCountRef.current.every(c => c >= 2)) {
         allSeenTwiceRef.current = true;
+        // Pose le cube exactement sur une face nette. Les frontières de palier suivent
+        // l'arc de rotation et ne sont donc plus à k/12 : l'armer sur un multiple
+        // de 1/12 le laisserait entre deux paliers, à l'angle, là où il se lisait
+        // jusqu'ici.
         const cubeP = Math.max(0, (currentP - INTRO_END) / CUBE_RANGE);
-        const snapBaseP = Math.min(1, Math.ceil(cubeP * 12) / 12);
+        const snapBaseP = nextCubeStepBound(cubeP);
         labelPinPRef.current = INTRO_END + snapBaseP * CUBE_RANGE;
       }
       // Release the pin once every labeled face has been clicked.
