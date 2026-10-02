@@ -21,7 +21,7 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { PROJECT_CONTENT, CAREER_CONTENT, USAGE_CONTENT } from "../lib/portfolio-content.js";
+import { PROJECT_CONTENT, CAREER_CONTENT, USAGE_CONTENT, STACK_CONTENT } from "../lib/portfolio-content.js";
 
 const DIST = path.resolve(import.meta.dirname, "..", "dist");
 const OUT = path.join(DIST, "content.json");
@@ -39,10 +39,16 @@ const OUT = path.join(DIST, "content.json");
  * tronqué au milieu d'une liste est pire qu'un digest absent, parce qu'il donne
  * l'illusion d'être complet.
  *
- * Le coût reste marginal : 15 000 caractères font environ 3 750 tokens, contre
+ * Passé de 15 000 à 16 000 en ajoutant la construction du site : la section tient
+ * dans les 373 caractères qui restaient, et pas davantage. Le plafond n'a pas à
+ * être au-dessus de la longueur réelle du digest, seulement assez grand pour que
+ * celui-ci ne soit pas tronqué — le remonter plus que nécessaire coûterait des
+ * tokens sans rien apprendre au modèle.
+ *
+ * Le coût reste marginal : 16 000 caractères font environ 4 000 tokens, contre
  * une allocation de 10 000 neurons par jour.
  */
-const MAX_CHARS = 15000;
+const MAX_CHARS = 16000;
 
 /**
  * Transforme une section de `PROJECT_CONTENT` en lignes de digest.
@@ -125,6 +131,16 @@ function careerLines() {
     // digest, le modèle ne l'aurait pas atteinte, comme le parcours avant elle.
     "## Utiliser ce site",
     ...USAGE_CONTENT,
+    "",
+    // La construction du site vient juste après l'usage, et avant le parcours et
+    // les projets. Deux raisons. La question « avec quoi c'est fait » est celle
+    // d'un visiteur qui regarde le cube et essaie de comprendre, donc elle est
+    // lue pendant qu'il regarde la page — mais elle n'a surtout pas sa place après
+    // 14 000 caractères de projets : le modèle y répondait déjà par une liste des
+    // technologies des autres projets, faute d'autre chose sous les yeux. Elle
+    // doit être lue tôt, pas exhaustive.
+    "## Construction du site",
+    ...STACK_CONTENT,
     "",
     "## Parcours professionnel",
     c.reconversion,
