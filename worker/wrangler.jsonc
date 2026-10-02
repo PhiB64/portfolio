@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "portfolio-chat",
+  "main": "src/index.js",
+  "compatibility_date": "2025-09-01",
+  "observability": {
+    "enabled": true
+  },
+  "ratelimits": [
+    // Compteur partagé par localisation Cloudflare. C'est le seul rempart qui
+    // tient : les compteurs en mémoire du Worker vivent dans l'isolate qui les a
+    // créés, et les requêtes se répartissent sur des isolates différents — la
+    // limite en mémoire n'a jamais été atteinte en test (20 requêtes en
+    // parallèle, 20 réponses 200). Ce binding s'appuie sur un store mutualisé
+    // au sein d'un même datacenter.
+    //
+    // `namespace_id` est un entier unique dans le compte. Deux Workers qui
+    // partagent le même `namespace_id` partagent aussi leurs compteurs.
+    {
+      "name": "CHAT_LIMIT",
+      "namespace_id": "41702026",
+      "simple": {
+        // Fenêtre courte : elle absorbe les rafales de script, qui est le cas
+        // d'usage réel (un robot qui boucle) plutôt que l'usage humain.
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    // Origines autorisées à appeler le Worker (séparateur : virgule). Ce sont des
+    // valeurs publiques : elles peuvent rester dans le dépôt, contrairement à la
+    // clé OpenRouter qui est un secret.
+    //
+    // `localhost:3000` permet de développer le site contre le Worker local
+    // (`npm run dev` dans worker/ → http://127.0.0.1:8787).
+    "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
+    "SITE_URL": "https://phib64.github.io/portfolio",
+    "SITE_TITLE": "Portfolio Philippe Barbosa"
+  }
+}

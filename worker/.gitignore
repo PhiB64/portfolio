@@ -1,0 +1,8 @@
+# Secrets Wrangler (`.dev.vars`) — NE PAS COMMITER.
+# Les vraies clés sont des secrets Cloudflare, pas des fichiers versionnés :
+#   npm run secret
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+node_modules/
+.wrangler/

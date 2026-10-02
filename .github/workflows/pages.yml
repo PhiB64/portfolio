@@ -41,6 +41,10 @@ jobs:
           # confidentialité — c'est la même valeur que celle en dur par défaut
           # dans components/contact-overlay.jsx.
           NEXT_PUBLIC_FORMSPREE_ENDPOINT: ${{ secrets.NEXT_PUBLIC_FORMSPREE_ENDPOINT }}
+          # URL publique du Worker proxy du chatbot. Comme pour Formspree, elle
+          # finit dans le bundle client — ce qui est sans risque ici : la clé
+          # OpenRouter ne la transite jamais, elle reste dans un secret Worker.
+          NEXT_PUBLIC_CHAT_ENDPOINT: ${{ vars.NEXT_PUBLIC_CHAT_ENDPOINT }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

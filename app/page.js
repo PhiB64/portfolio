@@ -1,4 +1,5 @@
 import { HeroCube } from "../components/hero-cube";
+import { ChatWidget } from "../components/chat-widget";
 import { FACE_MEDIA } from "../lib/cube-media";
 
 export default function Home() {
@@ -16,6 +17,9 @@ export default function Home() {
         subtitle="Concepteur Développeur"
         images={FACE_MEDIA}
       />
+      {/* Chatbot : se rend par-dessus le cube, en `z-40`. Le composant ne rend
+          rien si NEXT_PUBLIC_CHAT_ENDPOINT est absent (Worker non déployé). */}
+      <ChatWidget />
     </main>
   );
 }

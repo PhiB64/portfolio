@@ -1,0 +1,5 @@
+# Clé OpenRouter, utilisée EN LOCAL UNIQUEMENT (Wrangler la charge depuis .dev.vars).
+# En production elle ne vit pas dans un fichier : c'est un secret Cloudflare,
+# posé avec `npm run secret` (soit `wrangler secret put OPENROUTER_API_KEY`).
+# Ne jamais commiter ce fichier : il est ignoré par .gitignore.
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
