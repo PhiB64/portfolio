@@ -282,7 +282,7 @@ export function ChatWidget() {
                     <div
                       className={
                         isUser
-                          ? "max-w-[85%] rounded-2xl rounded-br-sm bg-[#00a5b0] px-3 py-2 text-sm text-white"
+                          ? "max-w-[85%] rounded-2xl rounded-br-sm bg-[#00a5b0] px-3 py-2 text-sm text-[#0a0f1c]"
                           : "max-w-[85%] rounded-2xl rounded-bl-sm border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm leading-relaxed text-[#e2e8f0]"
                       }
                     >
@@ -329,7 +329,7 @@ export function ChatWidget() {
                 type="submit"
                 disabled={!canSend}
                 aria-label="Envoyer le message"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#00a5b0] text-white transition-colors duration-200 hover:bg-[#00a5b0]/80 disabled:cursor-not-allowed disabled:opacity-30"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#00a5b0] text-[#0a0f1c] transition-colors duration-200 hover:bg-[#00b0bd] disabled:cursor-not-allowed disabled:opacity-30"
               >
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
               </button>
