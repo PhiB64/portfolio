@@ -105,6 +105,15 @@ function sectionLines(section) {
 function careerLines() {
   const c = CAREER_CONTENT;
   return [
+    // L'identité ouvre le digest. Elle est avant le parcours et avant les
+    // projets, parce que c'est la réponse à « c'est qui Philippe ? », et que le
+    // modèle ne va pas la chercher : il répond avec ce qu'il a sous les yeux au
+    // début. Placée après 10 000 caractères de projets, elle n'était jamais
+    // atteinte, et la seule phrase d'identité qui lui restait — celle du system
+    // prompt, « je suis l'assistant de Philippe » — devenait sa réponse.
+    "## Identité",
+    ...c.identite,
+    "",
     "## Parcours professionnel",
     c.reconversion,
     "",
@@ -141,7 +150,11 @@ function buildDigest() {
     "nom du projet et son lien quand la question porte sur une réalisation.",
   ];
 
-  const body = [...PROJECT_CONTENT.flatMap(sectionLines), ...careerLines()];
+  // Le parcours précède les projets, et non l'inverse. Le commentaire de
+  // `careerLines` dit que le placer en tête est « la réponse à la question la
+  // plus probable », mais l'ordre du code le mettait en dernier, à 85 % du digest :
+  // le commentaire décrivait l'intention, le code la contredisait.
+  const body = [...careerLines(), "", ...PROJECT_CONTENT.flatMap(sectionLines)];
   const digest = [...header, "", ...body].join("\n");
 
   if (digest.length <= MAX_CHARS) return digest;

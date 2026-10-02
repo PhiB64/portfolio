@@ -139,6 +139,43 @@ system prompt. Les faits sur Philippe ne sont donc écrits qu'à un seul endroit
 modifier un projet sur le site change ce que l'assistant dit au déploiement
 suivant.
 
+#### La section « Identité », en tête de digest
+
+C'est une section de trois lignes, et c'est la réponse à « c'est qui Philippe ? ».
+
+Elle existe parce que le digest ne la contenait pas. Écrit à partir des faces du
+cube, il était entièrement à la première personne : il décrivait un métier, jamais
+la personne. Le nom « Philippe Barbosa » n'apparaissait dans aucun des 12 000
+caractères publiés — mesuré sur le `content.json` déployé. Il n'y avait donc, dans
+tout le contexte, aucune phrase répondant à la question.
+
+Résultat mesuré : à « c'est qui Philippe ? », le modèle répondait « je suis
+l'assistant de Philippe ». Il ne se trompait pas de règle — le system prompt lui
+ordonne cette phrase pour toute question d'identité — il n'avait rien d'autre sous
+les yeux pour répondre.
+
+Deux corrections ont donc été apportées, dans cet ordre d'importance :
+
+- **La section « Identité » ouvre le digest**, avant le parcours et avant les
+  projets. Le parcours, lui, était placé en dernier dans le code alors que son
+  commentaire annonçait « la réponse à la question la plus probable » : il
+  commençait à 10 515 caractères sur 12 362, donc à 85 % du digest. Le commentaire
+  décrivait l'intention, le code la contredisait. Les deux sections sont maintenant
+  en tête, l'identité en premier.
+- **Le system prompt distingue les deux questions.** « Qui es-tu ? » porte sur le
+  modèle et garde la phrase d'identité. « Qui est Philippe ? » nomme Philippe, et
+  le prompt interdit désormais d'ouvrir la réponse par cette phrase, en renvoyant
+  explicitement à la section « Identité ».
+
+Les faits restent écrits à un seul endroit : ils vivent dans `CAREER_CONTENT`, le
+script les publie, et rien n'est recopié dans le Worker. Une ligne de la section
+« Identité » dit « il est titulaire des permis B et D » ? Elle est dans
+`CAREER_CONTENT.permis`, et le digest la publie à la suite — le résumé du system
+prompt ne la duplique pas.
+
+Le digest pèse 12 732 caractères après ces ajouts, contre 12 362 avant, sous le
+plafond de 15 000 : il n'est donc pas tronqué.
+
 #### La section « Parcours professionnel »
 
 Le digest a deux sources. La première est `PROJECT_CONTENT`, c'est-à-dire
