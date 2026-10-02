@@ -185,7 +185,7 @@ export function ChatWidget() {
       {open && (
         <section
           aria-label="Assistant de Philippe"
-          className="fixed inset-x-4 bottom-32 z-40 flex max-h-[calc(var(--svh)-10rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
+          className="fixed inset-x-4 top-20 z-40 flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
         >
           <header className="flex items-center justify-between gap-3 border-b border-[#1e293b] px-4 py-3">
             <div className="flex items-center gap-2">
@@ -287,14 +287,14 @@ export function ChatWidget() {
         </section>
       )}
 
-      {/* Lanceur. Empilé au-dessus du bouton « retour en haut » du cube, qui
-          occupe déjà `bottom-8 right-8`. */}
+      {/* Lanceur, en haut à droite. Le bouton « retour en haut » du cube reste
+          en bas à droite : plus de conflit de coin, donc plus d'empilement. */}
       <button
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={open ? "Fermer l'assistant" : "Ouvrir l'assistant"}
-        className="fixed bottom-24 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:right-8"
+        className="fixed top-4 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
       >
         {open ? <X size={20} /> : <MessageCircle size={20} />}
       </button>

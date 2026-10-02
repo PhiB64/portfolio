@@ -26,6 +26,34 @@ const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 // le mouvement sans qu'une ligne de code change.
 const ROUTER_MODEL = "openrouter/free";
 
+/**
+ * Repli quand le routeur répond 429, c'est-à-dire quand TOUS les modèles
+ * gratuits sont saturés. C'est courant en journée : la Capacity de la version
+ * gratuite est très faible, et le routeur n'a alors plus rien à proposer.
+ *
+ * On énumère donc des modèles `:free` connus et on les essaie dans l'ordre,
+ * en s'arrêtant au premier qui accepte la requête. C'est ce qui fait que le
+ * chat reste utilisable même quand le routeur, lui, est bloqué.
+ *
+ * Liste volontairement courte et figée : elle sert de filet, pas de catalogue.
+ * Le routeur reste le chemin normal, et il absorbe les modèles qui arrivent ou
+ * partent du catalogue. Le jour où un slug de cette liste disparaît, il échoue
+ * en 404 et on passe au suivant — d'où le tri par paísance décroissante
+ * (`nemotron-3-5-content-safety` et les modèles « omni » sont exclus : ce ne sont
+ * pas des modèles de conversation, ou leur format de sortie ne colle pas au
+ * streaming OpenAI).
+ */
+const FALLBACK_MODELS = [
+  "qwen/qwen3.8-27b:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "google/gemma-4-26b-a4b-it:free",
+  "poolside/laguna-s-2.1:free",
+  "liquid/lfm-2.5-2.6b:free",
+];
+
 const LIMITS = {
   maxMessages: 24,
   maxMessageChars: 4000,
@@ -280,44 +308,128 @@ export default {
       return json(request, env, { error: "Service indisponible." }, 503);
     }
 
+    const payload = (model) => ({
+      model,
+      messages: messages.messages,
+      max_tokens: LIMITS.maxOutputTokens,
+      stream: true,
+    });
+
+    /**
+     * Un appel à OpenRouter pour un modèle donné.
+     *
+     * @returns {Promise<Response|null>} la réponse, ou `null` si l'appel n'a
+     *   pas abouti et qu'il est pertinent d'essayer le modèle suivant.
+     */
+    async function callModel(model) {
+      try {
+        return await fetch(OPENROUTER_ENDPOINT, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            // OpenRouter affiche le site appelant sur ses pages d'attribution.
+            "HTTP-Referer": env.SITE_URL ?? "",
+            "X-Title": env.SITE_TITLE ?? "Portfolio Philippe Barbosa",
+          },
+          body: JSON.stringify(payload(model)),
+          // Si le visiteur ferme l'onglet, la requête amont est abandonnée au
+          // lieu de continuer à consommer des tokens pour rien.
+          signal: request.signal,
+        });
+      } catch (error) {
+        // 499 : convention nginx pour « fermé par le client ». Le visiteur est
+        // parti, il n'a plus personne à prévenir.
+        if (error?.name === "AbortError") throw error;
+        console.error("Appel OpenRouter impossible pour", model, error?.message);
+        return null;
+      }
+    }
+
+    // Le routeur d'abord, les modèles énumérés ensuite : on ne bascule sur le
+    // repli que si le routeur refuse pour cause de saturation, pas pour une
+    // erreur de clé ou de quota — dans ces cas-là, aucun autre modèle ne
+    // marcherait, et on veut renvoyer le bon message tout de suite.
     let upstream;
     try {
-      upstream = await fetch(OPENROUTER_ENDPOINT, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          // OpenRouter affiche le site appelant sur ses pages d'attribution.
-          "HTTP-Referer": env.SITE_URL ?? "",
-          "X-Title": env.SITE_TITLE ?? "Portfolio Philippe Barbosa",
-        },
-        body: JSON.stringify({
-          model: ROUTER_MODEL,
-          messages: messages.messages,
-          max_tokens: LIMITS.maxOutputTokens,
-          stream: true,
-        }),
-        // Si le visiteur ferme l'onglet, la requête amont est abandonnée au
-        // lieu de continuer à consommer des tokens pour rien.
-        signal: request.signal,
-      });
+      upstream = await callModel(ROUTER_MODEL);
     } catch (error) {
-      // 499 : convention nginx pour « fermé par le client ». Le visiteur est
-      // parti, il n'a plus personne à prévenir.
       if (error?.name === "AbortError") return new Response(null, { status: 499 });
       return json(request, env, { error: "Le service de discussion ne répond pas." }, 502);
+    }
+    let saturated = upstream?.status === 429;
+
+    // Un 429 peut vouloir dire deux choses. Si c'est le quota gratuit du jour
+    // qui est épuisé, aucun repli n'y changera quoi que ce soit : on économise
+    // les sept appels restants et on dit tout de suite la vraie raison.
+    let dailyQuota = false;
+    if (saturated) {
+      const body = await upstream.clone().text();
+      dailyQuota = body.includes("free-models-per-day") || body.includes("free_tier_daily");
+      if (dailyQuota) {
+        console.error("Quota gratuit quotidien OpenRouter épuisé :", body.slice(0, 300));
+        return json(
+          request,
+          env,
+          { error: "Le quota gratuit du jour est épuisé. Le chat sera de nouveau disponible demain." },
+          429,
+        );
+      }
+      console.warn("Routeur gratuit saturé, essai des modèles de repli.");
+      for (const model of FALLBACK_MODELS) {
+        let attempt;
+        try {
+          attempt = await callModel(model);
+        } catch (error) {
+          // Le visiteur a refermé l'onglet au milieu de la cascade.
+          if (error?.name === "AbortError") return new Response(null, { status: 499 });
+          break;
+        }
+        if (attempt?.ok) {
+          upstream = attempt;
+          saturated = false;
+          break;
+        }
+        if (attempt) {
+          // 404 : ce slug précis a quitté le catalogue. Ça ne concerne que lui,
+          // on passe donc au suivant — c'est exactement le cas pour lequel la
+          // liste figée était prévue.
+          if (attempt.status === 404) {
+            console.warn("Repli", model, "n'existe plus, on essaie le suivant.");
+            continue;
+          }
+          // 429 : ce modèle-là est plein aussi, on essaie le suivant.
+          if (attempt.status === 429) continue;
+
+          // Autre chose : la cause est commune à tous les modèles (clé refusée,
+          // quota épuisé, panne en amont), inutile d'enchaîner.
+          console.error("Repli", model, "a renvoyé", attempt.status);
+          // On garde cette réponse pour renvoyer le message qui correspond à
+          // son statut, plutôt que celui du routeur qui ne dit plus rien de vrai.
+          upstream = attempt;
+          saturated = false;
+          break;
+        }
+      }
     }
 
     // Erreur amont : traitée avant de démarrer le streaming, sinon le client a
     // déjà reçu un 200 et ne verrait qu'un flux coupé sans explication.
+    if (!upstream) {
+      return json(request, env, { error: "Le service de discussion ne répond pas." }, 502);
+    }
+
     if (!upstream.ok) {
       const status = upstream.status;
 
-      if (status === 429) {
+      if (saturated || status === 429) {
+        // Le quota quotidien a déjà été traité plus haut : ici, c'est un
+        // 429 « ce modèle est plein », qui se résout tout seul.
+        console.error("OpenRouter 429 :", (await upstream.text()).slice(0, 300));
         return json(request, env, { error: "Les modèles gratuits sont saturés. Réessayez dans un instant." }, 429);
       }
       if (status === 402) {
-        return json(request, env, { error: "Le quota du assistant est épuisé pour le moment." }, 503);
+        return json(request, env, { error: "Le quota de l'assistant est épuisé pour le moment." }, 503);
       }
       if (status === 401 || status === 403) {
         console.error("OpenRouter refuse la clé configurée sur le Worker.");
