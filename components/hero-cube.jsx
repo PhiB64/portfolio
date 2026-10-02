@@ -1414,10 +1414,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // de grandeur.
     //
     // Ces trois durées couvrent les deux cas signalés : la fin écrite après le 6e
-    // clic (SHOW+SPIN+TAIL) et la rotation de fin de skip (SPIN+TAIL). Du 6e
-    // clic au dernier nom, mobile passe de ~14,8 s à ~9,9 s.
-    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 3000 : 2600;
-    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 3700 : 3200;
+    // clic (SHOW+SPIN+TAIL) et la rotation de fin de skip (SPIN+TAIL).
+    //
+    // Puis demande explicite de doubler la vitesse de rotation. Les deux segments
+    // qui tournent — la showcase et le spin — sont donc divisés par deux en
+    // mobile : 240 deg/s sur la révolution de showcase, 303 sur le spin, contre
+    // 138 et 175 sur desktop. Le mobile est désormais plus vif que le desktop
+    // d'environ 1,75x, ce qui est l'inverse du rapport de 1,15x retenu au
+    // commit précédent. C'est le choix demandé, pas une dérive : si le desktop
+    // doit suivre, ce sont ses deux valeurs qu'il faut 나누er aussi.
+    //
+    // TAIL_MS n'est PAS divisé par deux : c'est la queue, où le cube ne tourne
+    // plus — elle pose le carré, la ligne et la monte des noms. La raccourcir
+    // ne changerait rien à la vitesse de rotation, seulement la durée pendant
+    // laquelle l'écran ne bouge plus. Du 6e clic au dernier nom, mobile passe
+    // de ~14,8 s à ~6,6 s, dont 2,0 s de queue sans rotation.
+    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 1500 : 2600;
+    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 1850 : 3200;
     const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 2000 : 1800;
     const FINALE_MS = SHOW_MS + SPIN_MS + TAIL_MS;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
@@ -1463,8 +1476,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // allongée pour rester lisible sur un écran tactile. 800 ms était
     // cependant encore 2x le desktop, pour la même raison que les budgets de
     // fin ci-dessus : la lisibilité venait de l'easing par palier, qui
-    // n'existe plus. On revient à 500 ms.
-    const SKIP_TURN_MS = isMobileDevice() ? 500 : 400;
+    // n'existe plus. On revient à 500 ms — puis à 250 ms sur la même demande de
+    // doublement de la vitesse de rotation.
+    //
+    // Mesuré à 60 Hz sur le chemin réel (90° d'un palier à l'autre) : 250 ms
+    // font 15 frames, soit 6° par frame. La rotation reste continue et sans
+    // à-coup. En dessous de 200 ms (12 frames, 7,5°/frame) la sensation de
+    // mouvement commence à disparaître ; le plancher útil est donc atteint.
+    const SKIP_TURN_MS = isMobileDevice() ? 250 : 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
     // Durée totale du finale de skip. Elle ne sert plus qu'àborner la séquence
