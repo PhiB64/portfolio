@@ -182,7 +182,26 @@ function buildDigest() {
   // `careerLines` dit que le placer en tête est « la réponse à la question la
   // plus probable », mais l'ordre du code le mettait en dernier, à 85 % du digest :
   // le commentaire décrivait l'intention, le code la contredisait.
-  const body = [...careerLines(), "", ...PROJECT_CONTENT.flatMap(sectionLines)];
+  // La portée des rubriques de compétences est annoncée ici, à leur frontière,
+  // et pas seulement dans la section « Construction du site ». Une règle posée
+  // à 19 % du digest ne tient pas jusqu'au bas : le modèle avait bien lu
+  // « Framer Motion n'est pas dans ce site », puis rencontra 45 lignes plus loin
+  // « J'utilise React 19 et Next.js 15 ... associés à des outils d'animation
+  // avancés (GSAP, Framer Motion) et de navigation fluide (Lenis) » — à la
+  // première personne, sans périmètre, dans la rubrique qui répondait le plus
+  // précisément à la question posée. La formulation suivante, plus proche, l'a
+  // emportée, et la réponse a fusionné les deux sections : GSAP cité trois fois,
+  // Framer Motion et Lenis annoncés pour ce site.
+  //
+  // La règle est donc répétée là où les technologies sont citées, pas seulement là
+  // où elles servent à répondre. La seconde phrase lève l'ambiguïté de la
+  // dernière rubrique : elle nomme ses technologies projet par projet, et ses
+  // crochets font déjà ce travail.
+  const scope = [
+    "Les rubriques de compétences qui suivent couvrent tous ses projets : une technologie",
+    "citée là n'est pas forcément dans ce site. La dernière rubrique la nomme projet par projet.",
+  ];
+  const body = [...careerLines(), "", ...scope, "", ...PROJECT_CONTENT.flatMap(sectionLines)];
   const digest = [...header, "", ...body].join("\n");
 
   if (digest.length <= MAX_CHARS) return digest;
