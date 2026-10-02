@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/build-chat-content.mjs",
     "start": "next start",
     "lint": "eslint ."
   },

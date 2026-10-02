@@ -11,6 +11,10 @@
 /out/
 /dist/
 
+# Wrangler (état local des Workers)
+/.wrangler/
+content.json
+
 # Production
 /build
 

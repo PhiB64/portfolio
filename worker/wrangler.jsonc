@@ -42,6 +42,16 @@
     //
     // Workers AI n'a besoin d'aucune clé : l'authentification passe par le
     // binding `AI` ci-dessus. Il n'y a donc plus de secret dans ce projet.
-    "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000"
+    "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
+
+    // Adresse du digest de contenu publié par le site (`dist/content.json`,
+    // généré par `scripts/build-chat-content.mjs` au build). Le Worker y lit les
+    // projets, compétences et liens avant de répondre, avec un cache de dix
+    // minutes.
+    //
+    // Elle est publique et versionnée avec le site : c'est la même information
+    // que celle affichée sur la page, pas un secret. En développement local, viser
+    // le build local (`npx serve dist`) pour tester un contenu non déployé.
+    "SITE_CONTENT_URL": "https://phib64.github.io/portfolio/content.json"
   }
 }

@@ -5,7 +5,10 @@ import reactHooks from "eslint-plugin-react-hooks";
 import { defineConfig, globalIgnores } from "eslint/config";
 
 export default defineConfig([
-  globalIgnores(["dist", ".next", "node_modules"]),
+  // `.wrangler` est l'état local des Workers : du code généré, versionné par
+  // Wrangler et pas par nous. Il est ignoré par git, il doit l'être aussi par
+  // ESLint, sinon `npm run lint` échoue sur des fichiers éphémères.
+  globalIgnores(["dist", ".next", "node_modules", "**/.wrangler/**"]),
   {
     files: ["**/*.{js,jsx}"],
     extends: [
