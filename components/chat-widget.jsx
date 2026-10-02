@@ -348,7 +348,7 @@ export function ChatWidget() {
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-label={open ? "Fermer l'assistant" : "Ouvrir l'assistant"}
-        className="fixed top-4 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
+        className="fixed top-4 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
       >
         {open ? <X size={20} /> : <MessageCircle size={20} />}
       </button>
