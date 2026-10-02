@@ -1401,24 +1401,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Ces budgets ont été une fois de trop. La suppression du `smoothstep` a
     // supprimé les à-coups — c'est elle qui réglait la vitesse perçue, pas la
     // durée — et une fois le profil plat, 9 s de spin donnaient 5,4 s par
-    // révolution : trop lent.
-    //
-    // Et ce plafond était encore 1,8x le desktop. Ce n'est pas la durée qui
-    // rendait la fin lisible sur mobile, c'était l'easing par palier qui
-    // l'accélarabait par moments : le profil à présent est plat — le spin varie
-    // de 0,90x à 1,07x sur sa fenêtre, sans arrêt — donc l'allonger ne rendait
-    // plus rien lisible, ça ne faisait que tourner lentement. Sur une
-    // révolution de showcase, mobile était à 80 deg/s contre 138 sur desktop,
-    // et le spin à 102 contre 175. On ramène le mobile à ~1,15x du desktop : un
-    // peu plus lent, parce que l'écran est plus petit, mais dans le même ordre
-    // de grandeur.
-    //
-    // Ces trois durées couvrent les deux cas signalés : la fin écrite après le 6e
-    // clic (SHOW+SPIN+TAIL) et la rotation de fin de skip (SPIN+TAIL). Du 6e
-    // clic au dernier nom, mobile passe de ~14,8 s à ~9,9 s.
-    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 3000 : 2600;
-    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 3700 : 3200;
-    const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 2000 : 1800;
+    // révolution : trop lent. On redescend à mi-chemin entre la sensation
+    // d'origine (trop rapide, ~1,4 s par tour) et ce plafond, soit 3,3 s par
+    // révolution sur mobile et 1,9 s sur desktop. La queue raccourcit d'autant :
+    // elle ne fait que poser le carré, la ligne et les noms.
+    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 4500 : 2600;
+    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 5500 : 3200;
+    const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 3500 : 1800;
     const FINALE_MS = SHOW_MS + SPIN_MS + TAIL_MS;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
@@ -1460,11 +1449,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const SKIP_MORPH_MS = 900;
     // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
     // bascule trop vite après l'apposition des onglets : la transition est
-    // allongée pour rester lisible sur un écran tactile. 800 ms était
-    // cependant encore 2x le desktop, pour la même raison que les budgets de
-    // fin ci-dessus : la lisibilité venait de l'easing par palier, qui
-    // n'existe plus. On revient à 500 ms.
-    const SKIP_TURN_MS = isMobileDevice() ? 500 : 400;
+    // allongée pour rester lisible sur un écran tactile.
+    const SKIP_TURN_MS = isMobileDevice() ? 800 : 400;
     const SKIP_LEAD_MS = 400;
     const SKIP_GAP_MS = 1100;
     // Durée totale du finale de skip. Elle ne sert plus qu'àborner la séquence
