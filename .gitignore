@@ -18,34 +18,17 @@ content.json
 # Production
 /build
 
-# Misc
-.DS_Store
-*.pem
-
-# Debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Local env files
-.env
+# Environnement local
+# Next.js lit `.env.local` avant `.env`, et le fichier est propre au poste de
+# travail. Il peut contenir un endpoint Formspree réel, qui n'est pas secret au
+# sens strict (le préfixe `NEXT_PUBLIC_` le rend public de toute façon) mais
+# n'a rien à faire dans l'historique Git. Le gabarit à copier est `.env.example`.
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env*.local
 
-# Vercel
-.vercel
-
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-Thumbs.db
+# Documents personnels
+# Le CV contient l'adresse du domicile, le téléphone et le parcours. `public/`
+# est recopié tel quel dans `dist/` par `next build`, donc tout ce qu'y dort est
+# téléchargeable à l'adresse du site — même sans lien dans l'interface.
+# Seul `public/cv.pdf` est publié, et il l'est volontairement.
+/public/CV2.pdf

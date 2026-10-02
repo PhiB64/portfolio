@@ -8,6 +8,9 @@
   "ai": { "binding": "AI" },
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:3000",
-    "SITE_CONTENT_URL": "http://127.0.0.1:8899/content.json"
+    "SITE_CONTENT_URL": "http://127.0.0.1:8899/content.json",
+    "SITE_URL": "https://phib64.github.io/portfolio",
+    "SITE_TITLE": "Portfolio Philippe Barbosa",
+    "GITHUB_USER": "PhiB64"
   }
 }

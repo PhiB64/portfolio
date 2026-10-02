@@ -6,9 +6,9 @@
   "observability": {
     "enabled": true
   },
-  // Workers AI. Le binding est authentifié par le compte Cloudflare du Worker :
-  // il n'y a donc aucun secret à gérer, et rien à exposer dans le bundle du
-  // site. C'est ce qui a remplacé la clé `OPENROUTER_API_KEY`.
+  // Workers AI. Sert de repli quand OpenRouter échoue (modèles `:free`
+  // saturés, quota épuisé, clé refusée). L'inférence principale passe par
+  // OpenRouter, dont la clé est un secret Cloudflare — voir le README.
   "ai": {
     "binding": "AI"
   },
@@ -44,6 +44,17 @@
     // binding `AI` ci-dessus. Il n'y a donc plus de secret dans ce projet.
     "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
 
+    // Page d'attribution affichée par OpenRouter sur les appels faite avec la
+    // clé du Worker. Valeurs publiques, versionnées avec le site : ce ne sont
+    // pas des secrets.
+    //
+    // La clé, elle, ne figure pas ici : c'est un secret Cloudflare, posé avec
+    // `npm run secret` (soit `wrangler secret put OPENROUTER_API_KEY`). Si elle
+    // manque, le Worker n'appelle pas OpenRouter et sert uniquement le repli
+    // Workers AI — il reste donc fonctionnel, en moins bien.
+    "SITE_URL": "https://phib64.github.io/portfolio",
+    "SITE_TITLE": "Portfolio Philippe Barbosa",
+
     // Adresse du digest de contenu publié par le site (`dist/content.json`,
     // généré par `scripts/build-chat-content.mjs` au build). Le Worker y lit les
     // projets, compétences et liens avant de répondre, avec un cache de dix
@@ -52,6 +63,16 @@
     // Elle est publique et versionnée avec le site : c'est la même information
     // que celle affichée sur la page, pas un secret. En développement local, viser
     // le build local (`npx serve dist`) pour tester un contenu non déployé.
-    "SITE_CONTENT_URL": "https://phib64.github.io/portfolio/content.json"
+    "SITE_CONTENT_URL": "https://phib64.github.io/portfolio/content.json",
+
+    // Compte GitHub lu par l'API publique (aucun secret, aucun token) pour
+    // compléter le digest au build avec les dépôts récents. Utile parce que
+    // GitHub évolue sans déploiement : un nouveau dépôt est visible tout de
+    // suite, alors que le contenu du site, lui, reste figé jusqu'au build.
+    //
+    // Le Worker écarte les forks — un fork n'est pas une réalisation de
+    // Philippe, et l'inclure ferait dire au modèle qu'il a écrit un code qu'il a
+    // seulement recopié.
+    "GITHUB_USER": "PhiB64"
   }
 }

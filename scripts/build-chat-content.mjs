@@ -21,7 +21,7 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import { PROJECT_CONTENT } from "../lib/portfolio-content.js";
+import { PROJECT_CONTENT, CAREER_CONTENT } from "../lib/portfolio-content.js";
 
 const DIST = path.resolve(import.meta.dirname, "..", "dist");
 const OUT = path.join(DIST, "content.json");
@@ -29,11 +29,20 @@ const OUT = path.join(DIST, "content.json");
 /**
  * Plafond de caractères sur le digest. Au-delà, le prompt devient coûteux à
  * chaque requête pour un gain marginal : les descriptions de projets font
- * chacune 200 à 400 caractères, et la liste complète tient largement en dessous.
+ * chacune 200 à 400 caractères.
  * La troncature est signalée dans le texte pour ne pas faire croire au modèle
  * que la liste est exhaustive.
+ *
+ * Passé de 12 000 à 15 000 en ajoutant le parcours issu du CV : à 12 000 la
+ * troncature mordait en plein milieu de la section « Méthode », et amputait
+ * surtout les langues et le permis, qui se trouvent en fin de digest. Un digest
+ * tronqué au milieu d'une liste est pire qu'un digest absent, parce qu'il donne
+ * l'illusion d'être complet.
+ *
+ * Le coût reste marginal : 15 000 caractères font environ 3 750 tokens, contre
+ * une allocation de 10 000 neurons par jour.
  */
-const MAX_CHARS = 12000;
+const MAX_CHARS = 15000;
 
 /**
  * Transforme une section de `PROJECT_CONTENT` en lignes de digest.
@@ -80,6 +89,44 @@ function sectionLines(section) {
 }
 
 /**
+ * Transforme `CAREER_CONTENT` en lignes de digest.
+ *
+ * Le parcours et le savoir-faire de gestion viennent du CV, pas du site : ces
+ * informations n'ont pas de face de cube, mais ce sont les premières choses
+ * qu'un visiteur demande. Elles sont publiées ici pour que l'assistant puisse
+ * répondre à « d'où viens-tu ? » ou « comment es-tu arrivé au développement ? ».
+ *
+ * La reconversion est placée en tête, et non à la fin, parce qu'elle est la
+ * réponse à la question la plus probable. Les formations viennent ensuite,
+ * puis les compétences de management.
+ *
+ * @returns {string[]}
+ */
+function careerLines() {
+  const c = CAREER_CONTENT;
+  return [
+    "## Parcours professionnel",
+    c.reconversion,
+    "",
+    "Formations :",
+    ...c.formation.map((line) => `- ${line}`),
+    "",
+    "Avant le développement :",
+    ...c.avant.map((line) => `- ${line}`),
+    "",
+    "Compétences de management et de gestion (issues de la carrière précédente) :",
+    ...c.management.map((line) => `- ${line}`),
+    "",
+    "Méthode :",
+    ...c.method.map((line) => `- ${line}`),
+    "",
+    `Langues : ${c.langues}`,
+    `Soft skills : ${c.soft}`,
+    c.permis,
+  ];
+}
+
+/**
  * Construit le digest complet.
  *
  * @returns {string}
@@ -94,7 +141,7 @@ function buildDigest() {
     "nom du projet et son lien quand la question porte sur une réalisation.",
   ];
 
-  const body = PROJECT_CONTENT.flatMap(sectionLines);
+  const body = [...PROJECT_CONTENT.flatMap(sectionLines), ...careerLines()];
   const digest = [...header, "", ...body].join("\n");
 
   if (digest.length <= MAX_CHARS) return digest;

@@ -42,9 +42,9 @@ jobs:
           # dans components/contact-overlay.jsx.
           NEXT_PUBLIC_FORMSPREE_ENDPOINT: ${{ secrets.NEXT_PUBLIC_FORMSPREE_ENDPOINT }}
           # URL publique du Worker proxy du chatbot. Comme pour Formspree, elle
-          # finit dans le bundle client — ce qui est sans risque ici : le Worker
-          # s'authentifie via son binding Workers AI, il n'y a aucune clé à
-          # protéger.
+          # finit dans le bundle client. Le Worker garde la clé OpenRouter dans
+          # un secret Cloudflare, donc cette URL n'expose rien : elle ne donne
+          # accès qu'à un proxy déjà protégé (rate limiting, CORS, validation).
           NEXT_PUBLIC_CHAT_ENDPOINT: ${{ vars.NEXT_PUBLIC_CHAT_ENDPOINT }}
 
       - name: Upload Pages artifact

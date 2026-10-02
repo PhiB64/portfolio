@@ -20,8 +20,59 @@ const HISTORY_LIMIT = 16;
 const GREETING = "Bonjour ! Je suis l'assistant de Philippe. Posez-moi une question sur ses projets, ses compétences ou son parcours.";
 
 /**
+ * Retire la syntaxe Markdown d'un texte destiné à être affiché tel quel.
+ *
+ * Le composant rend le texte dans une bulle avec `whitespace-pre-wrap` : aucune
+ * balise n'est interprétée, donc un `**` s'affiche littéralement à l'écran. Le
+ * system prompt interdit déjà le Markdown, mais un modèle raisonneur ou une
+ * bibliothèque tierce peut ne pas le respecter — et on a déjà mesuré que ce
+ * catalogue de modèles n'obéit pas aux consignes d'interdiction.
+ *
+ * On nettoie donc à l'affichage, qui est la seule couche qui ne peut pas échouer.
+ * L'ordre compte : les liens sont traités avant les astérisques, sinon leur URL
+ * passerait au cleaning des italiques.
+ *
+ * Ce qui est retiré : `**gras**`, `__gras__`, `*italique*`, `_italique_`,
+ * `` `code` ``, les puces `*`/`-` en début de ligne, et les titres `#`.
+ * Ce qui est conservé : les URL, y compris celles écrites `[texte](url)`.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripMarkdown(text) {
+  return text
+    // `[libellé](url)` → `libellé (url)` : l'URL est retirée de la syntaxe mais
+    // reste visible, sinon le visiteur perdrait le lien.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, "$1 ($2)")
+    // `**gras**` et `__gras__` → `gras`.
+    .replace(/\*\*(.+?)\*\*/gs, "$1")
+    .replace(/__(.+?)__/gs, "$1")
+    // `` `code` `` → `code`.
+    .replace(/`([^`]+)`/g, "$1")
+    // `*italique*` et `_italique_`, mais seulement entre deux caractères non
+    // blancs : sinon un `*` isolé ou un snake_case comme `snake_case` serait
+    // mutilé. C'est le compromis habituel, il rate quelques cas rares.
+    .replace(/(^|[\s(«"'—–-])\*([^*\n]+)\*(?=$|[\s.,;:!?)»"'—–])/g, "$1$2")
+    .replace(/(^|[\s(«"'—–-])_([^_\n]+)_(?=$|[\s.,;:!?)»"'—–])/g, "$1$2")
+    // Puces de liste : `- ` ou `* ` en début de ligne → `• `. Le contenu est
+    // conservé, seule la puce change.
+    //
+    // `[ \t]` et non `\s` : en mode multiligne, `\s` englobe le retour à la
+    // ligne, donc une puce en absorbait la ligne vide qui la précédait. Sur une
+    // réponse structurée en listes, cela collapait toutes les séparations.
+    .replace(/^[ \t]*[-*][ \t]+/gm, "• ")
+    // Titres : `#` en début de ligne → rien, le texte reste.
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
+    // Ligne horizontale (`---`, `***`) → rien.
+    .replace(/^[ \t]*(?:[-*_][ \t]*){3,}$/gm, "")
+    .trim();
+}
+
+/**
  * Lit un flux SSE au format OpenAI et appelle `onDelta` à chaque fragment de
- * texte. Workers AI émet déjà ce format, le Worker le relaie tel quel.
+ * texte. Les fournisseurs du Worker (OpenRouter, Workers AI) émettent déjà ce
+ * format, le Worker le relaie tel quel — le front n'a donc à connaître aucun des
+ * deux.
  *
  * @param {ReadableStreamDefaultReader<Uint8Array>} body
  * @param {(delta: string) => void} onDelta
@@ -241,7 +292,9 @@ export function ChatWidget() {
                           <span className="text-xs">rédaction…</span>
                         </span>
                       ) : (
-                        <span className="whitespace-pre-wrap break-words">{message.content}</span>
+                        <span className="whitespace-pre-wrap break-words">
+                          {isUser ? message.content : stripMarkdown(message.content)}
+                        </span>
                       )}
                     </div>
                   </li>
