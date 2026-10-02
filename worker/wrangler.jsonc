@@ -6,12 +6,10 @@
   "observability": {
     "enabled": true
   },
-  // Workers AI. Sert de repli quand OpenRouter échoue (modèles `:free`
-  // saturés, quota épuisé, clé refusée). L'inférence principale passe par
-  // OpenRouter, dont la clé est un secret Cloudflare — voir le README.
-  "ai": {
-    "binding": "AI"
-  },
+  // L'inférence passe uniquement par OpenRouter, dont la clé est un secret
+  // Cloudflare — voir le README. Le repli Workers AI qui existait ici a été
+  // retiré : il ne servait qu'à pallier une clé OpenRouter vide, et il doublait
+  // la surface de panne pour une qualité de réponse inférieure.
   "ratelimits": [
     // Compteur partagé par localisation Cloudflare. C'est le seul rempart qui
     // tient : les compteurs en mémoire du Worker vivent dans l'isolate qui les a
@@ -40,8 +38,8 @@
     // `localhost:3000` permet de développer le site contre le Worker local
     // (`npm run dev` dans worker/ → http://127.0.0.1:8787).
     //
-    // Workers AI n'a besoin d'aucune clé : l'authentification passe par le
-    // binding `AI` ci-dessus. Il n'y a donc plus de secret dans ce projet.
+    // Workers AI n'a besoin d'aucune clé : l'authentification passait par le
+    // binding `AI`, désormais retiré.
     "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
 
     // Page d'attribution affichée par OpenRouter sur les appels faite avec la
@@ -50,8 +48,8 @@
     //
     // La clé, elle, ne figure pas ici : c'est un secret Cloudflare, posé avec
     // `npm run secret` (soit `wrangler secret put OPENROUTER_API_KEY`). Si elle
-    // manque, le Worker n'appelle pas OpenRouter et sert uniquement le repli
-    // Workers AI — il reste donc fonctionnel, en moins bien.
+    // manque, le Worker répond une erreur explicite plutôt que d'appeler sans
+    // autorisation.
     "SITE_URL": "https://phib64.github.io/portfolio",
     "SITE_TITLE": "Portfolio Philippe Barbosa",
 
