@@ -1,5 +1,5 @@
-# Clé OpenRouter, utilisée EN LOCAL UNIQUEMENT (Wrangler la charge depuis .dev.vars).
-# En production elle ne vit pas dans un fichier : c'est un secret Cloudflare,
-# posé avec `npm run secret` (soit `wrangler secret put OPENROUTER_API_KEY`).
-# Ne jamais commiter ce fichier : il est ignoré par .gitignore.
-OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Aucune clé n'est nécessaire : Workers AI s'authentifie via le binding `AI`
+# déclaré dans wrangler.jsonc, avec le compte Cloudflare du Worker.
+#
+# Ce fichier existe seulement pour les variables de développement local. Il est
+# ignoré par .gitignore.

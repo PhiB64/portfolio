@@ -6,6 +6,12 @@
   "observability": {
     "enabled": true
   },
+  // Workers AI. Le binding est authentifié par le compte Cloudflare du Worker :
+  // il n'y a donc aucun secret à gérer, et rien à exposer dans le bundle du
+  // site. C'est ce qui a remplacé la clé `OPENROUTER_API_KEY`.
+  "ai": {
+    "binding": "AI"
+  },
   "ratelimits": [
     // Compteur partagé par localisation Cloudflare. C'est le seul rempart qui
     // tient : les compteurs en mémoire du Worker vivent dans l'isolate qui les a
@@ -29,13 +35,13 @@
   ],
   "vars": {
     // Origines autorisées à appeler le Worker (séparateur : virgule). Ce sont des
-    // valeurs publiques : elles peuvent rester dans le dépôt, contrairement à la
-    // clé OpenRouter qui est un secret.
+    // valeurs publiques : elles peuvent rester dans le dépôt.
     //
     // `localhost:3000` permet de développer le site contre le Worker local
     // (`npm run dev` dans worker/ → http://127.0.0.1:8787).
-    "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
-    "SITE_URL": "https://phib64.github.io/portfolio",
-    "SITE_TITLE": "Portfolio Philippe Barbosa"
+    //
+    // Workers AI n'a besoin d'aucune clé : l'authentification passe par le
+    // binding `AI` ci-dessus. Il n'y a donc plus de secret dans ce projet.
+    "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000"
   }
 }

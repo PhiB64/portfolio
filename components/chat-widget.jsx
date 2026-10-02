@@ -20,7 +20,8 @@ const HISTORY_LIMIT = 16;
 const GREETING = "Bonjour ! Je suis l'assistant de Philippe. Posez-moi une question sur ses projets, ses compétences ou son parcours.";
 
 /**
- * Lit un flux SSE d'OpenRouter et appelle `onDelta` à chaque fragment de texte.
+ * Lit un flux SSE au format OpenAI et appelle `onDelta` à chaque fragment de
+ * texte. Workers AI émet déjà ce format, le Worker le relaie tel quel.
  *
  * @param {ReadableStreamDefaultReader<Uint8Array>} body
  * @param {(delta: string) => void} onDelta

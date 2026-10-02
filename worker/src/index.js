@@ -1,75 +1,70 @@
 /**
- * Proxy OpenRouter du chatbot du portfolio.
+ * Chatbot du portfolio, adossé à Workers AI (binding `AI`).
  *
  * Pourquoi un Worker séparé plutôt qu'une route Next.js : le site est un
  * export statique (`output: "export"` dans next.config.mjs), donc aucune route
  * serveur ne peut exister dans le repo — `app/api/chat/route.js` ferait
  * échouer le build, et il n'y a aucun runtime sur GitHub Pages. Sans proxy, le
- * navigateur serait obligé d'appeler OpenRouter directement, et la clé se
- * retrouverait dans une variable `NEXT_PUBLIC_*`, donc dans le bundle public,
- * lisible par n'importe qui en quelques secondes.
+ * navigateur serait obligé d'appeler l'API d'IA directement, ce qui exposerait
+ * une clé dans le bundle public.
  *
- * Ce Worker est le seul endroit où la clé existe : elle vit dans un secret
- * (`wrangler secret put OPENROUTER_API_KEY`), jamais dans le code ni dans une
- * variable `NEXT_PUBLIC_*`.
- *
- * Il est aussi le garde-fou : sans lui, un visiteur peut boucler `fetch` dans
- * la console et vider le quota du compte. D'où le rate limiting ci-dessous, qui
+ * Workers AI supprime ce problème par construction : le binding `AI` est
+ * authentifié par le compte Cloudflare du Worker, il n'existe donc aucune clé à
+ * protéger, ni dans le code ni dans un secret. Le Worker n'est plus qu'un
+ * garde-fou : sans lui, un visiteur peut boucler `fetch` dans la console et
+ * vider l'allocation neuronale du jour. D'où le rate limiting ci-dessous, qui
  * borne le débit par IP, et `max_tokens`, qui borne le coût d'une requête.
  */
 
-const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
-
-// Routeur gratuit d'OpenRouter : il choisit un modèle `:free` parmi la liste
-// disponible (~17 modèles au moment de l'écriture). Le slug est volontairement
-// unique — le catalogue évolue (modèles ajoutés ou retirés) et le routeur suit
-// le mouvement sans qu'une ligne de code change.
-const ROUTER_MODEL = "openrouter/free";
+/**
+ * Modèle principal : `@cf/ibm-granite/granite-4.0-h-micro`.
+ *
+ * Deux raisons, dans cet ordre. D'abord, il n'émet aucun `reasoning_content` (voir
+ * la note sur les replis ci-dessous, c'est le critère qui élimine l'essentiel du
+ * catalogue). Ensuite, il est de loin le moins cher : 1 542 neurons en entrée et
+ * 10 158 en sortie par million de tokens, contre 9 091 et 27 273 pour gemma-4-26b.
+ * Sur l'allocation gratuite de 10 000 neurons par jour, un message du chatbot
+ * coûte de l'ordre de 1 à 2 neurons.
+ *
+ * Il répond correctement en français sur les questions testées (compétences,
+ * projets, contact), et le system prompt complet est respecté.
+ */
+const MODEL = "@cf/ibm-granite/granite-4.0-h-micro";
 
 /**
- * Repli quand le routeur répond 429, c'est-à-dire quand TOUS les modèles
- * gratuits sont saturés. C'est courant en journée : la Capacity de la version
- * gratuite est très faible, et le routeur n'a alors plus rien à proposer.
+ * Replis, essayés dans l'ordre uniquement si le principal échoue.
  *
- * On énumère donc des modèles `:free` connus et on les essaie dans l'ordre,
- * en s'arrêtant au premier qui accepte la requête. C'est ce qui fait que le
- * chat reste utilisable même quand le routeur, lui, est bloqué.
+ * Workers AI épingle ses modèles sur une version, donc un retrait est peu
+ * probable. La liste est donc courte : elle sert de filet, pas de catalogue.
  *
- * Liste volontairement courte et figée : elle sert de filet, pas de catalogue.
- * Le routeur reste le chemin normal, et il absorbe les modèles qui arrivent ou
- * partent du catalogue. Le jour où un slug de cette liste disparaît, il échoue
- * en 404 et on passe au suivant — d'où le tri par paísance décroissante
- * (`nemotron-3-5-content-safety` et les modèles « omni » sont exclus : ce ne sont
- * pas des modèles de conversation, ou leur format de sortie ne colle pas au
- * streaming OpenAI).
+ * Ces trois modèles ont été retenus parce qu'ils n'émettent **aucun**
+ * `reasoning_content`. C'est un critère dur ici, pas un détail : les modèles
+ * « raisonneurs » du catalogue (gemma-4-26b, qwen3-30b, gpt-oss-20b) brûlent
+ * 500 à 2 000 caractères de raisonnement avant le moindre mot de réponse, et le
+ * front n'affiche que `delta.content`. Résultat mesuré : sur une question simple,
+ * gemma-4-26b produisait 1 949 caractères de raisonnement pour 28 caractères de
+ * réponse utile — et une réponse vide quand `max_tokens` était bas.
  */
 const FALLBACK_MODELS = [
-  "qwen/qwen3.8-27b:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
-  "google/gemma-4-31b-it:free",
-  "nvidia/nemotron-3.5-lightning:free",
-  "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "google/gemma-4-26b-a4b-it:free",
-  "poolside/laguna-s-2.1:free",
-  "liquid/lfm-2.5-2.6b:free",
+  "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+  "@cf/mistralai/mistral-small-3.1-24b-instruct",
+  "@cf/meta/llama-4-scout-17b-16e-instruct",
 ];
 
 const LIMITS = {
   maxMessages: 24,
   maxMessageChars: 4000,
   maxBodyBytes: 64 * 1024,
-  // Borne le coût d'une requête : une réponse de modèle gratuit peut partir
-  // très vite, et le streaming est coupé par le client dès qu'il ferme le
-  // panneau — la facturation, elle, ne l'est pas.
+  // Borne le coût d'une requête : le streaming est coupé par le client dès
+  // qu'il ferme le panneau, et la consommation de neurons, elle, ne l'est pas.
   maxOutputTokens: 900,
 };
 
 /**
  * Persona du chatbot, bâtie à partir des données réelles du site
  * (components/cube/project-content.jsx, app/layout.js) — aucune compétence ni
- * aucun projet inventé. Volontairement dense plutôt que bavard : le routeur
- * gratuit mène à des modèles petits, et chaque token de ce prompt est
- * reproposé à chaque requête.
+ * aucun projet inventé. Volontairement dense plutôt que bavard : chaque token
+ * de ce prompt est reproposé à chaque requête.
  */
 const SYSTEM_PROMPT = `Tu es l'assistant du portfolio de Philippe Barbosa, concepteur développeur full stack. Tu parles au visiteur, à la première personne, en français, ton naturel et concis.
 
@@ -125,7 +120,7 @@ Règles :
  * La clé est l'IP : c'est la seule chose stable dont on dispose pour un
  * visiteur anonyme. Cloudflare déconseille l'IP en général (plusieurs personnes
  * derrière une même adresse mobile), mais ici le risque inverse — un robot sans
- * identité — est celui qui coûte de l'argent.
+ * identité — est celui qui coûte de l'allocation.
  *
  * @returns {Promise<{ok: true} | {ok: false, retryAfter: number}>}
  */
@@ -162,9 +157,10 @@ function allowedOrigins(env) {
  * Réponse avec en-têtes CORS.
  *
  * L'origine est réfléchie point par point, jamais renvoyée en `*` : ce Worker
- * porte un secret, même s'il ne le renvoie jamais. Un `Access-Control-Allow-Origin:
- * *` autoriserait n'importe quel site à s'en servir comme relais, et ce site
- * tiers pourrait alors lire les réponses à la place du portfolio.
+ * consomme une allocation neuronale sur le compte Cloudflare, et un
+ * `Access-Control-Allow-Origin: *` autoriserait n'importe quel site à s'en servir
+ * comme relais. Ce site tiers pourrait alors lire les réponses, et surtout vider
+ * l'allocation du jour pour tous les visiteurs du portfolio.
  */
 function withCors(request, env, response) {
   const origin = request.headers.get("Origin");
@@ -228,10 +224,10 @@ function sanitizeMessages(input) {
     client.push({ role: message.role, content });
   }
 
-  // L'API OpenRouter refuse un historique qui ne commence pas par un message
-  // `user` : on retire les éventuels messages `assistant` orphelins du début.
-  // Le découpage se fait sur `client` et AVANT d'ajouter le system prompt — sinon
-  // `slice()` couperait aussi le prompt, qui est précisément en tête.
+  // L'API refuse un historique qui ne commence pas par un message `user` : on
+  // retire les éventuels messages `assistant` orphelins du début. Le découpage
+  // se fait sur `client` et AVANT d'ajouter le system prompt — sinon `slice()`
+  // couperait aussi le prompt, qui est précisément en tête.
   const firstUser = client.findIndex((message) => message.role === "user");
   if (firstUser === -1) return { ok: false, error: "Aucun message utilisateur." };
 
@@ -245,7 +241,7 @@ function sanitizeMessages(input) {
 export default {
   /**
    * @param {Request} request
-   * @param {{OPENROUTER_API_KEY?: string, ALLOWED_ORIGINS?: string, SITE_URL?: string, SITE_TITLE?: string}} env
+   * @param {{AI?: Ai, ALLOWED_ORIGINS?: string}} env
    */
   async fetch(request, env) {
     // Le navigateur envoie un OPTIONS avant le POST, car la requête change de
@@ -303,149 +299,88 @@ export default {
       return json(request, env, { error: messages.error }, 400);
     }
 
-    if (!env.OPENROUTER_API_KEY) {
-      // Clé absente : configuration cassée, ce n'est pas une erreur du visiteur.
+    if (!env.AI) {
+      // Binding absent : configuration cassée, ce n'est pas une erreur du visiteur.
       return json(request, env, { error: "Service indisponible." }, 503);
     }
 
     const payload = (model) => ({
-      model,
       messages: messages.messages,
       max_tokens: LIMITS.maxOutputTokens,
       stream: true,
     });
 
     /**
-     * Un appel à OpenRouter pour un modèle donné.
+     * Un appel à Workers AI pour un modèle donné.
      *
-     * @returns {Promise<Response|null>} la réponse, ou `null` si l'appel n'a
-     *   pas abouti et qu'il est pertinent d'essayer le modèle suivant.
+     * Contrairement à une API HTTP, `env.AI.run` ne renvoie pas de statut : il
+     * lève une exception en cas d'échec. On attrape donc pour décider s'il
+     * vaut la peine d'essayer le modèle suivant.
+     *
+     * @returns {Promise<ReadableStream>} le flux amont
+     * @throws si l'appel échoue, y compris si le visiteur a fermé l'onglet
      */
     async function callModel(model) {
       try {
-        return await fetch(OPENROUTER_ENDPOINT, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-            "Content-Type": "application/json",
-            // OpenRouter affiche le site appelant sur ses pages d'attribution.
-            "HTTP-Referer": env.SITE_URL ?? "",
-            "X-Title": env.SITE_TITLE ?? "Portfolio Philippe Barbosa",
-          },
-          body: JSON.stringify(payload(model)),
-          // Si le visiteur ferme l'onglet, la requête amont est abandonnée au
-          // lieu de continuer à consommer des tokens pour rien.
-          signal: request.signal,
-        });
+        const stream = await env.AI.run(model, payload(model));
+        if (!stream) throw new Error("Workers AI n'a renvoyé aucun flux.");
+        return stream;
       } catch (error) {
-        // 499 : convention nginx pour « fermé par le client ». Le visiteur est
-        // parti, il n'a plus personne à prévenir.
         if (error?.name === "AbortError") throw error;
-        console.error("Appel OpenRouter impossible pour", model, error?.message);
-        return null;
+        console.error("Appel Workers AI impossible pour", model, error?.message ?? error);
+        throw error;
       }
     }
 
-    // Le routeur d'abord, les modèles énumérés ensuite : on ne bascule sur le
-    // repli que si le routeur refuse pour cause de saturation, pas pour une
-    // erreur de clé ou de quota — dans ces cas-là, aucun autre modèle ne
-    // marcherait, et on veut renvoyer le bon message tout de suite.
-    let upstream;
-    try {
-      upstream = await callModel(ROUTER_MODEL);
-    } catch (error) {
-      if (error?.name === "AbortError") return new Response(null, { status: 499 });
-      return json(request, env, { error: "Le service de discussion ne répond pas." }, 502);
-    }
-    let saturated = upstream?.status === 429;
-
-    // Un 429 peut vouloir dire deux choses. Si c'est le quota gratuit du jour
-    // qui est épuisé, aucun repli n'y changera quoi que ce soit : on économise
-    // les sept appels restants et on dit tout de suite la vraie raison.
-    let dailyQuota = false;
-    if (saturated) {
-      const body = await upstream.clone().text();
-      dailyQuota = body.includes("free-models-per-day") || body.includes("free_tier_daily");
-      if (dailyQuota) {
-        console.error("Quota gratuit quotidien OpenRouter épuisé :", body.slice(0, 300));
-        return json(
-          request,
-          env,
-          { error: "Le quota gratuit du jour est épuisé. Le chat sera de nouveau disponible demain." },
-          429,
-        );
-      }
-      console.warn("Routeur gratuit saturé, essai des modèles de repli.");
-      for (const model of FALLBACK_MODELS) {
-        let attempt;
-        try {
-          attempt = await callModel(model);
-        } catch (error) {
-          // Le visiteur a refermé l'onglet au milieu de la cascade.
-          if (error?.name === "AbortError") return new Response(null, { status: 499 });
+    // Le modèle principal d'abord, les replis ensuite. L'épuisement de
+    // l'allocation neuronale est une cause commune à tous les modèles : inutile
+    // d'enchaîner les replis dans ce cas, on dit tout de suite la vraie raison.
+    let stream;
+    let exhausted = false;
+    for (const model of [MODEL, ...FALLBACK_MODELS]) {
+      try {
+        stream = await callModel(model);
+        break;
+      } catch (error) {
+        if (error?.name === "AbortError") return new Response(null, { status: 499 });
+        const message = String(error?.message ?? error);
+        if (/limit|quota|neuron|billing/i.test(message)) {
+          console.error("Allocation Workers AI épuisée :", message.slice(0, 300));
+          exhausted = true;
           break;
         }
-        if (attempt?.ok) {
-          upstream = attempt;
-          saturated = false;
-          break;
-        }
-        if (attempt) {
-          // 404 : ce slug précis a quitté le catalogue. Ça ne concerne que lui,
-          // on passe donc au suivant — c'est exactement le cas pour lequel la
-          // liste figée était prévue.
-          if (attempt.status === 404) {
-            console.warn("Repli", model, "n'existe plus, on essaie le suivant.");
-            continue;
-          }
-          // 429 : ce modèle-là est plein aussi, on essaie le suivant.
-          if (attempt.status === 429) continue;
-
-          // Autre chose : la cause est commune à tous les modèles (clé refusée,
-          // quota épuisé, panne en amont), inutile d'enchaîner.
-          console.error("Repli", model, "a renvoyé", attempt.status);
-          // On garde cette réponse pour renvoyer le message qui correspond à
-          // son statut, plutôt que celui du routeur qui ne dit plus rien de vrai.
-          upstream = attempt;
-          saturated = false;
-          break;
-        }
+        console.warn("Modèle", model, "indisponible, essai du suivant.");
       }
     }
 
-    // Erreur amont : traitée avant de démarrer le streaming, sinon le client a
-    // déjà reçu un 200 et ne verrait qu'un flux coupé sans explication.
-    if (!upstream) {
+    if (exhausted) {
+      return json(
+        request,
+        env,
+        { error: "L'allocation du jour est épuisée. Le chat sera de nouveau disponible demain." },
+        429,
+      );
+    }
+
+    if (!stream) {
       return json(request, env, { error: "Le service de discussion ne répond pas." }, 502);
     }
 
-    if (!upstream.ok) {
-      const status = upstream.status;
-
-      if (saturated || status === 429) {
-        // Le quota quotidien a déjà été traité plus haut : ici, c'est un
-        // 429 « ce modèle est plein », qui se résout tout seul.
-        console.error("OpenRouter 429 :", (await upstream.text()).slice(0, 300));
-        return json(request, env, { error: "Les modèles gratuits sont saturés. Réessayez dans un instant." }, 429);
-      }
-      if (status === 402) {
-        return json(request, env, { error: "Le quota de l'assistant est épuisé pour le moment." }, 503);
-      }
-      if (status === 401 || status === 403) {
-        console.error("OpenRouter refuse la clé configurée sur le Worker.");
-        return json(request, env, { error: "Service indisponible." }, 503);
-      }
-      console.error("OpenRouter a renvoyé", status, (await upstream.text()).slice(0, 500));
-      return json(request, env, { error: "Le service de discussion a renvoyé une erreur." }, 502);
-    }
-
-    // Flux SSE transmis tel quel : OpenRouter gère le découpage, le client le
-    // décode. On ne recopie que le type MIME — les en-têtes de cache
-    // d'OpenRouter nuiraient à une reconnexion après erreur.
+    // Le flux est transmis tel quel, sans passer par un `TransformStream`.
+    //
+    // Workers AI émet déjà du SSE au format OpenAI — `choices[0].delta.content`,
+    // terminé par `data: [DONE]` — donc il n'y a rien à convertir, et
+    // `chat-widget.jsx` reste inchangé.
+    //
+    // Le `pipeThrough` a été essayé puis retiré : sur le flux d'un binding `AI`,
+    // qui s'exécute à distance, workerd livre à `transform` des chunks que ni
+    // `TextDecoder` ni le `controller` ne savent traiter. Résultat en production :
+    // des `200` à taille zéro, sans la moindre erreur visible. Le passthrough
+    // direct fonctionne (vérifié : 26 922 octets, trames et `[DONE]` inclus).
     return withCors(
       request,
       env,
-      new Response(upstream.body, {
+      new Response(stream, {
         status: 200,
         headers: {
           "Content-Type": "text/event-stream; charset=utf-8",

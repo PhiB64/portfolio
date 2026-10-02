@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "secret": "wrangler secret put OPENROUTER_API_KEY",
     "tail": "wrangler tail"
   },
   "devDependencies": {

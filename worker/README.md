@@ -1,7 +1,7 @@
-# Worker proxy du chatbot
+# Worker du chatbot
 
-Relaye les requêtes du chatbot vers OpenRouter en gardant la clé **hors du
-bundle du site**.
+Relaye les requêtes du chatbot vers **Workers AI** en gardant le contrôle des
+appels côté serveur.
 
 ## Pourquoi ce Worker existe
 
@@ -9,12 +9,21 @@ Le site est un export statique Next.js (`output: "export"` dans
 `next.config.mjs`), déployé sur GitHub Pages : il n'y a **aucun runtime**. Une
 route `app/api/chat/route.js` ferait échouer le build.
 
-La seule alternative sans proxy serait que le navigateur appelle OpenRouter
-directement. La clé devrait alors vivre dans une variable `NEXT_PUBLIC_*`, donc
-dans le bundle public : lisible en quelques secondes, et donc vidé ou bloqué au
-premier robot qui visite la page.
+La seule alternative sans proxy serait que le navigateur appelle l'API d'IA
+directement, avec une clé dans une variable `NEXT_PUBLIC_*` — donc dans le bundle
+public : lisible en quelques secondes, et donc vidé ou bloqué au premier robot qui
+visite la page.
 
-Ce Worker est le seul endroit où la clé existe.
+## Workers AI : pas de clé à gérer
+
+L'inférence passe par le binding `AI` (`env.AI.run`), déclaré dans
+`wrangler.jsonc`. Il s'authentifie avec le compte Cloudflare du Worker : il n'y a
+**aucun secret à poser, aucune clé à faire tourner, rien à retirer**. C'est ce qui
+a remplacé le proxy OpenRouter, qui demandait une clé secrète et dependait d'un
+quota de modèles gratuits très faible.
+
+L'allocation gratuite du plan Workers est de **10 000 neurons par jour**, remis à
+zéro à 00:00 UTC. Sur un portfolio à faible trafic, c'est confortable.
 
 ## Mise en place
 
@@ -22,25 +31,18 @@ Ce Worker est le seul endroit où la clé existe.
 cd worker
 npm install
 
-# 1. La clé OpenRouter, en secret Cloudflare (jamais dans un fichier versionné)
-npm run secret          # wrangler secret put OPENROUTER_API_KEY
-
-# 2. L'endpoint, dans le site (à la racine du dépôt, .env.local)
+# 1. L'endpoint, dans le site (à la racine du dépôt, .env.local)
 #    NEXT_PUBLIC_CHAT_ENDPOINT=https://portfolio-chat.<subdomain>.workers.dev
 
-# 3. Déploiement
+# 2. Déploiement
 npm run deploy
 ```
-
-La clé se crée sur https://openrouter.ai/keys. Il lui faut au moins un crédit,
-même pour router sur les modèles gratuits.
 
 ## En local
 
 ```bash
 cd worker
-cp .dev.vars.example .dev.vars    # y mettre la clé
-npm run dev                       # → http://127.0.0.1:8787
+npm run dev    # → http://127.0.0.1:8787
 ```
 
 Puis, à la racine du dépôt, `.env.local` :
@@ -52,24 +54,67 @@ NEXT_PUBLIC_CHAT_ENDPOINT=http://127.0.0.1:8787
 Le bouton de chat n'apparaît pas tant que cette variable est absente : `npm run
 dev` du site tourne sur son propre port, il faut lancer les deux.
 
-`wrangler dev` respecte `.dev.vars`, `wrangler.jsonc` fournit le reste.
+`wrangler.jsonc` fournit toute la configuration. `.dev.vars` n'est plus nécessaire
+en local : le binding `AI` est disponible sans clé.
 
 ## Configuration
 
-Tout est dans `wrangler.jsonc` (`vars`), ce sont des valeurs publiques :
+Tout est dans `wrangler.jsonc`. Une seule variable d'environnement reste, et c'est
+une valeur publique :
 
-| Variable            | Rôle                                                  |
-| ------------------- | ----------------------------------------------------- |
-| `ALLOWED_ORIGINS`   | Origines autorisées, séparées par virgule             |
-| `SITE_URL`          | `HTTP-Referer` envoyé à OpenRouter                   |
-| `SITE_TITLE`        | `X-Title` envoyé à OpenRouter                        |
+| Variable          | Rôle                                      |
+| ----------------- | ----------------------------------------- |
+| `ALLOWED_ORIGINS` | Origines autorisées, séparées par virgule |
 
-Le refus de CORS est volontaire : ce Worker porte un secret. Un
-`Access-Control-Allow-Origin: *` autoriserait n'importe quel site à s'en servir
-comme relais.
+Le refus de CORS est volontaire : ce Worker consomme l'allocation neuronale du
+compte. Un `Access-Control-Allow-Origin: *` autoriserait n'importe quel site à
+s'en servir comme relais et à le vider.
 
 Après un déploiement, ajouter l'origine du nouveau domaine dans
 `ALLOWED_ORIGINS`, sinon le navigateur bloquera la réponse.
+
+## Modèle et streaming
+
+Le modèle est défini en haut de `src/index.js` (`MODEL`). C'est
+`@cf/ibm-granite/granite-4.0-h-micro` : il n'émet aucun `reasoning_content` (voir
+ci-dessous, c'est le critère qui élimine l'essentiel du catalogue) et il est de
+loin le moins cher — 1 542 neurons en entrée et 10 158 en sortie par million de
+tokens. Un message du chatbot coûte de l'ordre de 1 à 2 neurons, donc l'allocation
+gratuite de 10 000 neurons par jour ne sera jamais un problème ici.
+
+Le flux est transmis **tel quel**, sans `TransformStream`. Workers AI émet déjà du
+SSE au format OpenAI — `choices[0].delta.content`, terminé par `data: [DONE]` — donc
+`chat-widget.jsx` n'a pas eu besoin d'être touché.
+
+### Pourquoi pas de `pipeThrough`
+
+C'est contre-intuitif, alors que le réécrire paraît plus propre. Un `TransformStream`
+posé sur le flux d'un binding `AI` **ne fonctionne pas** : le binding s'exécute à
+distance, et workerd livre alors à `transform` des chunks que ni `TextDecoder` ni
+le `controller` ne savent traiter (`controller.enqueue is not a function`). Le
+symptôme en production est un `200` avec **zéro octet** et aucune erreur visible —
+le client voit un chat bloqué indéfiniment.
+
+Le passthrough direct fonctionne : vérifié, 26 922 octets, trames et `[DONE]`
+compris. Un aller-retour par un Worker de test a confirmé que c'est bien
+`pipeThrough` qui casse, et non le modèle.
+
+### Le critère « pas de raisonnement »
+
+Un premier essai avec `@cf/google/gemma-4-26b-a4b-it` renvoyait des réponses
+vides. La cause : ce modèle est un modèle raisonneur, il émet
+`reasoning_content` avant `content`, et le front n'affiche que le second. Mesuré
+sur une question simple : **1 949 caractères de raisonnement pour 28 caractères de
+réponse**, et une réponse totalement vide quand `max_tokens` était bas.
+
+Les quatre modèles retenus (principal + trois replis) ont été choisis parce
+qu'ils n'émettent aucun `reasoning_content`. Si un jour un repli doit être
+remplacé, vérifier ce point d'abord — un modèle raisonneur produit un chat
+muet, sans la moindre erreur à l'écran.
+
+Si le modèle principal échoue, les replis sont essayés dans l'ordre. En revanche,
+si l'allocation du jour est épuisée, la cause est commune à tous les modèles : on
+ne tente pas les replis et on renvoie directement un message qui le dit.
 
 ## Garde-fous
 
@@ -111,7 +156,19 @@ un Durable Object. Pour un portfolio, le coût ne se justifie pas.
 Cloudflare déconseille l'IP comme clé : plusieurs personnes partagent une
 adresse derrière un CGNAT mobile. Ici le risque inverse l'emporte — un visiteur
 anonyme n'a pas d'autre identifiant stable, et c'est le robot sans identité qui
-coûte de l'argent. Sur un site à faible trafic, le faux positif est improbable.
+coûte de l'allocation. Sur un site à faible trafic, le faux positif est improbable.
+
+### Le tester est plus dur que le croire
+
+Tester cette limite depuis une machine ne fonctionne pas du premier coup, pour une
+raison qui fait perdre du temps : **l'IP de sortie peut être répartie sur plusieurs
+adresses**. Sur la machine de développement, les requêtes arrivaient en
+`185.5.129.29`, `.30` et `.31` — jamais plus de 10 sur aucune des trois, donc
+aucune n'était jamais bloquée, alors que 40 requêtes étaient envoyées.
+
+Le rempart n'était pas en cause : en descendant `limit` à 1, une rafale de 30
+requêtes a renvoyé 6 `429` et 24 `200`. Le binding fonctionne, mais pour l'observer
+il faut soit viser une seule adresse, soit réduire la limite le temps d'un test.
 
 ## Vérifier que ça fonctionne
 
@@ -119,7 +176,7 @@ coûte de l'argent. Sur un site à faible trafic, le faux positif est improbable
 npm run tail     # logs en direct, avec observability activée
 ```
 
-Un test rapide de la clé, sans passer par le site :
+Un test rapide, sans passer par le site :
 
 ```bash
 curl -i https://portfolio-chat.<subdomain>.workers.dev \
