@@ -124,6 +124,38 @@ function stripMarkdown(text) {
 }
 
 /**
+ * Traduit une erreur OpenRouter en message français, et dit si elle mérite une
+ * relance.
+ *
+ * Deux familles très différentes se cachent derrière un même `error_type` :
+ *
+ * - `content_policy_violation` et `refusal` : la demande a été comprise puis
+ *   refusée. Relancer répéterait exactement le même refus — trois requêtes
+ *   pour un résultat identique. Elles portent `retryable: false`.
+ * - Tout le reste (surcharge, limite de débit, coupure réseau) : la réponse
+ *   changerait si on reposait la question.
+ *
+ * Le message amont n'est jamais recopié : il est en anglais, et il parle au
+ * visiteur de politique de contenu, ce qui n'est ni lisible ni aimable.
+ *
+ * @param {{code?: number, message?: string, metadata?: {error_type?: string}}} error
+ * @returns {Error & {retryable: boolean}}
+ */
+function upstreamError(error) {
+  const kind = error?.metadata?.error_type;
+  const refused = kind === "content_policy_violation" || kind === "refusal";
+
+  return Object.assign(
+    new Error(
+      refused
+        ? "Je ne peux pas répondre à cette question. Posez-moi autre chose sur le portfolio."
+        : "Le service de discussion ne répond pas.",
+    ),
+    { retryable: !refused },
+  );
+}
+
+/**
  * Lit un flux SSE au format OpenAI et appelle `onDelta` à chaque fragment de
  * texte. Les fournisseurs du Worker (OpenRouter, Workers AI) émettent déjà ce
  * format, le Worker le relaie tel quel — le front n'a donc à connaître aucun des
@@ -158,12 +190,23 @@ async function readStream(body, onDelta) {
         if (!payload) continue;
         if (payload === "[DONE]") return;
 
+        let frame;
         try {
-          const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-          if (delta) onDelta(delta);
+          frame = JSON.parse(payload);
         } catch {
           // Trame illisible : on l'ignore, la suivante prend le relais.
+          continue;
         }
+
+        // Erreur en cours de flux : OpenRouter répond 200 et fait porter
+        // l'échec dans une trame SSE (`finish_reason: "error"`), le statut HTTP
+        // étant figé depuis l'envoi des en-têtes. Sans ce test, une modération
+        // ou un refus de modèle s'affiche comme une réponse vide, sans texte
+        // et sans erreur — le visiteur voit une bulle muette.
+        if (frame?.error) throw upstreamError(frame.error);
+
+        const delta = frame?.choices?.[0]?.delta?.content;
+        if (delta) onDelta(delta);
       }
     }
   }
@@ -261,16 +304,23 @@ export function ChatWidget() {
           });
 
           if (!res.ok || !res.body) {
-            // Le Worker renvoie toujours `{ error }` sur une erreur : on le montre
-            // tel quel, il est déjà rédigé pour le visiteur.
+            // Le Worker renvoie toujours `{ error }` sur une erreur, déjà rédigé
+            // pour le visiteur : on le montre tel quel.
             let message = "Le service de discussion ne répond pas.";
+            let retryable = true;
             try {
               const data = await res.json();
               if (data?.error) message = data.error;
             } catch {
               // Pas de JSON lisible (HTML d'erreur, réseau coupé) : texte par défaut.
             }
-            throw new Error(message);
+            // 403 : la demande a été lue puis refusée (modération, garde-fou,
+            // permissions). Le message du Worker est alors définitif, et surtout
+            // identique à chaque tentative : on ne le relance pas. Les autres
+            // statuts sont des pannes ou des limites, qui se résorbent.
+            if (res.status === 403) retryable = false;
+
+            throw Object.assign(new Error(message), { retryable });
           }
 
           await readStream(res.body, (delta) => {
@@ -285,6 +335,10 @@ export function ChatWidget() {
           break; // Réponse reçue en entier : plus rien à relancer.
         } catch (err) {
           if (err?.name === "AbortError") throw err; // Remonte au `catch` d'après.
+          // Un refus de modération ou de modèle ne change pas d'une tentative à
+          // l'autre : le relancer consommerait trois requêtes pour aboutir au
+          // même refus.
+          if (err?.retryable === false) throw err;
           // Dernière tentative : on laisse l'erreur remonter, c'est elle qu'on
           // affiche au visiteur.
           if (attempt === MAX_RETRIES) throw err;

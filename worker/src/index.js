@@ -487,19 +487,6 @@ function sanitizeMessages(input) {
   return { ok: true, messages: client.slice(firstUser) };
 }
 
-/**
- * Erreur amont, avec le statut HTTP à renvoyer au visiteur.
- *
- * Le message est rédigé pour le visiteur : les callers le sortent tel quel dans
- * `{ error }`, il ne faut donc pas y glisser de détail interne.
- *
- * @param {string} message
- * @param {number} status
- */
-function upstreamError(message, status) {
-  return Object.assign(new Error(message), { status });
-}
-
 /* ------------------------------------------------------------------ */
 /* Handler                                                             */
 /* ------------------------------------------------------------------ */
@@ -652,6 +639,22 @@ export default {
 
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => "");
+
+      // Un 403 est une décision, pas une panne : la demande a été lue puis
+      // refusée (modération, garde-fou, permissions). Le relayer en 502 ferait
+      // croire au front que la panne est passagère, et il relancerait trois
+      // fois la même question pour aboutir au même refus. On le laisse passer
+      // en 403, avec un message rédigé pour le visiteur.
+      if (response.status === 403) {
+        console.warn("OpenRouter a refusé la demande :", detail.slice(0, 300));
+        return json(
+          request,
+          env,
+          { error: "Je ne peux pas répondre à cette question. Posez-moi autre chose sur le portfolio." },
+          403,
+        );
+      }
+
       console.error("OpenRouter a renvoyé", response.status, detail.slice(0, 300));
       return json(request, env, { error: `Le service de discussion ne répond pas (${response.status}).` }, 502);
     }
