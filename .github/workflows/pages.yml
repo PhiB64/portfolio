@@ -31,6 +31,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Le lint et les tests ne bloquent pas le déploiement (`continue-on-error`) :
+      # un portfolio doit rester en ligne même quand une passe de vérification
+      # échoue. En revanche ils s'exécutent, donc la page GitHub affiche le
+      # verdict — c'est là que le signal est utile, pas dans le blocage du
+      # déploiement.
+      - name: Lint
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Tests
+        continue-on-error: true
+        run: npm test
+
       - name: Build
         run: npm run build
         env:

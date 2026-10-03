@@ -31,7 +31,9 @@ Site one-page immersif avec un **cube 3D interactif** qui présente les compéte
 
 ### Prérequis
 
-- Node.js 18+
+- Node.js **20.9+** — exigence de Next.js 16, déclarée dans le champ `engines`
+  de `package.json`. Node 18 est refusé dès l'installation. (Ce README
+  annonçait 18+ jusqu'à récemment : l'échec ne se voyait qu'au build.)
 - npm ou yarn
 
 ### Installation
@@ -61,6 +63,20 @@ Le build est exporté dans `dist/`.
 ```bash
 npm run lint
 ```
+
+### Tests
+
+```bash
+npm test           # une passe
+npm run test:watch # en continu
+```
+
+Les tests couvrent `lib/cube-math.js` — la géométrie du cube (rotations, paliers
+de scroll, projection, hit-test). C'est le seul module assez isolé pour être
+testé sans DOM, et le seul où une régression passerait inaperçue : une
+interpolation de pose erronée ne produit aucune erreur, seulement un cube qui
+tourne mal. Les chiffres cités dans les commentaires du module — pointe de
+vitesse, inégalité des paliers — sont vérifiés par ces tests.
 
 ## Déploiement
 
@@ -138,10 +154,21 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   défilement au clavier.
 - Les onglets projets, masqués (`opacity: 0`) avant leur révélation, **se
   révèlent au focus** : sans cela la tabulation menait à des boutons invisibles.
-- `prefers-reduced-motion: reduce` raccourcit les animations **autonomes**
-  (autoplay de fin, skip, ondes sonar, molette). Le scrub de scroll n'est pas
-  concerné : c'est un contrôle direct de l'utilisateur, et l'annuler figerait la
-  page sur la carte d'intro.
+- **Ce que `prefers-reduced-motion` ne fait pas, aujourd'hui.** La fonction
+  `reduceMotion()` de `components/hero-cube.jsx` renvoie `false` en dur : le
+  réglage système n'est pas lu en JavaScript. Seul effet actif, en CSS
+  (`app/globals.css`) : `.wheel-anim`, l'invite de scroll. Concrètement, un
+  visiteur qui a coupé les animations subit quand même l'autoplay de fin et les
+  ondes sonar. Le choix est argumenté dans le code — les durées mobiles dépassent
+  le plafond WCAG 2.2.2 de 5 s, et le bon correctif est de raccourcir ces
+  animations plutôt que de les neutraliser — mais il n'est **pas implémenté**.
+  Point de restauration, indiqué en commentaire dans `hero-cube.jsx` :
+  retourner `matchMedia("(prefers-reduced-motion: reduce)").matches`.
+- Les deux overlays plein écran (rubrique, contact) ne sont pas des `dialog` :
+  pas de `role`, pas de `aria-modal`, et **pas de gestion de la touche Échap** —
+  `grep -i escape` ne trouve aucune occurrence dans tout le dépôt. Un visiteur au
+  clavier ouvre une rubrique et ne peut la refermer qu'en rebouclant jusqu'au
+  bouton placé dessous. À faire.
 - Le titre de la page d'accueil est un `<text>` SVG, non exposé aux lecteurs
   d'écran : un `<h1 class="sr-only">` est posé dans `app/page.js`.
 

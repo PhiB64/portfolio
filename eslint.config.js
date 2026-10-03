@@ -10,6 +10,14 @@ export default defineConfig([
   // ESLint, sinon `npm run lint` échoue sur des fichiers éphémères.
   globalIgnores(["dist", ".next", "node_modules", "**/.wrangler/**"]),
   {
+    // Tests Vitest : le runner fournit ses propres globals (`describe`, `it`,
+    // `expect`), et `process` est ambiant côté Node comme côté navigateur.
+    files: ["**/*.test.{js,jsx}", "vitest.config.js"],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+  },
+  {
     files: ["**/*.{js,jsx}"],
     extends: [
       js.configs.recommended,
