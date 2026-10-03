@@ -17,6 +17,61 @@ const ENDPOINT = process.env.NEXT_PUBLIC_CHAT_ENDPOINT ?? "";
  */
 const HISTORY_LIMIT = 16;
 
+/**
+ * Nombre de relances automatiques après l'échec d'une requête.
+ *
+ * Plafond bas et non négociable : le Worker autorise 10 requêtes par minute et
+ * par IP, donc chaque relance rejoue la requête et consomme un jeton de ce
+ * quota. Sans plafond, un échec permanent bouclerait jusqu'à bloquer le
+ * visiteur — lui-même et tous ceux derrière la même IP.
+ */
+const MAX_RETRIES = 2;
+
+/**
+ * Erreur d'annulation, dans la forme que produit `AbortController`.
+ *
+ * `DOMException` n'est pas garanti sur tous les navigateurs (ni dans le rendu
+ * serveur de React), on fabrique donc un objet qui porte le seul champ que la
+ * gestion d'erreur de `send` regarde : `name`.
+ *
+ * @returns {Error}
+ */
+function abortError() {
+  return Object.assign(new Error("Aborted"), { name: "AbortError" });
+}
+
+/**
+ * Attente entre deux tentatives, interrompue si le visiteur annule.
+ *
+ * Sans l'interruption, fermer l'onglet pendant l'attente laisserait la boucle
+ * repartir sur une requête morte : le `sleep` ignorait le signal et la
+ * nouvelle requête partait vers un composant démonté.
+ *
+ * @param {number} ms
+ * @param {AbortSignal} signal
+ * @returns {Promise<void>}
+ */
+function sleep(ms, signal) {
+  // Signal déjà annulé avant l'appel : aucun écouteur ne se déclencherait et
+  // l'attente irait jusqu'à son terme. On sort avant de s'enregistrer.
+  if (signal.aborted) return Promise.reject(abortError());
+
+  return new Promise((resolve, reject) => {
+    // `timer` est référencé par `cancel`, déclaré après : `const` vit dans le
+    // TDZ, donc l'appel doit forcément être postérieur aux deux déclarations.
+    const cancel = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", cancel);
+  });
+}
+
 const GREETING = "Bonjour ! Je suis l'assistant de Philippe. Posez-moi une question sur ses projets, ses compétences ou son parcours.";
 
 /**
@@ -120,6 +175,9 @@ export function ChatWidget() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // Numéro de la relance en cours (0 = première tentative). Affiché dans la
+  // bulle pour que le visiteur comprenne le silence lors du backoff.
+  const [retry, setRetry] = useState(0);
 
   const abortRef = useRef(null);
   const listRef = useRef(null);
@@ -150,6 +208,7 @@ export function ChatWidget() {
     setMessages([]);
     setError(null);
     setBusy(false);
+    setRetry(0);
     inputRef.current?.focus();
   }, []);
 
@@ -169,39 +228,68 @@ export function ChatWidget() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch(ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: history.slice(-HISTORY_LIMIT).map(({ role, content: text }) => ({
-            role,
-            content: text,
-          })),
-        }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        // Le Worker renvoie toujours `{ error }` sur une erreur : on le montre
-        // tel quel, il est déjà rédigé pour le visiteur.
-        let message = "Le service de discussion ne répond pas.";
+      // Relance automatique : toute erreur repart, sans exception. Seule
+      // l'annulation du visiteur sort de la boucle, relance n'ayant pas de sens
+      // pour une requête à laquelle il a mis fin lui-même.
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
-          const data = await res.json();
-          if (data?.error) message = data.error;
-        } catch {
-          // Pas de JSON lisible (HTML d'erreur, réseau coupé) : texte par défaut.
-        }
-        throw new Error(message);
-      }
+          if (attempt > 0) {
+            // Backoff croissant : laisse le temps au service de se rétablir
+            // après un pic de charge, sans faire attendre un simple 400.
+            await sleep(500 * attempt, controller.signal);
+            // La tentative précédente a pu écrire des fragments avant d'échouer :
+            // on repart d'une bulle vide, sinon le texte partiel et la nouvelle
+            // réponse s'afficheraient collés l'un à l'autre.
+            setMessages((prev) =>
+              prev[prev.length - 1]?.role === "assistant"
+                ? [...prev.slice(0, -1), { role: "assistant", content: "" }]
+                : prev,
+            );
+            setRetry(attempt);
+          }
 
-      await readStream(res.body, (delta) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          next[next.length - 1] = { ...last, content: last.content + delta };
-          return next;
-        });
-      });
+          const res = await fetch(ENDPOINT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: history.slice(-HISTORY_LIMIT).map(({ role, content: text }) => ({
+                role,
+                content: text,
+              })),
+            }),
+            signal: controller.signal,
+          });
+
+          if (!res.ok || !res.body) {
+            // Le Worker renvoie toujours `{ error }` sur une erreur : on le montre
+            // tel quel, il est déjà rédigé pour le visiteur.
+            let message = "Le service de discussion ne répond pas.";
+            try {
+              const data = await res.json();
+              if (data?.error) message = data.error;
+            } catch {
+              // Pas de JSON lisible (HTML d'erreur, réseau coupé) : texte par défaut.
+            }
+            throw new Error(message);
+          }
+
+          await readStream(res.body, (delta) => {
+            setMessages((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              next[next.length - 1] = { ...last, content: last.content + delta };
+              return next;
+            });
+          });
+
+          break; // Réponse reçue en entier : plus rien à relancer.
+        } catch (err) {
+          if (err?.name === "AbortError") throw err; // Remonte au `catch` d'après.
+          // Dernière tentative : on laisse l'erreur remonter, c'est elle qu'on
+          // affiche au visiteur.
+          if (attempt === MAX_RETRIES) throw err;
+        }
+      }
     } catch (err) {
       if (err?.name === "AbortError") {
         // Le visiteur a fermé le panneau ou relancé une question : il n'est
@@ -217,6 +305,7 @@ export function ChatWidget() {
       );
     } finally {
       setBusy(false);
+      setRetry(0);
       abortRef.current = null;
     }
   }
@@ -289,7 +378,12 @@ export function ChatWidget() {
                       {isPending ? (
                         <span className="flex items-center gap-2 py-1 text-[#64748b]">
                           <Loader2 size={14} className="animate-spin" />
-                          <span className="text-xs">rédaction…</span>
+                          {/* `retry` > 0 = la requête précédente a échoué et
+                              repart. Sans ce libellé, le backoff est un silence
+                              qui ressemble à un blocage. */}
+                          <span className="text-xs">
+                            {retry > 0 ? `nouvelle tentative (${retry}/${MAX_RETRIES})…` : "rédaction…"}
+                          </span>
                         </span>
                       ) : (
                         <span className="whitespace-pre-wrap break-words">
