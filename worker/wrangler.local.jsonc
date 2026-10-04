@@ -1,7 +1,8 @@
 {
   // Config de test local, jetable : sert à faire pointer le Worker vers le digest
   // du build local (servi sur le port 8899) au lieu du site déployé. Sans elle,
-  // `wrangler dev` irait chercher le contenu sur GitHub Pages.
+  // `wrangler dev` irait chercher le contenu sur GitHub Pages. C'est aussi la
+  // seule config qui autorise `localhost:3000` — la prod ne l'autorise pas.
   "name": "portfolio-chat",
   "main": "src/index.js",
   "compatibility_date": "2025-09-01",

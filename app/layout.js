@@ -1,6 +1,7 @@
 import "./globals.css";
 import { Share_Tech_Mono } from "next/font/google";
 import { SITE_ROOT, assetUrl } from "../lib/site-url";
+import { CONTACT } from "../lib/portfolio-content";
 
 const shareTechMono = Share_Tech_Mono({
   weight: "400",
@@ -88,18 +89,15 @@ const jsonLd = {
   jobTitle: "Concepteur Développeur",
   url: SITE_ROOT,
   image: assetUrl("/og-image.png"),
-  email: "mailto:philippebarbosa64@gmail.com",
-  telephone: "+33651305916",
+  email: `mailto:${CONTACT.email}`,
+  telephone: CONTACT.phoneInternational,
   address: {
     "@type": "PostalAddress",
-    addressLocality: "Lons",
-    addressRegion: "Pyrénées-Atlantiques",
+    addressLocality: CONTACT.city,
+    addressRegion: CONTACT.region,
     addressCountry: "FR",
   },
-  sameAs: [
-    "https://github.com/PhiB64",
-    "https://www.linkedin.com/in/philippe-barbosa/",
-  ],
+  sameAs: [CONTACT.githubUrl, CONTACT.linkedinUrl],
 };
 
 export default function RootLayout({ children }) {

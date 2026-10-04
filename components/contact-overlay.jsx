@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, CheckCircle, AlertCircle } from "lucide-react";
 import { ProjectTabs, BackButton } from "./cube/project-tabs";
+import { CONTACT, CONTACT_LOCATION } from "../lib/portfolio-content";
 
 // Icônes de liaison (GitHub, LinkedIn) : décoratives, le lien adjacent porte
 // déjà le nom (« github.com/PhiB64 »). `focusable="false"` pour IE/Edge
@@ -20,7 +21,6 @@ const IconLinkedin = () => (
 
 const FORMSPREE_ENDPOINT =
   process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT || "https://formspree.io/f/xbglwdny";
-const CONTACT_EMAIL = "philippebarbosa64@gmail.com";
 
 export function ContactOverlay({ onClose, onSelectProject }) {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
@@ -88,8 +88,8 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                 <Mail size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
                 <div>
                   <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">Email</p>
-                  <a href={`mailto:${CONTACT_EMAIL}`} className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm break-all">
-                    {CONTACT_EMAIL}
+                  <a href={`mailto:${CONTACT.email}`} className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm break-all">
+                    {CONTACT.email}
                   </a>
                 </div>
               </li>
@@ -97,8 +97,8 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                 <Phone size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
                 <div>
                   <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">Téléphone</p>
-                  <a href="tel:0651305916" className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm">
-                    06 51 30 59 16
+                  <a href={CONTACT.phoneHref} className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm">
+                    {CONTACT.phoneDisplay}
                   </a>
                 </div>
               </li>
@@ -106,15 +106,15 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                 <MapPin size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
                 <div>
                   <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">Localisation</p>
-                  <span className="text-white text-sm">Lons · Pyrénées-Atlantiques (64)</span>
+                  <span className="text-white text-sm">{CONTACT_LOCATION}</span>
                 </div>
               </li>
               <li className="flex items-start gap-4">
                 <IconGithub />
                 <div>
                   <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">GitHub</p>
-                  <a href="https://github.com/PhiB64" target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm">
-                    github.com/PhiB64
+                  <a href={CONTACT.githubUrl} target="_blank" rel="noopener noreferrer" className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm">
+                    {CONTACT.githubLabel}
                   </a>
                 </div>
               </li>
@@ -123,12 +123,12 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                 <div>
                   <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">LinkedIn</p>
                   <a
-                    href="https://www.linkedin.com/in/philippe-barbosa/"
+                    href={CONTACT.linkedinUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm"
                   >
-                    linkedin.com/in/philippe-barbosa
+                    {CONTACT.linkedinLabel}
                   </a>
                 </div>
               </li>
@@ -168,8 +168,8 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                 </div>
                 <p className="text-[#94a3b8] leading-relaxed text-sm mb-5">
                   L&apos;envoi automatique n&apos;a pas abouti. Vous pouvez me écrire directement à{" "}
-                  <a href={`mailto:${CONTACT_EMAIL}`} className="text-[#00a5b0] hover:underline break-all">
-                    {CONTACT_EMAIL}
+                  <a href={`mailto:${CONTACT.email}`} className="text-[#00a5b0] hover:underline break-all">
+                    {CONTACT.email}
                   </a>
                   .
                 </p>
@@ -177,7 +177,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                   type="button"
                   onClick={() => {
                     const body = encodeURIComponent(`De : ${form.name} (${form.email})\n\n${form.message}`);
-                    window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(
+                    window.location.href = `mailto:${CONTACT.email}?subject=${encodeURIComponent(
                       `Contact portfolio – ${form.name}`
                     )}&body=${body}`;
                   }}

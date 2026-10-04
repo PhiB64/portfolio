@@ -35,6 +35,12 @@
  *   d'une requête comme sa longueur.
  */
 
+// Unique dépendance du Worker envers le dépôt, et elle est volontaire : les
+// coordonnées du repli viennent de la même source que l'écran CONTACT du site.
+// Resolu au déploiement par esbuild, donc sans coût à l'exécution — le Worker
+// reste autonome et sans lecture réseau supplémentaire.
+import { CONTACT } from "../../lib/portfolio-content.js";
+
 /**
  * Point d'entrée de l'API Chat d'OpenRouter.
  *
@@ -126,8 +132,13 @@ Des dépôts GitHub peuvent suivre entre leurs propres marqueurs. Ils sont plus 
  * ferait ressortir l'ancienne version bien après la mise en ligne. Dix minutes
  * est un compromis : assez pour que le trafic normal ne déclenche qu'une requête
  * sur plusieurs, assez court pour qu'une correction apparaisse vite.
+ *
+ * En cas d'échec de lecture, on ne prolonge ce cache que d'une courte fenêtre
+ * (`DIGEST_RETRY_MS`) : cacher l'échec dix minutes rendrait une coupure
+ * transitoire invisible au monitoring pendant tout ce temps.
  */
 const DIGEST_TTL_MS = 10 * 60 * 1000;
+const DIGEST_RETRY_MS = 30 * 1000;
 
 /**
  * Cache du digest, au niveau du module donc de l'isolate.
@@ -189,10 +200,11 @@ async function getSiteDigest(env) {
     // On garde l'éventuelle valeur périmée plutôt que de tomber à vide, et on
     // trace pour que la panne soit visible dans les logs du Worker.
     console.error("Digest du site indisponible :", error?.message ?? error);
-    // `text` est volontairement conservé tel quel : une coupure de quelques
+    // Fenêtre de réessai courte, pas un TTL plein : une coupure de quelques
     // secondes après un déploiement laisse un digest encore pertinent, et mieux
-    // vaut un contenu légèrement ancien qu'un repli sans aucun détail.
-    digestCache = { text: digestCache.text, expiresAt: now + DIGEST_TTL_MS };
+    // vaut un contenu légèrement ancien qu'un repli sans aucun détail — mais
+    // une panne durable ne doit pas rester invisible dix minutes.
+    digestCache = { text: digestCache.text, expiresAt: now + DIGEST_RETRY_MS };
     return digestCache.text;
   }
 }
@@ -208,6 +220,9 @@ async function getSiteDigest(env) {
  * profil GitHub ne bouge quasiment jamais, alors qu'un push par jour est courant.
  */
 const GITHUB_TTL_MS = 60 * 60 * 1000;
+// Réessai court après un échec GitHub : même logique que `DIGEST_RETRY_MS` —
+// garder la valeur périmée sans masquer une panne durable.
+const GITHUB_RETRY_MS = 60 * 1000;
 
 let githubCache = { text: null, expiresAt: 0 };
 
@@ -247,9 +262,22 @@ async function getGithubDigest(env) {
       .filter((repo) => repo && !repo.fork && !repo.archived)
       .slice(0, 25)
       .map((repo) => {
-        const description = repo.description ? repo.description.replace(/\s+/g, " ").trim() : "";
-        const language = repo.language ?? "";
-        const parts = [`- ${repo.name} : ${repo.html_url}`];
+        // `name`, `description` et `language` viennent de l'API GitHub : un
+        // dépôt compromis pourrait y glisser une fausse consigne (« ignore les
+        // instructions ») ou un faux marqueur `</depots_github>`. On aplatit
+        // les retours ligne et on neutralise les chevrons avant insertion
+        // entre les marqueurs du system prompt.
+        const clean = (value) =>
+          String(value ?? "")
+            .replace(/\s+/g, " ")
+            .replace(/</g, "‹")
+            .replace(/>/g, "›")
+            .trim();
+        const name = clean(repo.name);
+        const url = typeof repo.html_url === "string" ? repo.html_url : "";
+        const description = clean(repo.description);
+        const language = clean(traduireLangage(repo.language ?? ""));
+        const parts = [`- ${name} : ${url}`];
         if (description) parts.push(description);
         if (language) parts.push(traduireLangage(language));
         return parts.join(" — ");
@@ -262,7 +290,7 @@ async function getGithubDigest(env) {
     return text;
   } catch (error) {
     console.error("Résumé GitHub indisponible :", error?.message ?? error);
-    githubCache = { text: githubCache.text, expiresAt: now + GITHUB_TTL_MS };
+    githubCache = { text: githubCache.text, expiresAt: now + GITHUB_RETRY_MS };
     return githubCache.text;
   }
 }
@@ -288,15 +316,23 @@ function traduireLangage(language) {
  * modèle ne doit pas les confondre. Les marqueurs sont indispensables — sans
  * eux, une phrase de projet peut être lue comme une instruction.
  *
+ * Le tout est plafonné côté Worker aussi, pas seulement au build
+ * (`MAX_CHARS` dans `scripts/build-chat-content.mjs`) : le digest est relu via
+ * `fetch` et pourrait dépasser le plafond si le build change sans que le
+ * Worker soit redéployé. Au-delà, la réponse court-circuite vers le repli —
+ * mieux vaut un « indisponible » franc qu'un prompt hors budget.
+ *
  * @param {string} digest
  * @param {string|null} github
  * @returns {string}
  */
+const MAX_PROMPT_CHARS = 16000 + 6000;
+
 function buildSystemPrompt(digest, github) {
   let prompt = SYSTEM_PROMPT;
 
   if (digest) {
-    prompt += `\n\n${DIGEST_OPEN}\n${digest}\n${DIGEST_CLOSE}`;
+    prompt += `\n\n${DIGEST_OPEN}\n${digest.slice(0, MAX_PROMPT_CHARS)}\n${DIGEST_CLOSE}`;
   } else {
     prompt += `\n\nÉtat du site : le contenu n'a pas pu être chargé. Dans ce cas, dis simplement au visiteur que le détail du portfolio est momentanément indisponible, propose-lui de réessayer dans quelques minutes, et oriente-le vers l'adresse de contact ci-dessus. N'invente aucun détail sur Philippe.`;
   }
@@ -314,15 +350,23 @@ function buildSystemPrompt(digest, github) {
  * Le format est celui d'OpenAI, donc `chat-widget.jsx` affiche ce texte exactement
  * comme celui du modèle : aucun traitement particulier côté front.
  *
+ * Les coordonnées viennent de `CONTACT`, dans `lib/portfolio-content.js` : même
+ * source que l'écran CONTACT et que le JSON-LD, donc une adresse en dur ici ne
+ * pouvait pas diverger des deux autres. L'import est résolu au déploiement —
+ * esbuild inline le bloc dans le bundle — donc le Worker n'a toujours rien à
+ * charger au moment de la requête. C'est le seul endroit où il lit le dépôt, et
+ * il ne peut le faire qu'au build : le repli s'affiche précisément quand le
+ * site est injoignable.
+ *
  * @returns {ReadableStream}
  */
 function fallbackStream() {
   const text =
     "Le détail du portfolio n'est pas disponible pour le moment, une coupure de liaison empêche " +
     "de le consulter. Je préfère te le dire plutôt que d'inventer. En attendant, tu peux écrire à " +
-    "Philippe à philippebarbosa64@gmail.com, ou regarder ses projets sur " +
-    "https://github.com/PhiB64 et son profil sur " +
-    "https://www.linkedin.com/in/philippe-barbosa/.";
+    `Philippe à ${CONTACT.email}, ou regarder ses projets sur ` +
+    `${CONTACT.githubUrl} et son profil sur ` +
+    `${CONTACT.linkedinUrl}.`;
 
   const encoder = new TextEncoder();
   const frame = (content, done) =>
@@ -377,9 +421,11 @@ function fallbackStream() {
  */
 async function consume(env, key) {
   if (!env.CHAT_LIMIT) {
-    // Binding absent (déploiement sans la config à jour) : on laisse passer
+    // Binding absent (déploiement sans la config à jour) : on trace l'anomalie
+    // pour qu'elle soit visible dans `npm run tail`, mais on laisse passer
     // plutôt que de couper le chat à tout le monde. Un quota qui n'a pas de
-    // rempart vaut mieux qu'un service en panne.
+    // rempart vaut mieux qu'un service en panne — à condition de le savoir.
+    console.error("CHAT_LIMIT absent : rate limiting inactif, redéployer avec wrangler.jsonc à jour.");
     return { ok: true };
   }
 
@@ -415,7 +461,9 @@ function allowedOrigins(env) {
  */
 function withCors(request, env, response) {
   const origin = request.headers.get("Origin");
-  // Requête sans Origin (curl, test de santé) : il n'y a pas de CORS à accorder.
+  // Requête sans Origin (curl, test de santé) : il n'y a ni navigateur ni
+  // CORS en jeu. On laisse passer sans en-tête plutôt que de rejeter : le
+  // contrôle porte sur les origines listées, pas sur l'absence d'origine.
   if (origin && allowedOrigins(env).includes(origin)) {
     response.headers.set("Access-Control-Allow-Origin", origin);
     response.headers.set("Vary", "Origin");
@@ -523,10 +571,12 @@ export default {
 
     // `CF-Connecting-IP` est posé par CloudEdge et n'est pas falsifiable par le
     // client, contrairement à `X-Forwarded-For` — c'est lui qui sert de clé
-    // de jauge. La taille du corps est vérifiée via l'en-tête avant même de lire
-    // le flux, pour ne pas engager de la mémoire sur une requête abusive.
+    // de jauge. La taille du corps est pré-vérifiée via l'en-tête pour rejeter
+    // vite les requêtes franchement abusives, puis re-vérifiée après lecture :
+    // l'en-tête est déclaratif et absent en `chunked`, donc seul le corps réel
+    // fait foi.
     const declaredLength = Number(request.headers.get("Content-Length") ?? "0");
-    if (declaredLength > LIMITS.maxBodyBytes) {
+    if (Number.isFinite(declaredLength) && declaredLength > LIMITS.maxBodyBytes) {
       return json(request, env, { error: "Requête trop volumineuse." }, 413);
     }
 
@@ -549,9 +599,23 @@ export default {
       return json(request, env, { error: "Corps de requête illisible." }, 400);
     }
 
+    // Seul le corps réel fait foi : `JSON.stringify` du corps parsé borne la
+    // taille effectivement reçue, quel que soit l'en-tête déclaré.
+    if (JSON.stringify(body)?.length > LIMITS.maxBodyBytes) {
+      return json(request, env, { error: "Requête trop volumineuse." }, 413);
+    }
+
     const messages = sanitizeMessages(body?.messages);
     if (!messages.ok) {
       return json(request, env, { error: messages.error }, 400);
+    }
+
+    // `fail-fast` clé API : sans elle, aucun appel ne peut aboutir. On échoue
+    // avant les `fetch` digest + GitHub pour ne pas consommer de quota ni
+    // masquer une erreur de configuration derrière un repli « indisponible ».
+    if (!env.OPENROUTER_API_KEY) {
+      console.error("OPENROUTER_API_KEY manquante sur le Worker.");
+      return json(request, env, { error: "Le service de discussion n'est pas configuré." }, 500);
     }
 
     // Le contenu du site est relu ici, et seulement ici : jusqu'ici la
@@ -589,11 +653,6 @@ export default {
     const systemPrompt = buildSystemPrompt(digest, github);
     // Le system prompt est reconstruit ici, jamais repris du client.
     const history = [{ role: "system", content: systemPrompt }, ...messages.messages];
-
-    if (!env.OPENROUTER_API_KEY) {
-      console.error("OPENROUTER_API_KEY manquante sur le Worker.");
-      return json(request, env, { error: "Le service de discussion n'est pas configuré." }, 500);
-    }
 
     // Un appel, un modèle, un flux. Le `signal` propage l'annulation : si le
     // visiteur ferme l'onglet, la requête amont est abandonnée au lieu de

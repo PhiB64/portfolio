@@ -36,8 +36,11 @@
     // valeurs publiques : elles peuvent rester dans le dépôt.
     //
     // `localhost:3000` permet de développer le site contre le Worker local
-    // (`npm run dev` dans worker/ → http://127.0.0.1:8787).
-    "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
+    // (`npm run dev` dans worker/ → http://127.0.0.1:8787). Il ne figure que
+    // dans `wrangler.local.jsonc` : la config de production n'autorise que le
+    // domaine déployé, sinon n'importe quel script local pourrait consommer
+    // le quota via le Worker déployé.
+    "ALLOWED_ORIGINS": "https://phib64.github.io",
 
     // Page d'attribution affichée par OpenRouter sur les appels faite avec la
     // clé du Worker. Valeurs publiques, versionnées avec le site : ce ne sont
