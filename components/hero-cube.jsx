@@ -3125,19 +3125,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         </div>
         <div className="absolute inset-0 bg-[#0a0f1c]/60" />
         <button
-          onClick={() => {
-            // « Accueil » : on rejoue le retour vers l'intro — le même geste que
-            // le bouton RETOUR. Un `location.reload()` était la solution
-            // précédente : il détruisait l'état, re-téléchargeait le bundle et
-            // repartait de zéro pour revenir au point de départ.
-            if (goToStartRef.current) {
-              goToStartRef.current();
-            } else if (sectionRef.current) {
-              sectionRef.current.scrollTop = 0;
-            }
-          }}
+          onClick={() => window.location.reload()}
           className="absolute top-3 left-3 z-30 sm:top-5 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
-          aria-label="Retour à l'accueil"
+          aria-label="Recharger la page"
         >
           <img
             src={`${BASE}/icon.webp`}
