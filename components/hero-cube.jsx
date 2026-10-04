@@ -8,9 +8,9 @@ import { renderProjectContent } from "./cube/project-content";
 import { ProjectTabs, BackButton, PROJECT_LINKS } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
 import {
-  CUBE_STEP_BOUNDS,
   FACE_LABELS,
   FACE_NORMALS,
+  FACE_ROTATIONS,
   FACES,
   LIGHT_DIR,
   computeWireframe,
@@ -40,6 +40,110 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const smoothstep = (t) => {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
+};
+
+// Plus court chemin signé de `a` vers `b`, sur (-180, 180]. Un tour entier ne
+// change rien à l'orientation : c'est ce qui permet de ramener n'importe quelle
+// pose sur un multiple de 360 sans que le cube bouge d'un pixel.
+const shortAngle = (deg) => ((deg % 360) + 540) % 360 - 180;
+
+// Index de la pose frontale que `rot` décrit exactement, ou -1. Une face n'est
+// carrée devant la caméra que sur l'une des six poses de `FACE_ROTATIONS` :
+// entre deux poses le cube est de biais, sur une arête. C'est la contrainte qui
+// gouverne le spin plus bas : montrer les six faces oblige à traverser les coins.
+const poseIndexOf = (rot) =>
+  FACE_ROTATIONS.findIndex((p) => p.rx === rot.rx && p.ry === rot.ry);
+
+// Plafond de parcours du spin, en degrés cumulés (longueur des lignes tracées en
+// (rx, ry)). Il ne sert pas à raccourcir le spin mais à l'égaliser : sans lui un
+// ordre qui relie deux faces par un quart de tour simple fait traverser l'angle en
+// un clin d'œil, et un ordre qui passe par les coins le fait payer en six temps.
+// La vitesse doit être la même d'un tirage à l'autre.
+const SPIN_TOUR_BUDGET = 780;
+
+const spinTourIsOpposite = (a, b) =>
+  FACE_ROTATIONS[a].rx === -FACE_ROTATIONS[b].rx &&
+  FACE_ROTATIONS[a].ry === -FACE_ROTATIONS[b].ry;
+
+// Tirage de la tournée du spin, une fois, à son entrée.
+//
+// Le cube quitte `from`, montre les cinq faces qu'il ne montre pas, dans un ordre
+// tiré au sort, puis revient sur la face avant : tout ce qui suit — le carré, la
+// ligne, les noms — est écrit pour un cube aligné, donc le retour n'est pas un
+// choix de mise en scène mais une contrainte.
+//
+// L'ordre est tiré parmi les seules permutations qui n'enchaînent jamais deux
+// faces opposées (un tour de 180° au lieu de ~127°), qui n'ouvrent pas la
+// tournée sur l'opposé de `from`, et dont le parcours total reste sous le plafond.
+// Il en reste assez pour que deux spins successifs ne se ressemblent pas, sans
+// qu'aucun ne sorte plus vite que les autres.
+//
+// Le tirage se fait ICI et non à chaque frame : un tirage par frame rebattrait la
+// cible à chaque image et le cube vibrerait sur place au lieu de voyager.
+const buildSpinTour = (from) => {
+  // Chaîne les poses du tirage en gardant un courant « levé ».
+  //
+  // Le levage est ce qui rend la suite CONTINUE. `shortAngle(180)` rend -180, et
+  // une face à ry = -180 est la même image qu'une face à ry = +180 — mais si le
+  // segment suivant repartait de la pose cible réinjectée (+180), les nombres
+  // sauteraient de 360° d'un palier à l'autre. À l'écran on ne verrait rien ; en
+  // revanche tout ce qui raisonne sur ces valeurs (vitesse, contrôle de
+  // continuité, détection de pose) verrait un à-coup de 360°. On additionne donc
+  // le delta au courant : la pose d'arrivée est exactement `courant + delta`, et
+  // le segment suivant en repart.
+  const chain = (order) => {
+    const steps = [];
+    let cur = { rx: from.rx, ry: from.ry };
+    for (const faceIndex of [...order, 0]) {
+      const target = FACE_ROTATIONS[faceIndex];
+      const drx = shortAngle(target.rx - cur.rx);
+      const dry = shortAngle(target.ry - cur.ry);
+      const len = Math.hypot(drx, dry);
+      steps.push({ rx: cur.rx, ry: cur.ry, drx, dry, len });
+      cur = { rx: cur.rx + drx, ry: cur.ry + dry };
+    }
+    return steps;
+  };
+  // Coût d'un ordre : la somme des distances angulaires de ses six transitions.
+  const costOf = (order) =>
+    chain(order).reduce((total, step) => total + step.len, 0);
+  const orders = [];
+  const walk = (rest, acc) => {
+    if (!rest.length) {
+      orders.push(acc);
+      return;
+    }
+    for (let i = 0; i < rest.length; i++) {
+      const next = rest[i];
+      if (acc.length && spinTourIsOpposite(acc[acc.length - 1], next)) continue;
+      walk(
+        rest.filter((x) => x !== next),
+        [...acc, next],
+      );
+    }
+  };
+  walk([1, 2, 3, 4, 5], []);
+  const startFace = poseIndexOf(from);
+  const usable = orders.filter(
+    (o) =>
+      costOf(o) <= SPIN_TOUR_BUDGET &&
+      // Ouvrir sur l'opposé de `from` coûterait un demi-tour d'entrée. `-1` veut
+      // dire que `from` n'est pas une pose exacte : dans ce cas on n'a rien à
+      // reprocher au premier tirage.
+      (startFace < 0 || !spinTourIsOpposite(startFace, o[0])),
+  );
+  // Repli : droite, fond, dessus, gauche, dessous — un ordre vérifié, sans
+  // opposées ni dépassement. Il ne sert que si `from` est une pose si rare
+  // qu'aucun tirage ne satisfait les filtres.
+  const order =
+    usable.length > 0
+      ? usable[Math.floor(Math.random() * usable.length)]
+      : [5, 3, 1, 2, 4];
+  // Chaque transition reçoit une part de fenêtre proportionnelle à sa longueur :
+  // la vitesse angulaire est donc constante de bout en bout. Le cube ne s'arrête
+  // sur aucune face et ne rattrape pas le dernier quart de tour.
+  const steps = chain(order);
+  return { steps, total: costOf(order) };
 };
 
 // Interpolation coordonnée par coordonnée entre deux chaînes de points SVG de
@@ -74,9 +178,8 @@ const DRAG_EASE_MS = 450;
 // trois lettres, la dernière se résout donc vers 625 ms, pas 1 s. C'est la
 // cadence de résolution qu'on ralentit, pas le délai d'attente — le décodage
 // démarre à l'exposition, sans latence.
-// L'alignement avec SKIP_LABEL_DECODE_MS (550 ms), longtemps justifié ici, est
-// rompu volontairement : c'est le label de face qui s'étire, celui du skip
-// garde son rythme. Une conséquence à connaître : le pointeur attend la FIN de
+// Le skip n'a plus de label décodeur : son 유일 label est celui de face, qui
+// s'étire sur 1 s. Une conséquence à connaître : le pointeur attend la FIN de
 // la tween (`onComplete`), il apparaît donc désormais à 1 s, bien après que le
 // mot est lisible — voir le commentaire dans la boucle de labels.
 const FACE_LABEL_DECODE_MS = 1000;
@@ -120,28 +223,6 @@ const FACE_LABEL_FONT_SCALE = 1.07;
 // que celui de `allSeenTwiceRef`, qui marque la fin de l'intro : labels et fin
 // d'intro tombent donc au même moment, par construction.
 const FACE_LABEL_REVEAL_COUNT = 2;
-// Chorégraphie du skip (balayage automatique des faces). Le label y rejoue le
-// même cycle codé -> décodé que les labels de face, mais calé sur le temps du
-// hold (1,5 s par face) et non sur le temps d'exposition : c'est la boucle rAF
-// qui tient la cadence, donc pas d'accumulateur ici, contrairement aux faces.
-// Les quatre constantes découpent un hold.
-const SKIP_HOLD_MS = 1500;
-// Fondu d'apparition : le cube doit avoir fini de se poser avant que le texte
-// se montre, sinon il apparaît pendant la rotation.
-const SKIP_LABEL_DELAY_MS = 100;
-// Phase « codée » : le label reste en brouillage continu, jamais résolu, avant de
-// partir en décodage. C'est l'état que le skip doit rendre lisible.
-const SKIP_LABEL_CIPHER_MS = 450;
-// Décodage : le brouillage se résout de gauche à droite sur cette durée.
-const SKIP_LABEL_DECODE_MS = 550;
-// Fondu de sortie avant la rotation suivante : sans lui le texte se rétrécit en
-// perspective pendant le tour, ce qui se lit comme un redimensionnement.
-const SKIP_LABEL_EXIT_MS = 200;
-// Instant (dans un hold) où le décodage est terminé : apparition, phase codée,
-// puis résolution. C'est exactement là que l'onglet de la face exposée se rend
-// visible pendant le skip — jamais avant, pour qu'il accompagne le label lisible.
-const SKIP_LABEL_READY_MS =
-  SKIP_LABEL_DELAY_MS + SKIP_LABEL_CIPHER_MS + SKIP_LABEL_DECODE_MS;
 // Icône de pointer : là où le texte d'accueil le demandait, le geste le montre.
 // Elle se pose sur la face dont le label se met à décoder — l'instant où le mot
 // devient lisible —, tape deux fois, puis s'efface. Un tir unique par
@@ -280,9 +361,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const [mediaRetracted, setMediaRetracted] = useState(false);
   const mediaRetractedRef = useRef(false);
   const skipRef = useRef(false);
-  // Start position (timeline units) of the skipped sequence, captured on the
-  // first skip frame so the gentle rotation begins exactly where we are.
-  const skipStartRef = useRef(0);
   const skipActiveRef = useRef(false);
   const skipRevealedFacesRef = useRef(skipRevealedFaces);
   // Once skipped, the faces fold away so the cube is visibly empty during the
@@ -291,6 +369,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // While the folding morph runs, the per-frame face loop leaves the wrapper
   // transforms alone so a single CSS transition can play through.
   const skipFoldRef = useRef(false);
+  // Pose exacte rendue à la frame précédente, drag compris. Sert de source à
+  // `skipRotRef` au déclenchement du skip.
+  const renderedRotRef = useRef({ rx: 0, ry: 0 });
+  // Pose gelée au déclenchement du skip, et pendant toute sa durée. C'est elle
+  // qui remplace la rotation lue dans le scroll.
+  const skipRotRef = useRef(null);
   const cubeScaleRef = useRef(1);
   const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
@@ -360,7 +444,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const namesRef = useRef(null);
   const subtitleRef = useRef(null);
   const facesVisibleRef = useRef(true);
-  const spinFromRef = useRef(null);
+  // Tournée du spin, tirée UNE fois à son entrée : les six transitions, chacune
+  // avec son angle et sa part de fenêtre. `null` tant que le spin n'a pas commencé,
+  // ce qui sert aussi de déclencheur au tirage.
+  const spinTourRef = useRef(null);
   const bgResetRef = useRef(true);
   // True tant que le fond est « vide » (couleur de base, sans visuel) ; remis
   // à false par toute révélation (changeBackground).
@@ -890,29 +977,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
       );
   }, [stopPointer]);
 
-  // Pendant le skip, le label de la gallery rejoue le cycle des labels de face :
-  // d'abord l'état « codé » (brouillage continu qui ne se résout jamais), puis
-  // le décodage. Même rendu, même police, seule la source du temps diffère.
-  const encodeGalleryLabel = (text) => {
-    const galleryLabel = galleryLabelRef.current;
-    if (!galleryLabel) return;
-    stopScramble(galleryScrambleTlRef.current);
-    galleryScrambleTlRef.current = scrambleLabel(galleryLabel, text, {
-      cipher: true,
-    });
-    galleryScrambleStateRef.current = "encoded";
-  };
-
-  const decodeGalleryLabel = (text) => {
-    const galleryLabel = galleryLabelRef.current;
-    if (!galleryLabel) return;
-    stopScramble(galleryScrambleTlRef.current);
-    galleryScrambleTlRef.current = scrambleLabel(galleryLabel, text, {
-      duration: SKIP_LABEL_DECODE_MS / 1000,
-    });
-    galleryScrambleStateRef.current = "decoded";
-  };
-
+  // Le skip n'écrit plus aucun label dans l'overlay : il se contente de le vider
+  // au démarrage et à la fin du sweep. L'overlay reste câblé parce que la
+  // finale s'y appuie pour poser les libellés.
   const stopGalleryScramble = () => {
     stopScramble(galleryScrambleTlRef.current);
     galleryScrambleTlRef.current = null;
@@ -1558,6 +1625,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
     let skipLate = false;
+    // Durée RÉELLE du repli de skip, recalculée à chaque déclenchement : le
+    // morphing ne paie que le repli, au lieu de brûler un budget fixe à traverser
+    // des segments de timeline vides. Voir le calcul dans le bloc de démarrage.
+    //
+    // Initialisée à 0, et NON à `SKIP_UNFOLD_MS` : la constante est déclarée plus
+    // bas dans cet effet, donc la lire ici tomberait dans la zone morte
+    // temporelle — un `let` n'existe qu'à partir de sa propre déclaration. 0 est
+    // de toute façon la valeur juste avant le premier skip, et le bloc de
+    // démarrage la remplace avant tout usage.
+    let skipUnfoldMs = 0;
     // Durées des séquences autonomes. Elles NE dépendent PAS de
     // `prefers-reduced-motion`, et c'est délibéré.
     //
@@ -1608,7 +1685,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // clic (SHOW+SPIN+TAIL) et la rotation de fin de skip (SPIN+TAIL). Du 6e
     // clic au dernier nom, mobile passe de ~14,8 s à ~9,9 s.
     const SHOW_MS = mobileScroll ? 3000 : 2600;
-    const SPIN_MS = mobileScroll ? 3700 : 3200;
+    const SPIN_MS = mobileScroll ? 4400 : 4000;
     const TAIL_MS = mobileScroll ? 2000 : 1800;
     const FINALE_MS = SHOW_MS + SPIN_MS + TAIL_MS;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
@@ -1645,27 +1722,26 @@ export function HeroCube({ title, subtitle, images = [] }) {
       elapsed -= SPIN_MS;
       return SPIN_END + (1 - SPIN_END) * Math.min(1, elapsed / TAIL_MS);
     };
-    // Skipped intro: faces come back out and each one is exposed frontally for
-    // a moment (roughly two seconds, label included), then the cube folds and
-    // the finale plays at its own readable pace.
+    // Skipped intro: the cube glides straight to the spin pose while its faces
+    // stay folded, then the finale plays at its own readable pace and reveals
+    // the names and links. The sweep shows no intermediate pose at all.
+    //
+    // Durée du repli carré → cube quand il reste tout l'intro à jouer. C'est le
+    // SEUL moment où le skip montre quoi que ce soit : cette durée est donc
+    // celle qui décide quand la première rotation arrive.
+    //
+    // Elle remplace les 3000 ms d'avant, calibrés quand le morphing PORTAIT
+    // l'arc : il faisait tourner le cube à travers les poses pour rejoindre le
+    // spin, et cette course continue demandait du temps. Il n'y a plus d'arc — la
+    // pose est gelée et les visuels restent repliés pendant tout le skip — donc
+    // ces 3000 ms ne payaient plus que du temps mort : le cube finissait de se
+    // déplier vers 500 ms, puis attendait ~2,2 s avant de tourner. Voir le
+    // commentaire du calcul, dans le bloc de démarrage du skip.
     //
     // Les durées du sweep NE dépendent PAS de `prefers-reduced-motion` :
     // réduire la durée sans réduire l'arc parcouru n'adoucit rien, ça
-    // accélère (même angle en moins de temps), et les mettre à zéro fige le
-    // cube sur chaque pose sans rotation entre les labels. Le
-    // re-brouillage continu n'est pas neutralisé sous `reduce` : il tourne
-    // jusqu'au décodage de chaque pose (cf. `scramble.js`), et la rotation
-    // garde son rythme normal, comme la finale.
-    const SKIP_MORPH_MS = 900;
-    // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
-    // bascule trop vite après l'apposition des onglets : la transition est
-    // allongée pour rester lisible sur un écran tactile. 800 ms était
-    // cependant encore 2x le desktop, pour la même raison que les budgets de
-    // fin ci-dessus : la lisibilité venait de l'easing par palier, qui
-    // n'existe plus. On revient à 500 ms.
-    const SKIP_TURN_MS = isMobileDevice() ? 500 : 400;
-    const SKIP_LEAD_MS = 400;
-    const SKIP_GAP_MS = 1100;
+    // accélère (même angle en moins de temps).
+    const SKIP_UNFOLD_MS = 1200;
     // Durée totale du finale de skip. Elle ne sert plus qu'àborner la séquence
     // entière : le minutage lui-même est porté par `runFinale`, qui donne au spin
     // son budget propre. SPIN_START + 1 est atteint en SPIN_MS + TAIL_MS.
@@ -1718,33 +1794,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const RESET_MORPH_END_MS =
       RESET_NAMES_MS + RESET_LINE_GROW_MS + RESET_MORPH_MS;
     const RESET_REVEAL_MS = RESET_MS - RESET_MORPH_END_MS;
-    // Poses (rotation units) the skip gallery lingers on, one per exposed face,
-    // computed from where the cube is when the sweep starts. `galleryFace` holds the
-    // matching face index: the palier boundaries are no longer evenly spaced (they
-    // follow the rotation arc), so a face can no longer be recovered by multiplying
-    // the position by 12 and taking the remainder.
-    let galleryRot = [];
-    let galleryFace = [];
-    let galleryDur = 0;
-    const gallerySetup = (start) => {
-      galleryRot = [];
-      galleryFace = [];
-      galleryDur = 0;
-      lastGalleryLabelTextRef.current = "";
-      stopGalleryScramble();
-      const startRot = Math.max(0, (start - INTRO_END) / CUBE_RANGE);
-      if (startRot <= CUBE_STEP_BOUNDS[5] + 1e-9) {
-        for (let k = 0; k < 6; k++) {
-          if (CUBE_STEP_BOUNDS[k] >= startRot - 1e-9) {
-            galleryRot.push(CUBE_STEP_BOUNDS[k]);
-            galleryFace.push(k);
-          }
-        }
-      }
-      if (galleryRot.length === 0) return;
-      const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
-      galleryDur = lead + galleryRot.length * (SKIP_HOLD_MS + SKIP_TURN_MS) - SKIP_TURN_MS;
-    };
 
     // Cache face DOM children once to avoid querySelector calls in the animation loop.
     const faceCache = Array.from({ length: 6 }, (_, i) => {
@@ -2246,9 +2295,37 @@ export function HeroCube({ title, subtitle, images = [] }) {
           tlAutoplayStartP = null;
           skipFrom = currentP;
           skipLate = currentP >= SPIN_START;
-          skipStartRef.current = skipLate
-            ? currentP
-            : Math.min(SPIN_START, Math.max(INTRO_END, currentP));
+          // Le morphing ne paie que ce qu'il a à montrer : le repli du carré en
+          // cube, et RIEN D'AUTRE.
+          //
+          // Le trajet complet va de `skipFrom` à SPIN_START, mais tout ce qui
+          // suit l'intro (`idle`, `showcase`, `facesOut`, `cubeFade`) est vide :
+          // aucune cible, aucune propriété animée. La tête traverse donc 9700 ms
+          // de timeline qui ne dessinent rien — et le cube, lui, ne tourne pas,
+          // puisque la pose est gelée pendant tout le skip. C'est ce que le
+          // morphing paidait, et c'était 2,2 s d'immobilité entre le repli et la
+          // première rotation.
+          //
+          // Ces segments étant inertes, on ne les PARCOURS pas : à la fin du
+          // repli, la tête saute directement sur SPIN_START et le spin démarre.
+          // Le saut est invisible par construction — il n'y a rien à anime entre
+          // les deux points.
+          //
+          // Le repli est donc borné à `SKIP_UNFOLD_MS`, au prorata de ce qu'il en
+          // reste. Un skip au premier pixel joue ~1,2 s de repli et enchaîne
+          // aussitôt ; un skip déclenché après l'intro n'a plus rien à montrer et
+          // part directement au spin.
+          skipUnfoldMs = skipLate
+            ? 0
+            : (Math.max(0, INTRO_END - skipFrom) / INTRO_END) * SKIP_UNFOLD_MS;
+          // Gel de la pose : on prend exactement ce qui est à l'écran, drag
+          // compris. `renderedRotRef` n'est réécrit qu'en fin de frame, donc il
+          // contient encore la pose de la frame précédente — celle qui est
+          // effectivement affichée. Aucun à-coup au déclenchement.
+          skipRotRef.current = {
+            rx: renderedRotRef.current.rx,
+            ry: renderedRotRef.current.ry,
+          };
           // During the whole sweep the cube stays blank: the media stay folded
           // away (scale 0), only the labels show up as each face turns frontally.
           for (let i = 0; i < 6; i++) {
@@ -2260,163 +2337,54 @@ export function HeroCube({ title, subtitle, images = [] }) {
             cached.wrapper.style.maskImage = "";
             cached.wrapper.style.webkitMaskImage = "";
           }
-          // Labels are handed over to the gallery: none at the very start, only
-          // the frontally exposed face once the morph is over.
+          // Le skip ne montre plus les faces une à une : aucun label n'est
+          // confié à l'overlay, et les onglets restent révélés par la seule
+          // finale. On neutralise donc tout ce qui pourrait trainer d'un skip
+          // précédent avant de replier les faces.
           for (let i = 0; i < 6; i++) {
             const label = clickLabelRefs.current[i];
             if (label) label.style.opacity = "0";
-            stopFaceScramble(i);
-          }
-          skipFoldRef.current = true;
-          skipFacesHiddenRef.current = true;
-          gallerySetup(skipStartRef.current);
-        }
-        autoplayElapsed += dt;
-        const start = skipStartRef.current;
-        if (skipLate) {
-          skipFoldRef.current = false;
-          skipFacesHiddenRef.current = true;
-          currentP = runFinale(skipFrom, autoplayElapsed);
-        } else if (autoplayElapsed < SKIP_MORPH_MS) {
-          // Morphing first: glide from the current position up to the cube pose
-          // while the faces unfold, so the sweep is never a visual jump.
-          if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
-          currentP = skipFrom + (start - skipFrom) * smoothstep(autoplayElapsed / SKIP_MORPH_MS);
-        } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur) {
-          // Gallery: settle on each face so it stares frontally two seconds,
-          // only its label visible, with a short spin between two exposures.
-          const galT = autoplayElapsed - SKIP_MORPH_MS;
-          const startRot = (start - INTRO_END) / CUBE_RANGE;
-          const lead = startRot < galleryRot[0] - 1e-9 ? SKIP_LEAD_MS : 0;
-          const SEG = SKIP_HOLD_MS + SKIP_TURN_MS;
-          let galP;
-          let labelIdx = -1;
-          let labelReady = false;
-          if (galT < lead) {
-            galP = startRot + (galleryRot[0] - startRot) * smoothstep(galT / lead);
-          } else {
-            const t = galT - lead;
-            const j = Math.min(galleryRot.length - 1, Math.floor(t / SEG));
-            const loc = t - j * SEG;
-            if (loc < SKIP_HOLD_MS) {
-              galP = galleryRot[j];
-              // The label fades in only once the cube has fully settled, and
-              // fades out again before the next turn so it never stays visible
-              // while the cube rotates (which reads as the text shrinking).
-              const labelOn = loc >= SKIP_LABEL_DELAY_MS && loc < SKIP_HOLD_MS - SKIP_LABEL_EXIT_MS;
-              labelIdx = labelOn ? galleryFace[j] : -1;
-              // Le label n'est « montrable » qu'une fois son décodage terminé :
-              // l'onglet correspondant ne se révèle qu'à ce moment précis. En
-              // pose directe (mobile ou `prefers-reduced-motion`), pas de
-              // décodage : l'onglet se révèle avec le label, dès son apparition.
-              labelReady =
-                labelOn &&
-                (reduceMotion() || isMobileDevice() || loc >= SKIP_LABEL_READY_MS);
-            } else if (j < galleryRot.length - 1) {
-              const tt = SKIP_TURN_MS > 0
-                ? smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS))
-                : 1;
-              galP = galleryRot[j] + (galleryRot[j + 1] - galleryRot[j]) * tt;
-              labelIdx = -1;
-            } else {
-              galP = galleryRot[j];
-            }
-          }
-          if (labelReady && !skipRevealedFacesRef.current[labelIdx]) {
-            const next = [...skipRevealedFacesRef.current];
-            next[labelIdx] = true;
-            skipRevealedFacesRef.current = next;
-            setSkipRevealedFaces(next);
-          }
-          currentP = INTRO_END + galP * CUBE_RANGE;
-          // During the sweep the labels never live inside the 3D faces: a GPU
-          // re-raster of a face right after a turn would re-size the text. They
-          // are instead drawn by a stable 2D overlay aligned on the cube center.
-          const galleryLabel = galleryLabelRef.current;
-          if (galleryLabel) {
-            const wantText = labelIdx >= 0 ? FACE_LABELS[labelIdx] : "";
-            galleryLabel.style.opacity = labelIdx >= 0 ? "1" : "0";
-            if (wantText !== lastGalleryLabelTextRef.current) {
-              lastGalleryLabelTextRef.current = wantText;
-              // Nouvelle face : le compteur repart de zéro et le label réentre en
-              // état « codé ». Sur mobile ou sous `prefers-reduced-motion`,
-              // pas de brouillage sur le skip : le texte est posé directement
-              // via `textContent` (`stopGalleryScramble` coupe la boucle
-              // éventuelle puis vide le label). La rotation, elle, garde son
-              // rythme normal : réduire la durée sans réduire l'arc
-              // l'accélérerait au lieu de l'adoucir.
-              galleryExposureElapsedRef.current = 0;
-              if (wantText === "") {
-                stopGalleryScramble();
-              } else if (reduceMotion() || isMobileDevice()) {
-                stopGalleryScramble();
-                galleryLabel.textContent = wantText;
-              } else {
-                encodeGalleryLabel(wantText);
-              }
-            }
-          }
-          // Tant que le label est « codé », on cumule son temps d'exposition et
-          // on déclenche le décodage une fois le délai écoulé, comme pour les
-          // labels de face. Le texte est donc lisible avant le fondu de sortie.
-          // Sur mobile ou sous `prefers-reduced-motion`, pas de décodage sur
-          // le skip : l'état reste « none » (texte posé directement
-          // ci-dessus), ce bloc ne se déclenche pas. Si le réglage s'active en
-          // cours de hold (état « encoded » déjà armé), on rabat sur le texte
-          // direct plutôt que de décoder.
-          if (labelIdx >= 0 && galleryScrambleStateRef.current === "encoded") {
-            if (reduceMotion() || isMobileDevice()) {
-              stopGalleryScramble();
-              galleryLabel.textContent = FACE_LABELS[labelIdx];
-            } else {
-              galleryExposureElapsedRef.current += dt;
-              if (galleryExposureElapsedRef.current >= SKIP_LABEL_CIPHER_MS) {
-                decodeGalleryLabel(FACE_LABELS[labelIdx]);
-              }
-            }
-          }
-          for (let i = 0; i < 6; i++) {
-            const label = clickLabelRefs.current[i];
-            if (label) label.style.opacity = "0";
-            stopFaceScramble(i);
-          }
-        } else if (autoplayElapsed < SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS) {
-          // Fold every face away again while the playhead eases up to the spin.
-          // skipFoldRef stays true so the render loop lets the transition play.
-          for (let i = 0; i < 6; i++) {
-            const cached = faceCache[i];
-            if (!cached?.wrapper) continue;
-            if (cached.wrapper.style.transform !== "scale(0)") {
-              cached.wrapper.style.transform = "scale(0)";
-            }
-            cached.wrapper.style.maskImage = "";
-            cached.wrapper.style.webkitMaskImage = "";
-          }
-          for (let i = 0; i < 6; i++) {
-            if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
             stopFaceScramble(i);
           }
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
           lastGalleryLabelTextRef.current = "";
           stopGalleryScramble();
-          const gapK = SKIP_GAP_MS > 0
-            ? smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS)
-            : 1;
-          const galEnd = galleryRot.length > 0
-            ? INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE
-            : start;
-          currentP = galEnd + (SPIN_START - galEnd) * gapK;
+          skipFoldRef.current = true;
+          skipFacesHiddenRef.current = true;
+        }
+        autoplayElapsed += dt;
+        if (skipLate) {
+          skipFoldRef.current = false;
+          skipFacesHiddenRef.current = true;
+          currentP = runFinale(skipFrom, autoplayElapsed);
+        } else if (autoplayElapsed < skipUnfoldMs) {
+          // Repli : le carré devient le cube, et c'est tout ce que le skip
+          // montre. La tête va de `skipFrom` à INTRO_END en `skipUnfoldMs`, puis
+          // le finale la prend à SPIN_START — le saut d'INTRO_END à SPIN_START
+          // traverse des segments vides, donc ne dessine rien.
+          // skipFoldRef reste vrai : les visuels restent repliés pendant tout le
+          // repli, ils n'apparaissent pas même une frame.
+          //
+          // Vitesse CONSTANTE, sans `smoothstep`, dont la dérivée est nulle à
+          // l'arrivée : le cube décélérait sur ses dernières centaines de ms et
+          // s'arrêtait net avant de tourner. Il n'y a plus de pose de scroll à
+          // adoucir ici, donc il ne restait que ce défaut.
+          const unfoldK = Math.min(1, autoplayElapsed / skipUnfoldMs);
+          currentP = skipFrom + (INTRO_END - skipFrom) * unfoldK;
         } else {
           // Finale (spin, line, name) at its own steady pace on the blank cube.
+          // C'est ici que les textes et les onglets apparaissent. Le spin est
+          // déjà amorcé sur sa toute première frame : `runFinale(SPIN_START, 0)`
+          // rend SPIN_START, et la branche du spin s'ouvre à `tlP > SPIN_START`.
           skipFacesHiddenRef.current = true;
           skipFoldRef.current = false;
-          currentP = runFinale(SPIN_START, autoplayElapsed - SKIP_MORPH_MS - galleryDur - SKIP_GAP_MS);
+          currentP = runFinale(SPIN_START, autoplayElapsed - skipUnfoldMs);
         }
         const sbNow = el.scrollHeight - el.offsetHeight;
         if (sbNow > 0) el.scrollTop = currentP * sbNow;
         const skipDuration = skipLate
           ? SKIP_FINALE_MS
-          : SKIP_MORPH_MS + galleryDur + SKIP_GAP_MS + SKIP_FINALE_MS;
+          : skipUnfoldMs + SKIP_FINALE_MS;
         if (autoplayElapsed >= skipDuration) {
           currentP = 1;
           targetP = 1;
@@ -2426,9 +2394,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           skipLate = false;
           skipFoldRef.current = false;
           skipFacesHiddenRef.current = false;
-          galleryRot = [];
-          galleryFace = [];
-          galleryDur = 0;
+          skipRotRef.current = null;
           // La mesure de recul repart de l'arrivée réelle. Pendant TOUT le sweep,
           // `sync` sort en tête (skip actif) et n'a donc jamais ré-ancré
           // `reverseAnchor` : laissée à sa valeur initiale, elle vaut 0 et
@@ -2598,7 +2564,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
           ? Math.min(cubeP, ROT_END)
           : lockedCubeP
         : cubeP;
-      let rot = getCubeRotation(baseP);
+      // Pendant le skip, la base n'est plus lue dans le scroll : le cube garde
+      // la pose gelée à son déclenchement, et le morphing ne joue plus que le
+      // scale et le fondu des visuels. La position de scroll continue pourtant
+      // d'avancer — la tête de timeline s'en sert encore — mais elle ne commande
+      // plus l'orientation. Le spin reste le SEUL segment qui fait tourner le
+      // cube, ce qui retire du même coup les quarts de tour parasites que le
+      // glissement de scroll luirait.
+      let rot =
+        skipActiveRef.current && skipRotRef.current
+          ? { rx: skipRotRef.current.rx, ry: skipRotRef.current.ry }
+          : getCubeRotation(baseP);
       // `spinning` ne passe à vrai qu'au spin à vide, celui qui replie les
       // visuels : la showcase tourne avec les images déployées et garde donc
       // `spinning` à faux. C'est ce qui évite que le branchement de rendu plus
@@ -2625,46 +2601,38 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // le spin les replie. C'est `showcasing` qui distingue les deux.
       }
       if (unlocked && tlP > SPIN_START) {
-        if (spinFromRef.current === null) {
+        if (spinTourRef.current === null) {
           // Le spin part de la pose acquise (fin de showcase ou `lockedCubeP`)
-          // et non d'une valeur reventilée : la reprise est donc invisible.
-          spinFromRef.current = rot;
+          // et non d'une valeur reventilée : la reprise est donc invisible. La
+          // tournée est tirée ICI, une fois pour tout le spin — voir
+          // `buildSpinTour`.
+          spinTourRef.current = buildSpinTour(rot);
         }
-        const from = spinFromRef.current;
-        const k = Math.min(1, (tlP - SPIN_START) / (SPIN_END - SPIN_START));
-        // Vitesse CONSTANTE dans chaque palier, sans `smoothstep`. L'easing par
-        // palier était la vraie cause du « toujours trop rapide » : il repart de
-        // zéro à chaque frontière de segment, donc le cube accélère, décélère,
-        // repart — quatre fois de suite. Le mouvement se lisait comme une suite
-        // de à-coups quelle que soit la durée totale, ce qui explique que les
-        // quatre commits « ralentit les rotations finales » n'aient rien changé
-        // de visible : ils allongeaient un budget sans toucher à ce profil.
-        // Ici la dérivée est plate : la seule sensation de vitesse est celle de
-        // `SPIN_MS`.
-        const seg = (start, end) => Math.min(1, Math.max(0, (k - start) / (end - start)));
-        // Quatre paliers de 90° alternés Y-X-Y-X sur les 60% de la fenêtre, et
-        // non quatre paliers de 180° sur 80% : le cube fait une révolution au
-        // lieu de deux, et chaque palier est deux fois plus court.
-        const SPIN_STEP = 90;
-        const ryTurn = (seg(0, 0.15) + seg(0.3, 0.45)) * SPIN_STEP;
-        const rxTurn = (seg(0.15, 0.3) + seg(0.45, 0.6)) * SPIN_STEP;
-        const ryMid = from.ry + ryTurn;
-        const rxMid = from.rx + rxTurn;
-        // Le placement final ramène chaque axe sur le multiple de 360 le plus
-        // proche. Son amplitude dépend du nombre de tours qui précèdent : à quatre
-        // tours de 180°, l'écart accumulé atteignait ~450°, et il était serré
-        // dans les 20% de fenêtre les plus courts — c'est de là que venait le
-        // à-coup final. Deux choses le calment : une révolution au lieu de deux
-        // laisse l'écart bien plus faible, et il dispose maintenant des 40%
-        // restants. Les deux gardent la pose d'arrivée sur (0, 360).
-        const ryMod = ((ryMid % 360) + 360) % 360;
-        const rxMod = ((rxMid % 360) + 360) % 360;
-        const ry = ryMid + ((360 - ryMod) % 360) * seg(0.6, 1);
-        const rx = rxMid - rxMod * seg(0.6, 1);
-        rot = { rx, ry };
+        const tour = spinTourRef.current;
+        const k = Math.min(1, Math.max(0, (tlP - SPIN_START) / (SPIN_END - SPIN_START)));
+        // On parcourt la tournée à vitesse angulaire constante : la distance
+        // totale est convertie en distance parcourue, puis chaque transition est
+        // traversée dans une part de fenêtre PROPORTIONNELLE à sa longueur.
+        //
+        // C'est ce qui supprime les à-coups. Un découpage en paliers de durée
+        // égale donnait à chaque face la même part de temps quel que soit l'angle
+        // à couvrir : un quart de tour simple et une traversée de coin en sortaient
+        // tous deux en 1/6 de fenêtre, donc la vitesse changeait à chaque
+        // frontière — six accélérations et six ralentissements. C'était la vraie
+        // cause des quatre commits « ralentit les rotations finales » sans effet :
+        // ils allongeaient un budget sans toucher à ce profil.
+        let remaining = tour.total * k;
+        let i = 0;
+        while (i < tour.steps.length - 1 && remaining > tour.steps[i].len) {
+          remaining -= tour.steps[i].len;
+          i++;
+        }
+        const step = tour.steps[i];
+        const t = step.len > 0 ? remaining / step.len : 1;
+        rot = { rx: step.rx + step.drx * t, ry: step.ry + step.dry * t };
         spinning = true;
       } else {
-        spinFromRef.current = null;
+        spinTourRef.current = null;
       }
       // `showcasing` couvre le tour où le cube tourne AVEC les six visuels
       // déployés, `spinning` celui où il tourne à vide. Le rendu des faces en
@@ -2692,10 +2660,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // face au spectateur. L'offset s'éteint donc progressivement sur le morph
       // d'entrée du skip et reste nul pendant toute la parade.
       if (skipActiveRef.current) {
-        const k = Math.min(1, autoplayElapsed / SKIP_MORPH_MS);
-        const ease = 1 - k * k * (3 - 2 * k);
-        dragRx *= ease;
-        dragRy *= ease;
+        if (skipRotRef.current) {
+          // La pose gelée a été capturée APRÈS application du drag, qui est donc
+          // déjà dedans : le rejouer ici le compterait deux fois. La pose reste
+          // figée, et c'est bien ce qu'on veut.
+          dragRx = 0;
+          dragRy = 0;
+        } else {
+          const k = Math.min(1, autoplayElapsed / skipUnfoldMs);
+          const ease = 1 - k * k * (3 - 2 * k);
+          dragRx *= ease;
+          dragRy *= ease;
+        }
       }
       // Reprise du scroll après un drag : l'offset de rotation s'estompe vers
       // zéro pendant le défilement pour réaligner faces et labels sur la piste.
@@ -2723,6 +2699,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
         ry: rot.ry + dragRy,
       };
       cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
+      // Pose réellement à l'écran, drag inclus : c'est celle que le skip gèle à
+      // son déclenchement. Écrit ici, en fin de frame, pour que la frame suivante
+      // y lise la pose précédente — celle qui est affichée.
+      renderedRotRef.current.rx = rot.rx;
+      renderedRotRef.current.ry = rot.ry;
       currentPRef.current = baseP;
 
       // Only recompute wireframe geometry when rotation changes by a visible amount.
@@ -2937,6 +2918,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       skipLate = false;
       skipFoldRef.current = false;
       skipFacesHiddenRef.current = false;
+      skipRotRef.current = null;
       clickStackRef.current = [];
       allClickedRef.current = false;
       wasUnlockedRef.current = false;
@@ -2967,7 +2949,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       dragOffsetRef.current = { rx: 0, ry: 0 };
       dragEaseResetRef.current = false;
       dragEaseStartRef.current = 0;
-      spinFromRef.current = null;
+      spinTourRef.current = null;
       bgResetRef.current = true;
       bgBaseRef.current = false;
       bgIsVideoRef.current = false;
