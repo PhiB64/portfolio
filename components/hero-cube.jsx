@@ -67,10 +67,31 @@ const SNAP_THRESHOLD = 0.0005;
 // sauter d'un coup.
 const DRAG_EASE_MS = 450;
 // Durée du décodage d'un label de face : le brouillage se résout de gauche à
-// droite sur ce temps. Aligné sur SKIP_LABEL_DECODE_MS — à 1 s le label mettait
-// presque deux fois plus longtemps à se résoudre que pendant le skip, pour le
-// même rendu.
-const FACE_LABEL_DECODE_MS = 500;
+// droite sur ce temps.
+// 1000 ms. La durée est celle de la TWEEN, pas le moment où le texte devient
+// lisible : chaque lettre porte un seuil (cf. `scrambleLabel`) et l'étiquette
+// n'est déchiffrée qu'au-delà de la moitié de `state.c`. Sur un libellé de
+// trois lettres, la dernière se résout donc vers 625 ms, pas 1 s. C'est la
+// cadence de résolution qu'on ralentit, pas le délai d'attente — le décodage
+// démarre à l'exposition, sans latence.
+// L'alignement avec SKIP_LABEL_DECODE_MS (550 ms), longtemps justifié ici, est
+// rompu volontairement : c'est le label de face qui s'étire, celui du skip
+// garde son rythme. Une conséquence à connaître : le pointeur attend la FIN de
+// la tween (`onComplete`), il apparaît donc désormais à 1 s, bien après que le
+// mot est lisible — voir le commentaire dans la boucle de labels.
+const FACE_LABEL_DECODE_MS = 1000;
+// Marge de rétention de la face décodée, en « exposition » (composante z de la
+// normale après rotation, cf. `faceFrontAmount`). Près d'une vue de coin, les
+// expositions de deux faces se croisent à ~0,025 par degré de rotation : sans
+// marge, l'argmax changerait de camp au moindre jitter de scroll ou de drag et
+// les deux labels se re-coderaient sans arrêt, sur des faces qu'aucun ne
+// distingue. La détentrice ne cède donc qu'à un rival qui la dépasse franchement.
+// 0,02 absorbe ~0,8° de rotation, soit ~3 px de scroll — large devant le bruit
+// d'un trackpad. Et le handover réel n'en sufferte pas : une face doit
+// dépasser de 0,02 pour prendre le relais, donc ~0,8° de rotation de plus, sur
+// une piste qui en parcourt 1080°. Au repos la marge n'est même pas engagée,
+// le cube étant épinglé sur une pose nette (exposition 1,000 contre 0,000).
+const FRONT_FACE_HYSTERESIS = 0.02;
 // Facteur de projection perspective : une face frontale (translateZ 150px, cube
 // 300px) sous une perspective de 1200px est rendue 1200/(1200-150) = 8/7 plus
 // grande que l'overlay 2D. C'est l'échelle qu'il faut au label du skip pour
@@ -286,6 +307,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const orientationLockRef = useRef(null);
   const galleryLabelRef = useRef(null);
   const faceScrambleTlRef = useRef([]);
+  // Quatre états : "none" (label pas encore révélé) -> "encoded" (brouillage
+  // continu) -> "decoding" (résolution en cours) -> "decoded" (texte entier).
+  // "decoding" et "decoded" sont distincts parce que "decoded" sert de porte
+  // d'entrée : une face n'est cliquable que lorsque son nom est déchiffré
+  // (cf. `hitTestAndOpen`).
   const faceScrambleStateRef = useRef(["none", "none", "none", "none", "none", "none"]);
   const galleryScrambleTlRef = useRef(null);
   // Même machine à trois états que les labels de face ("none" -> "encoded" ->
@@ -300,6 +326,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const faceWasVisibleRef = useRef([false, false, false, false, false, false]);
   const faceVisibilityCountRef = useRef([0, 0, 0, 0, 0, 0]);
   const faceExposureElapsedRef = useRef([0, 0, 0, 0, 0, 0]);
+  // Visibilité des six faces pour la frame en cours. La boucle de labels a
+  // besoin de la connaître avant de décider, et le cube en expose trois d'un
+  // coup : la phase de lecture (« qui expose qui ») est donc séparée de la phase
+  // d'écriture (« qui se met à jour »), qui sinon n'aurait pas encore les
+  // données de ses propres faces. Un tableau de ref plutôt qu'une allocation par
+  // frame, cette boucle tournant à 60 Hz.
+  const faceVisibleRef = useRef([false, false, false, false, false, false]);
+  // Face qui détient le décodage, et qui ne le rend qu'à un rival franchement
+  // plus exposé (`FRONT_FACE_HYSTERESIS`). `-1` = personne.
+  const frontFaceRef = useRef(-1);
   const clickLabelRefs = useRef([]);
   // Icône de pointer : le conteneur porte l'entrée et la sortie, le glyphe le
   // geste (il s'abaisse à chaque tape), l'anneau l'onde qui part du clic.
@@ -695,11 +731,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
   };
 
   // Remet le label à l'état « codé » : brouillage continu, jamais résolu.
-  // C'est l'animation visible entre deux expositions et pendant le délai
-  // avant décodage. Sous `prefers-reduced-motion`, `scrambleLabel` en mode
-  // `cipher` rend une image fixe et renvoie `null` (pas de boucle infinie) :
-  // le label reste brouillé sans scintiller, puis le décodage borné
-  // (`decodeFaceLabel`, ~0,5 s) suit son cours normal. `stopScramble`
+  // C'est l'animation visible sur toutes les faces tant qu'elles ne sont pas la
+  // plus exposée, et sur celle-ci avant que le décodage ne prenne. Sous
+  // `prefers-reduced-motion`, `scrambleLabel` en mode `cipher` rend une image
+  // fixe et renvoie `null` (pas de boucle infinie) : le label reste brouillé
+  // sans scintiller, puis le décodage borné (`decodeFaceLabel`, ~1 s) suit son
+  // cours normal. `stopScramble`
   // (`if (tl) tl.kill()`), `stopFaceScramble` (restaure aussi sur `null`) et
   // le `?.eventCallback` du tick l'acceptent déjà.
   const encodeFaceLabel = (i) => {
@@ -712,16 +749,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
     });
   };
 
-  // Décodage (~0,55 s) : le brouillage se résout de gauche à droite vers le
-  // texte final. Ne se déclenche qu'après une exposition continue d'1 s.
+  // Décodage (~1 s) : le brouillage se résout de gauche à droite vers le texte
+  // final. Démarre dès l'exposition, sans latence — il existait ici un délai
+  // d'une seconde, supprimé quand il a été ramené à 0 ; la seconde qui figure
+  // désormais dans la durée est celle de la TWEEN, pas une attente.
+  // Renvoie la timeline créée, ou `null` si le label n'est pas monté. L'appelant
+  // s'en sert pour n'accrocher son `onComplete` que sur un vrai décodage :
+  // accroché à la timeline précédente (boucle `cipher`, `repeat: -1`, qui
+  // n'achève jamais), le passage à l'état « decoded » ne se ferait plus.
   const decodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
-    if (!el) return;
+    if (!el) return null;
     stopScramble(faceScrambleTlRef.current[i]);
     faceScrambleTlRef.current[i] = undefined;
     faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
       duration: FACE_LABEL_DECODE_MS / 1000,
     });
+    return faceScrambleTlRef.current[i];
   };
 
   // Retrait immédiat de l'icône, sans fondu : au démontage, au clic sur une face
@@ -1003,9 +1047,21 @@ export function HeroCube({ title, subtitle, images = [] }) {
       cubeScaleRef.current,
     );
     if (idx >= 0 && faceImages[idx] && facesVisibleRef.current) {
-      const labelShown = faceVisibilityCountRef.current[idx] >= FACE_LABEL_REVEAL_COUNT;
+      // Une face n'est cliquable que décodée : l'état « decoded » n'est atteint
+      // qu'à la fin de la tween de décodage, quand le libellé est entièrement
+      // résolu. « decoding » (décodage en cours) et « encoded » (brouillage)
+      // sont donc refusés, de même que « none » (label pas encore révélé).
+      // L'ancien test — deux expositions, `FACE_LABEL_REVEAL_COUNT` — ne
+      // garantissait que l'APPARITION du label : la face était cliquable dès
+      // la première image de brouillage.
+      // La gate est plus faible qu'elle ne paraît : le décodage ne démarre
+      // qu'une fois `labelRevealed(i)`, donc « decoded » implique le seuil
+      // d'expositions, qu'on n'a plus besoin de vérifier.
+      // Une face déjà ouverte reste cliquable même sans son label (il est
+      // masqué au clic) : `mediaShown` couvre ce cas.
+      const decoded = faceScrambleStateRef.current[idx] === "decoded";
       const mediaShown = zoomedFacesRef.current[idx];
-      if (labelShown || mediaShown) handleFaceClick(idx);
+      if (decoded || mediaShown) handleFaceClick(idx);
     }
   }, [handleFaceClick, faceImages]);
 
@@ -1053,11 +1109,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
         }
       }
       if (best < 0) return;
-      // Même garde que le hit-test au pointeur : une face ne s'ouvre qu'une
-      // fois son label révélé ou son média déjà exposé.
-      const labelShown = faceVisibilityCountRef.current[best] >= FACE_LABEL_REVEAL_COUNT;
+      // Même garde que le hit-test au pointeur : une face ne s'ouvre que
+      // décodée, ou si son média est déjà exposé. Les deux chemins de clic
+      // doivent partager la condition, sinon le tapourtourne la porte que le
+      // hit-test oppose.
+      const decoded = faceScrambleStateRef.current[best] === "decoded";
       const mediaShown = zoomedFacesRef.current[best];
-      if (labelShown || mediaShown) handleFaceClick(best);
+      if (decoded || mediaShown) handleFaceClick(best);
     },
     [faceImages, handleFaceClick],
   );
@@ -1816,6 +1874,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // la position à l'autoplay, qui la pilotait déjà.
     };
 
+    // Le label d'une face est-il autorisé à s'afficher ? Deux conditions, et
+    // elles sont lues à deux endroits de la même frame — d'abord pour désigner
+    // la face la plus exposée, ensuite pour tenir la machine à états. Passé ici
+    // pour n'avoir qu'une définition : elles doivent rester d'accord, sinon la
+    // face désignée pourrait être une face muette.
+    // `mediaRetracted` fait exception : après la fin, le repli des visuels
+    // redonne les labels même aux faces déjà ouvertes.
+    const labelRevealed = (i) =>
+      faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT &&
+      (!zoomedFacesRef.current[i] || mediaRetractedRef.current);
+
     const tick = (now) => {
       // Le drag, le clic sur une face et le relâchement du pointeur appellent
       // `tick` sans timestamp. `now` y vaut alors `undefined`, `dt` devient NaN,
@@ -1981,10 +2050,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
         return;
       }
 
-      // Le brouillage apparaît à la seconde visibilité : le label reste « codé »
-      // pendant LABEL_DECODE_DELAY_MS d'exposition, puis se résout. À 0, le
-      // décodage démarre dès la première frame. Dès que la face n'est plus
-      // exposée, le compte repart de zéro.
+      // Qui se décode : seule la face la plus exposée à l'utilisateur. Les
+      // autres restent visibles, mais en brouillage continu — c'est le codage qui
+      // se poursuit, pas le décodage.
       // Frozen during the auto sweep: there the labels are driven solely by the
       // gallery, otherwise they would light up mid-rotation.
       // This runs before the rotation for this frame is resolved, so it reads
@@ -1999,76 +2067,152 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // face qui sort de vue rend un compte — pour que les labels se re-codent
         // et soient re-découverts au prochain passage avant.
         const rewinding = diff < 0;
+        const nowVisible = faceVisibleRef.current;
+
+        // Phase de lecture. Le cube en expose trois d'un coup : dire laquelle est
+        // la plus exposée demande de les avoir toutes mesurées, alors que la
+        // machine à états se joue face par face. D'où les deux passes — on
+        // désigne d'abord, on n'écrit qu'ensuite.
+        let bestIndex = -1;
+        let bestAmount = -Infinity;
         for (let i = 0; i < 6; i++) {
-          const nowVisible = isFaceVisible(
+          const visible = isFaceVisible(
             FACE_NORMALS[i][0],
             FACE_NORMALS[i][1],
             FACE_NORMALS[i][2],
             visRot.rx,
             visRot.ry,
           );
-          if (nowVisible && !faceWasVisibleRef.current[i]) {
+          nowVisible[i] = visible;
+          if (visible && !faceWasVisibleRef.current[i]) {
             if (!rewinding) {
               faceVisibilityCountRef.current[i]++;
             }
             // Lors d'un retour, une face qui redevient frontale ne « compte »
             // pas : seul le passage avant alimente le compte de révélation.
-          } else if (!nowVisible && faceWasVisibleRef.current[i] && rewinding) {
+          } else if (!visible && faceWasVisibleRef.current[i] && rewinding) {
             faceVisibilityCountRef.current[i] = Math.max(
               0,
               faceVisibilityCountRef.current[i] - 1,
             );
           }
-          const revealed = faceVisibilityCountRef.current[i] >= FACE_LABEL_REVEAL_COUNT && (!zoomedFacesRef.current[i] || mediaRetractedRef.current);
-          if (revealed) {
+          // Seules les faces au label révélé concourent. Pendant l'introduction
+          // (aucun compte atteint le seuil) un argmax global désignerait une face
+          // muette, et le label d'une face voisine resterait codé : le décodage
+          // n'existerait que par accident, à la rotation près du seuil.
+          if (visible && labelRevealed(i)) {
+            const amount = faceFrontAmount(
+              FACE_NORMALS[i][0],
+              FACE_NORMALS[i][1],
+              FACE_NORMALS[i][2],
+              visRot.rx,
+              visRot.ry,
+            );
+            if (amount > bestAmount) {
+              bestAmount = amount;
+              bestIndex = i;
+            }
+          }
+        }
+
+        // Hystérésis : la détentrice ne cède qu'à un rival franchement plus
+        // exposé. Les poses où deux faces sont exactement à égalité sont isolées
+        // dans le plan (rx, ry) — ce sont les vues de coin, le long d'une
+        // diagonale du cube — mais on en traverse une en scrollant, et de part
+        // et d'autre les deux expositions se croisent à environ 0,025 par degré.
+        // Sans marge, le moindre jitter de scroll ou de drag y ferait changer
+        // l'argmax de camp : deux labels se re-codant et se résolvant sans arrêt,
+        // sur des faces qu'aucun ne distingue. Au repos la question ne se pose
+        // pas — le cube est épinglé sur une pose nette, exposition 1,000 contre
+        // 0,000 pour la suivante. Voir `FRONT_FACE_HYSTERESIS`.
+        let frontFace = bestIndex;
+        const held = frontFaceRef.current;
+        if (held >= 0 && nowVisible[held] && labelRevealed(held)) {
+          const heldAmount = faceFrontAmount(
+            FACE_NORMALS[held][0],
+            FACE_NORMALS[held][1],
+            FACE_NORMALS[held][2],
+            visRot.rx,
+            visRot.ry,
+          );
+          if (heldAmount >= bestAmount - FRONT_FACE_HYSTERESIS) frontFace = held;
+        }
+        frontFaceRef.current = frontFace;
+
+        // Phase d'écriture.
+        for (let i = 0; i < 6; i++) {
+          if (labelRevealed(i)) {
             const el = clickLabelRefs.current[i];
             if (el) el.style.opacity = "1";
-            if (nowVisible) {
-              if (
+            if (nowVisible[i]) {
+              faceExposureElapsedRef.current[i] += dt;
+              if (i === frontFace) {
+                // La plus exposée : le brouillage se résout de gauche à droite.
+                // Le passage par « encoded » est sauté — `scrambleLabel` part
+                // d'un rendu entièrement aléatoire, donc le décodage démarre
+                // proprement aussi depuis l'état « none », et l'encodage que la
+                // même frame annule ne ferait que reconstruire les spans du DOM
+                // pour les détruire aussitôt.
+                if (
+                  faceScrambleStateRef.current[i] !== "decoding" &&
+                  faceScrambleStateRef.current[i] !== "decoded"
+                ) {
+                  const tl = decodeFaceLabel(i);
+                  faceScrambleStateRef.current[i] = "decoding";
+                  // Un seul `onComplete` pour les deux effets : `eventCallback`
+                  // remplace le callback précédent, il ne s'y ajoute pas.
+                  //
+                  // Le passage à « decoded » est ce qui rend la face cliquable
+                  // (`hitTestAndOpen`). Il attend la FIN de la tween, pas le
+                  // moment où le texte devient lisible : une face à moitié
+                  // déchiffrée reste donc fermée, ce qui est le but — on
+                  // n'ouvre pas un projet dont le nom est encore du bruit.
+                  //
+                  // `kill()` (voir `stopScramble`) ne déclenche pas `onComplete`
+                  // : une interruption laisse l'état « decoding », que les
+                  // branches ci-dessous rebouclent, et le décodage suivant
+                  // jouera son `onComplete`.
+                  if (tl) {
+                    tl.eventCallback("onComplete", () => {
+                      faceScrambleStateRef.current[i] = "decoded";
+                      // Le pointer ne se montre qu'une fois par introduction, et
+                      // sur la face dont le label se résout en premier. Il attend
+                      // lui aussi la fin du décodage : c'est le mot entier,
+                      // résolu, qu'il vient souligner — le déclencher au départ
+                      // mettrait le geste sur un brouillage.
+                      if (i === POINTER_FACE && !pointerPlayedRef.current) {
+                        playPointer();
+                      }
+                    });
+                  }
+                }
+              } else if (
                 faceScrambleStateRef.current[i] === "none" ||
+                faceScrambleStateRef.current[i] === "decoding" ||
                 faceScrambleStateRef.current[i] === "decoded"
               ) {
-                // Une seule fois par transition : `encodeFaceLabel` vide et
-                // recrée les spans du DOM, l'appeler à chaque frame pendant le
-                // compte à rebours reconstruirait le label en boucle.
-                // Sous `prefers-reduced-motion`, c'est une image fixe (pas de
-                // boucle infinie de re-brouillage), et le décodage borné suit
-                // son cours normal — l'image reste lue en deux temps.
+                // Visible mais moins exposée que la détentrice : le brouillage
+                // continu s'installe et le texte redevient illisible. Une seule
+                // fois par transition : `encodeFaceLabel` vide et recrée les
+                // spans du DOM, l'appeler à chaque frame reconstruirait le label
+                // en boucle. Sous `prefers-reduced-motion`, c'est une image fixe
+                // (pas de boucle infinie de re-brouillage) : le texte reste codé
+                // sans scintiller, et la face qui devient la plus exposée se
+                // résout normalement — le décodage, lui, est borné et piloté par
+                // l'exposition, donc la préférence ne l'atteint pas.
                 encodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "encoded";
               }
-              faceExposureElapsedRef.current[i] += dt;
-              // Décodage immédiat dès l'exposition. Il existait ici un délai
-              // (`LABEL_DECODE_DELAY_MS`) qui retardait le passage au texte lisible,
-              // avec une branche d'attente et un drapeau `pendingDecode` pour tenir
-              // la boucle d'animation en vie le temps de ce délai. Le délai avait
-              // été ramené à 0 : la branche d'attente était donc inatteignable et
-              // le drapeau ne servait plus à rien. Le décodage n'a pas besoin
-              // d'une frame de plus, donc les deux ont été retirés.
-              if (faceScrambleStateRef.current[i] === "encoded") {
-                  // `scrambleLabel` part d'un rendu entièrement aléatoire, donc
-                  // le décodage démarre proprement même depuis l'état « none ».
-                  decodeFaceLabel(i);
-                  faceScrambleStateRef.current[i] = "decoded";
-                  // Le pointer ne se montre qu'une fois par introduction, et sur
-                  // la face dont le label se résout en premier. Il attend la FIN
-                  // du décodage : c'est le mot entier, résolu, qu'il vient
-                  // souligner — le déclencher au départ mettrait le geste sur
-                  // un brouillage. `kill()` (voir `stopScramble`) ne déclenche
-                  // pas `onComplete` : une interruption laisse donc la course
-                  // entière sans icône, et le décodage suivant la rejouera.
-                  if (i === POINTER_FACE && !pointerPlayedRef.current) {
-                    faceScrambleTlRef.current[i]?.eventCallback(
-                      "onComplete",
-                      playPointer,
-                    );
-                  }
-                }
             } else {
               faceExposureElapsedRef.current[i] = 0;
               // Face sortie de vue : le label redevient « codé » au prochain
               // passage, pour rejouer le cycle à la prochaine exposition.
-              if (faceScrambleStateRef.current[i] === "decoded") {
+              // « decoding » compris : un décodage interrompu par la sortie de
+              // vue est un texte à moitié résolu, pas un libellé.
+              if (
+                faceScrambleStateRef.current[i] === "decoding" ||
+                faceScrambleStateRef.current[i] === "decoded"
+              ) {
                 encodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "encoded";
               }
@@ -2082,7 +2226,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             stopFaceScramble(i);
             faceScrambleStateRef.current[i] = "none";
           }
-          faceWasVisibleRef.current[i] = nowVisible;
+          faceWasVisibleRef.current[i] = nowVisible[i];
         }
       }
 
@@ -2804,6 +2948,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       faceVisibilityCountRef.current = [0, 0, 0, 0, 0, 0];
       faceExposureElapsedRef.current = [0, 0, 0, 0, 0, 0];
       faceWasVisibleRef.current = [false, false, false, false, false, false];
+      frontFaceRef.current = -1;
       faceScrambleStateRef.current = ["none", "none", "none", "none", "none", "none"];
       // L'introduction repart de zéro : le pointer est rejoué au prochain
       // décodage du premier label.
