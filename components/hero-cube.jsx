@@ -686,7 +686,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   const stopFaceScramble = (i) => {
     const tl = faceScrambleTlRef.current[i];
-    if (!tl) return;
+    // `undefined` = aucune animation active, rien à restaurer. `null` = état
+    // « codé » statique sous `prefers-reduced-motion` (`scrambleLabel` en mode
+    // `cipher` y rend une image fixe sans boucle) : le texte affiché est
+    // brouillé, il faut quand même restaurer le libellé final.
+    if (tl === undefined) return;
     stopScramble(tl);
     faceScrambleTlRef.current[i] = undefined;
     const el = clickLabelRefs.current[i];
@@ -695,13 +699,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   // Remet le label à l'état « codé » : brouillage continu, jamais résolu.
   // C'est l'animation visible entre deux expositions et pendant le délai
-  // d'1 s avant décodage. Sous `prefers-reduced-motion` le tick ne passe
-  // jamais par ici (branche directe qui pose le texte final) : `scrambleLabel`
-  // n'est appelé en mode `cipher` qu'en régime normal, où il renvoie toujours
-  // une timeline. Si `reduceMotion()` devenait vrai entre l'appel et le tick
-  // suivant, la ref contiendrait `null` — `stopScramble` (`if (tl) tl.kill()`),
-  // `stopFaceScramble` (`if (!tl) return`) et le `?.eventCallback` du tick
-  // l'acceptent déjà.
+  // avant décodage. Sous `prefers-reduced-motion`, `scrambleLabel` en mode
+  // `cipher` rend une image fixe et renvoie `null` (pas de boucle infinie) :
+  // le label reste brouillé sans scintiller, puis le décodage borné
+  // (`decodeFaceLabel`, ~0,5 s) suit son cours normal. `stopScramble`
+  // (`if (tl) tl.kill()`), `stopFaceScramble` (restaure aussi sur `null`) et
+  // le `?.eventCallback` du tick l'acceptent déjà.
   const encodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
     if (!el) return;
@@ -1474,7 +1477,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // normal. Le réduire sans réduire l'arc parcouru (six poses + six
     // rotations) l'accélérerait au lieu de l'adoucir, et le figer à zéro
     // stationnait sur chaque pose sans rotation entre les labels. Seul le
-    // brouillage du label est neutralisé (texte posé directement).
+    // re-brouillage continu est neutralisé : l'état « codé » devient une
+    // image fixe, puis le décodage borné suit son cours normal.
     // Budgets de la fin écrite, segment par segment, et non plus un total unique.
     // La tête de timeline traversait `[CUBE_END, 1]` à vitesse égale, si bien que
     // le spin n'en recevait que 27,6 % (48,8 % sur le chemin du skip) et la
@@ -1547,10 +1551,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Les durées du sweep NE dépendent PAS de `prefers-reduced-motion` :
     // réduire la durée sans réduire l'arc parcouru n'adoucit rien, ça
     // accélère (même angle en moins de temps), et les mettre à zéro fige le
-    // cube sur chaque pose sans rotation entre les labels. Seul le brouillage
-    // du label est neutralisé sous `reduce` (texte posé directement, cf. le
-    // tick de la galerie plus bas) — la rotation, elle, garde son rythme
-    // normal, comme la finale.
+    // cube sur chaque pose sans rotation entre les labels. Seul le
+    // re-brouillage continu est neutralisé sous `reduce` (image fixe, cf.
+    // `scramble.js`) — le décodage borné suit son cours, et la rotation garde
+    // son rythme normal, comme la finale.
     const SKIP_MORPH_MS = 900;
     // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
     // bascule trop vite après l'apposition des onglets : la transition est
@@ -1999,35 +2003,24 @@ export function HeroCube({ title, subtitle, images = [] }) {
             const el = clickLabelRefs.current[i];
             if (el) el.style.opacity = "1";
             if (nowVisible) {
-              if (reduceMotion()) {
-                // Sous `prefers-reduced-motion`, pas de brouillage : le label
-                // apparaît directement dans son état final. `stopFaceScramble`
-                // coupe la boucle éventuelle (`null` accepté) et restaure le
-                // texte exact via `textContent` — aucun état `"encoded"` /
-                // `"decoded"` n'est posé, le visiteur a lu le label sans
-                // transition. Le pointer suit la même voie : `playPointer`
-                // marque le tir et sort aussitôt, sans effet visuel.
-                stopFaceScramble(i);
-                faceExposureElapsedRef.current[i] = 0;
-                if (i === POINTER_FACE && !pointerPlayedRef.current) {
-                  playPointer();
-                }
-              } else {
-                if (
-                  faceScrambleStateRef.current[i] === "none" ||
-                  faceScrambleStateRef.current[i] === "decoded"
-                ) {
-                  // Une seule fois par transition : `encodeFaceLabel` vide et
-                  // recrée les spans du DOM, l'appeler à chaque frame pendant le
-                  // compte à rebours reconstruirait le label en boucle.
-                  encodeFaceLabel(i);
-                  faceScrambleStateRef.current[i] = "encoded";
-                }
-                faceExposureElapsedRef.current[i] += dt;
-                if (
-                  faceExposureElapsedRef.current[i] >= LABEL_DECODE_DELAY_MS &&
-                  faceScrambleStateRef.current[i] === "encoded"
-                ) {
+              if (
+                faceScrambleStateRef.current[i] === "none" ||
+                faceScrambleStateRef.current[i] === "decoded"
+              ) {
+                // Une seule fois par transition : `encodeFaceLabel` vide et
+                // recrée les spans du DOM, l'appeler à chaque frame pendant le
+                // compte à rebours reconstruirait le label en boucle.
+                // Sous `prefers-reduced-motion`, c'est une image fixe (pas de
+                // boucle infinie de re-brouillage), et le décodage borné suit
+                // son cours normal — l'image reste lue en deux temps.
+                encodeFaceLabel(i);
+                faceScrambleStateRef.current[i] = "encoded";
+              }
+              faceExposureElapsedRef.current[i] += dt;
+              if (
+                faceExposureElapsedRef.current[i] >= LABEL_DECODE_DELAY_MS &&
+                faceScrambleStateRef.current[i] === "encoded"
+              ) {
                   // `scrambleLabel` part d'un rendu entièrement aléatoire, donc
                   // le décodage démarre proprement même depuis l'état « none ».
                   decodeFaceLabel(i);
@@ -2048,14 +2041,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 } else if (faceScrambleStateRef.current[i] === "encoded") {
                   pendingDecode = true;
                 }
-              }
             } else {
               faceExposureElapsedRef.current[i] = 0;
               // Face sortie de vue : le label redevient « codé » au prochain
-              // passage, pour rejouer le cycle à la prochaine exposition. Sous
-              // `prefers-reduced-motion` le tick ne pose jamais l'état
-              // `"encoded"` (branche directe ci-dessus), donc ce cas ne se
-              // produit pas — pas de boucle à réarmer, pas d'image à figer.
+              // passage, pour rejouer le cycle à la prochaine exposition.
               if (faceScrambleStateRef.current[i] === "decoded") {
                 encodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "encoded";
@@ -2179,17 +2168,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
             if (wantText !== lastGalleryLabelTextRef.current) {
               lastGalleryLabelTextRef.current = wantText;
               // Nouvelle face : le compteur repart de zéro et le label réentre en
-              // état « codé ». Sous `prefers-reduced-motion`, pas de brouillage :
-              // le texte est posé directement via `textContent`
-              // (`stopGalleryScramble` coupe la boucle éventuelle puis vide le
-              // label). La rotation, elle, garde son rythme normal : réduire la
-              // durée sans réduire l'arc l'accélérerait au lieu de l'adoucir.
+              // état « codé » — une image fixe sous `prefers-reduced-motion`
+              // (pas de boucle infinie de re-brouillage), puis le décodage
+              // borné suit son cours normal. C'est le choix demandé : pas de
+              // brouillage continu sur le skip, mais le cycle reste lisible.
               galleryExposureElapsedRef.current = 0;
               if (wantText === "") {
                 stopGalleryScramble();
-              } else if (reduceMotion()) {
-                stopGalleryScramble();
-                galleryLabel.textContent = wantText;
               } else {
                 encodeGalleryLabel(wantText);
               }
