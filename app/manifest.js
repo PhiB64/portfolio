@@ -21,6 +21,9 @@ export default function manifest() {
     background_color: "#0a0f1c",
     theme_color: "#0a0f1c",
     icons: [
+      { src: `${BASE}/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: `${BASE}/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: `${BASE}/icon-maskable-512.png`, sizes: "512x512", type: "image/png", purpose: "maskable" },
       { src: `${BASE}/icon.webp`, sizes: "512x512", type: "image/webp", purpose: "any" },
       { src: `${BASE}/favicon.webp`, sizes: "any", type: "image/webp" },
     ],

@@ -23,6 +23,10 @@ content.json
 # travail. Il peut contenir un endpoint Formspree réel, qui n'est pas secret au
 # sens strict (le préfixe `NEXT_PUBLIC_` le rend public de toute façon) mais
 # n'a rien à faire dans l'historique Git. Le gabarit à copier est `.env.example`.
+# `.env` (sans suffixe) n'est jamais commité non plus : seul `.env.example`
+# est versionné.
+.env
+!.env.example
 .env.local
 .env*.local
 

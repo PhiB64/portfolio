@@ -48,6 +48,10 @@ jobs:
         run: npm run build
         env:
           GITHUB_PAGES: true
+          # Racine publique du site (canonique, Open Graph, JSON-LD, sitemap).
+          # Sans elle, `app/layout.js` retombe sur `https://phib64.github.io`
+          # (domaine nu, sans `/portfolio`), et la canonique pointe hors site.
+          NEXT_PUBLIC_SITE_URL: https://phib64.github.io
           # Valeur publique par construction : le préfixe NEXT_PUBLIC_ la lit à
           # la compilation et elle finit dans le bundle client, où n'importe qui
           # peut la lire. La garder dans `secrets` n'ajoute aucune
@@ -59,6 +63,13 @@ jobs:
           # un secret Cloudflare, donc cette URL n'expose rien : elle ne donne
           # accès qu'à un proxy déjà protégé (rate limiting, CORS, validation).
           NEXT_PUBLIC_CHAT_ENDPOINT: ${{ vars.NEXT_PUBLIC_CHAT_ENDPOINT }}
+
+      # Le digest `content.json` est la seule source de vérité du chatbot
+      # (voir `scripts/build-chat-content.mjs`) : un build qui l'oublie livre
+      # un site dont le chat répond en boucle « indisponible ». On échoue ici
+      # plutôt que de déployer un site muet.
+      - name: Check chat digest
+        run: test -f dist/content.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
