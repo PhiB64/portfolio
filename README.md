@@ -71,12 +71,26 @@ npm test           # une passe
 npm run test:watch # en continu
 ```
 
-Les tests couvrent `lib/cube-math.js` — la géométrie du cube (rotations, paliers
-de scroll, projection, hit-test). C'est le seul module assez isolé pour être
-testé sans DOM, et le seul où une régression passerait inaperçue : une
-interpolation de pose erronée ne produit aucune erreur, seulement un cube qui
-tourne mal. Les chiffres cités dans les commentaires du module — pointe de
-vitesse, inégalité des paliers — sont vérifiés par ces tests.
+Les tests couvrent quatre modules :
+
+| Module | Ce qui est vérifié |
+|---|---|
+| `lib/cube-math.js` | la géométrie du cube (rotations, paliers de scroll, projection, hit-test) |
+| `lib/reduced-motion.js` | la lecture de la préférence, y compris quand elle est absente |
+| `lib/scramble.js` (branche `cipher` + `prefers-reduced-motion`) | image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact — sur DOM |
+| `lib/use-dialog-focus.js` | piège de focus, Échap, restauration du focus — sur DOM |
+
+Le premier est le seul module testé sans DOM ; c'est aussi
+le seul où une régression passerait inaperçue, car une interpolation de pose
+erronée ne produit aucune erreur, seulement un cube qui tourne mal. Les chiffres
+cités dans ses commentaires — pointe de vitesse, inégalité des paliers — sont
+vérifiés par ces tests.
+
+Les deux fichiers sur DOM ont exigé une dépendance de plus — `jsdom` — ainsi
+que le pragma `// @vitest-environment jsdom` en tête de fichier (`vitest.config.js`
+reste en environnement `node` par défaut : le pragma n'est payé que par les
+fichiers qui en ont besoin). Le troisième (`use-dialog-focus`) a en plus exigé
+`@testing-library/react` et le réglage JSX automatique du config.
 
 ## Déploiement
 
@@ -154,23 +168,73 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   défilement au clavier.
 - Les onglets projets, masqués (`opacity: 0`) avant leur révélation, **se
   révèlent au focus** : sans cela la tabulation menait à des boutons invisibles.
-- **Ce que `prefers-reduced-motion` ne fait pas, aujourd'hui.** La fonction
-  `reduceMotion()` de `components/hero-cube.jsx` renvoie `false` en dur : le
-  réglage système n'est pas lu en JavaScript. Seul effet actif, en CSS
-  (`app/globals.css`) : `.wheel-anim`, l'invite de scroll. Concrètement, un
-  visiteur qui a coupé les animations subit quand même l'autoplay de fin et les
-  ondes sonar. Le choix est argumenté dans le code — les durées mobiles dépassent
-  le plafond WCAG 2.2.2 de 5 s, et le bon correctif est de raccourcir ces
-  animations plutôt que de les neutraliser — mais il n'est **pas implémenté**.
-  Point de restauration, indiqué en commentaire dans `hero-cube.jsx` :
-  retourner `matchMedia("(prefers-reduced-motion: reduce)").matches`.
-- Les deux overlays plein écran (rubrique, contact) ne sont pas des `dialog` :
-  pas de `role`, pas de `aria-modal`, et **pas de gestion de la touche Échap** —
-  `grep -i escape` ne trouve aucune occurrence dans tout le dépôt. Un visiteur au
-  clavier ouvre une rubrique et ne peut la refermer qu'en rebouclant jusqu'au
-  bouton placé dessous. À faire.
+- **`prefers-reduced-motion` est lu en JavaScript**, via `lib/reduced-motion.js`.
+  La fonction était un `return false` en dur : le réglage système n'était lu
+  nulle part, et seul `.wheel-anim` y obéissait, en CSS. Un visiteur qui a coupé
+  les animations subissait donc l'autoplay de fin, les ondes sonar, le brouillage
+  des labels, l'icône de pointer et les `scrollTo` lisses. Ce qui est neutralisé,
+  et ce qui ne l'est pas :
+
+  | Élément | Traitement | Pourquoi |
+  |---|---|---|
+  | Finale d'autoplay (SHOW+SPIN+TAIL) | durées normales, comme sans la préférence | raccourcir accélérait la rotation (même angle en moins de temps) ; la piste doit atteindre le bout pour dévoiler les liens |
+  | Galerie du skip (tour des 6 faces) | sweep sans défilement (morph, rotations, lead et gap à 0 ; holds conservés) | animation imposée la plus longue du skip ; la finale suit son cours et dévoile les liens |
+  | Ondes sonar (faces) | quasi instantanées (700/480 ms → 60 ms) | le voile doit être plein avant le basculement du visuel, sinon pop ; seul l'anneau disparaît |
+  | Onde de fond | quasi instantanée (700/420 ms → 60 ms) | même raison ; pas de durée explicite sous `reduce`, pour laisser le `??` appliquer la durée réduite |
+  | Brouillage des labels (faces + galerie) | texte posé directement, pas de boucle `cipher` | le contenu est identique, seule la transition disparaît ; la boucle infinie de re-brouillage est la seule hors CSS |
+  | Icône de pointer | supprimée (tir marqué, geste non joué) | ~2,3 s de geste imposé, redondant avec le texte « cliquez sur une face » |
+  | Vidéos (fond + faces) | figées sur la première image | le projet montré est identique, seul le mouvement disparaît ; la lecture suivait déjà le clic |
+  | Bouton « retour en haut », rattrapage de verrou | `scrollTo` instantané | repositionnement imposé par le code, pas un geste de l'utilisateur |
+  | Boucles `.wheel-anim`, `.animate-spin` | `animation: none` | boucles infinies, donc toujours autonomes |
+  | **Scrub de scroll du cube** | **non concerné** | contrôle direct de l'utilisateur, pas une animation automatique ; le neutraliser figerait la page sur la carte d'intro |
+
+  La préférence est relue à chaque appel, pas au montage : un visiteur qui la
+  change en cours de page voit la séquence suivante en tenir compte. Seule
+  exception, les durées du skip (`SKIP_MORPH_MS`, `SKIP_TURN_MS`, `SKIP_LEAD_MS`,
+  `SKIP_GAP_MS`) sont figées à l'armement de l'effet — `SKIP_HOLD_MS` (1500 ms,
+  constante partagée du découpage des holds) ne l'est pas, mais sans rotations
+  ni gap le sweep ne défile plus : changer le réglage en cours de sweep ne
+  rebranche pas la galerie, le cas est absorbé sans image figée (label posé
+  directement).
+- **Les deux overlays plein écran sont des `dialog` modaux.** `role="dialog"`,
+  `aria-modal="true"`, `aria-labelledby` sur le titre de la page, piège de focus
+  (Tab reboucle sur le dernier et le premier contrôle), **touche Échap** pour
+  fermer, focus posé sur le premier contrôle à l'ouverture et **rendu au bouton
+  déclencheur à la fermeture**. La mécanique est dans
+  `lib/use-dialog-focus.js`, testée sur DOM (`lib/use-dialog-focus.test.jsx`).
+- La section du cube est **`inert`** tant qu'un overlay est ouvert ou que le
+  verrou d'orientation est actif. `aria-hidden` seul ne suffisait pas : il sort
+  l'arbre d'accessibilité mais laisse les boutons focusables sous une couche
+  opaque. Les deux overlays sont pour cette raison frères de la `<section>` et non
+  enfants — un `inert` ne peut pas neutraliser un sous-arbre qui contient le
+  dialogue. Ce déplacement a au passage corrigé un bug d'empilement : la section
+  portant `z-10` + `relative`, c'était un contexte d'empilement, et la bulle de
+  l'assistant (`z-40`, hors section) passait **au-dessus** de l'overlay projet.
+- Les boutons **CONTACT** et **SKIP** du cube, et les **six onglets** avant leur
+  révélation, sont masqués en `opacity: 0`. `opacity` ne les sortait pas de la
+  tabulation : ils étaient focusables et annoncés avant d'être visibles. Corrigé
+  par `tabIndex={-1}` + `aria-hidden` — pas par `visibility`, qui aurait tué le
+  fondu du bouton CONTACT. Le `onFocus` qui révélait les onglets reste en filet
+  (navigateur ignorant `tabIndex`, restauration de session).
+- **Contenus réécrits en boucle masqués aux lecteurs.** Les labels des faces et
+  de la galerie sont réécrits à chaque frame pendant le brouillage (`scramble.js`)
+  : sans `aria-hidden`, le lecteur épelle des suites comme « X Q 7 % ». Le label
+  n'est pas interactif — la zone de clic porte le nom de la face, l'onglet le nom
+  stable. Même traitement pour les textes anglais redondants dans une page
+  `lang="fr"` (« CLICK TO EXPLORE », « SCROLL DOWN »), couverts par l'`aria-label`
+  français de la zone de clic, et pour les SVG décoratifs (souris d'intro, fil de
+  fer du cube, icônes GitHub/LinkedIn), doublés par un texte adjacent.
+- **Contrastes.** Trois familles de texte échouaient au seuil AA (4,5:1) :
+  `#64748b` sur fond sombre (4,02) est passé à `#7c8ca1` (5,58) ; le blanc sur le
+  cyan des boutons primaires (3,00) est passé au texte sombre `#0a0f1c` (6,38) ;
+  le placeholder du formulaire `#334155` (1,72) est passé à `#728296` (4,55).
 - Le titre de la page d'accueil est un `<text>` SVG, non exposé aux lecteurs
   d'écran : un `<h1 class="sr-only">` est posé dans `app/page.js`.
+- **Ce qui reste à faire.** Le verrou d'orientation est un `alertdialog` sans
+  contrôle focusable : il est annoncé au focus, mais rien ne permet de le fermer
+  au clavier, ce qui est correct — il n'a pas de fermeture, seulement une
+  consigne. Le panneau de l'assistant a Échap et `aria-controls`, mais reste
+  non modal par choix : la page reste tabulable derrière.
 
 ## Licence
 

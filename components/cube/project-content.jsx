@@ -65,7 +65,9 @@ export function renderProjectContent(i, { onContact } = {}) {
         <PageIcon size={16} />
         {p.label}
       </p>
-      <h1 className="text-5xl font-bold text-white mb-6">{p.title}</h1>
+      {/* `id` repris par `aria-labelledby` du dialog parent : c'est ce titre
+          qui nomme l'overlay projet aux lecteurs d'écran. */}
+      <h1 id="project-overlay-title" className="text-5xl font-bold text-white mb-6">{p.title}</h1>
       <div className="w-16 h-0.5 bg-[#00a5b0] mb-16" />
     </div>
   );
@@ -79,7 +81,7 @@ export function renderProjectContent(i, { onContact } = {}) {
             {p.profile.stats.map((s, j) => (
               <div key={j} className="text-center border border-[#1e293b] rounded-lg p-4">
                 <p className="text-3xl font-bold text-[#00a5b0]">{s.value}</p>
-                <p className="text-xs uppercase tracking-widest text-[#64748b] mt-1">{s.label}</p>
+                <p className="text-xs uppercase tracking-widest text-[#7c8ca1] mt-1">{s.label}</p>
               </div>
             ))}
           </div>
@@ -174,7 +176,7 @@ export function renderProjectContent(i, { onContact } = {}) {
               <h3 className="text-xl font-bold text-white mb-1">{pr.title}</h3>
               <p className="text-[#00a5b0] text-sm mb-2">{pr.tags}</p>
               <p className="text-[#94a3b8] mb-2">{pr.desc}</p>
-              {pr.details && <p className="text-[#64748b] text-sm mb-4">{pr.details}</p>}
+              {pr.details && <p className="text-[#7c8ca1] text-sm mb-4">{pr.details}</p>}
               {pr.links && pr.links.length > 0 && (
                 <div className="flex flex-wrap gap-3 mt-3">
                   {pr.links.map((l, k) => (
@@ -222,7 +224,7 @@ export function renderProjectContent(i, { onContact } = {}) {
           <p className="text-[#94a3b8] mb-8">Discutons de votre besoin — réponse rapide garantie.</p>
           <button
             onClick={onContact}
-            className="bg-[#00a5b0] text-white tracking-[0.2em] uppercase text-xs px-8 py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 inline-flex items-center gap-2"
+            className="bg-[#00a5b0] text-[#0a0f1c] tracking-[0.2em] uppercase text-xs px-8 py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 inline-flex items-center gap-2"
           >
             <Mail size={14} /> Me contacter
           </button>

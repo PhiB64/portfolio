@@ -98,12 +98,28 @@ body {
   animation: wheelScroll 1.5s ease-in-out infinite;
 }
 
-/* `prefers-reduced-motion` : on neutralise les boucles infinies et les fondus
-   ambiants. Les animations pilotées par le scroll ne sont PAS concernées — le
-   scrub est un contrôle direct de l'utilisateur, et le couper figerait la page
-   sur la carte d'intro (cf. commentaire dans hero-cube.jsx). */
+/* `prefers-reduced-motion`.
+ *
+   Le scrub de scroll du cube n'est PAS concerné, en CSS comme en JS : c'est un
+   contrôle direct de l'utilisateur, pas une animation automatique, et le
+   neutraliser figerait la page sur la carte d'intro (cf. commentaire dans
+   hero-cube.jsx).
+ *
+   Ce bloc ne couvre que ce qui est exprimé en CSS. Tout le reste — autoplay de
+   fin, ondes sonar, brouillage des labels, `scrollTo({behavior:"smooth"})` —
+   est piloté par GSAP, anime.js et des appels JS, hors de portée d'une media
+   query : c'est `lib/reduced-motion.js` qui s'en charge. */
 @media (prefers-reduced-motion: reduce) {
   .wheel-anim {
+    animation: none;
+  }
+
+  /* `animate-spin` est utilisé par les deux indicateurs d'attente du projet :
+     le loader d'envoi de l'assistant et le loader de la page contact. Boucle
+     infinie, donc toujours autonome. La figer plutôt que la supprimer : le
+     texte adjacent (« rédaction… », « Envoi... ») porte déjà l'information,
+     l'icône n'est qu'un renfort. */
+  .animate-spin {
     animation: none;
   }
 }

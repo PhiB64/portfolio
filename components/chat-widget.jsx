@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useEscapeKey } from "../lib/use-dialog-focus";
 import { Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 
 /**
@@ -386,6 +387,7 @@ export function ChatWidget() {
   const abortRef = useRef(null);
   const listRef = useRef(null);
   const inputRef = useRef(null);
+  const launcherRef = useRef(null);
 
   // Descend avec la conversation : le texte arrive fragment par fragment, donc
   // on se cale sur chaque delta pour rester collé à la dernière ligne écrite.
@@ -405,7 +407,17 @@ export function ChatWidget() {
   const close = useCallback(() => {
     abortRef.current?.abort();
     setOpen(false);
+    // Le champ de saisie est démonté avec le panneau : sans ça le focus tombe
+    // sur `body` et le clavier repart du haut de la page. On le rend au bouton
+    // lanceur, qui est le point de retour logique.
+    launcherRef.current?.focus?.();
   }, []);
+
+  // Échap referme le panneau. Pas de piège de focus ici : le widget n'est pas
+  // modal — il laisse la page sous-jacente tabulable, ce qui est le bon
+  // comportement pour une bulle d'aide. `close` et non `setOpen(false)` : il
+  // faut aussi arrêter la requête en vol.
+  useEscapeKey(open, close);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
@@ -546,9 +558,13 @@ export function ChatWidget() {
     <>
       {/* Panneau. `z-40` le place au-dessus du contenu du cube (`z-30` max) mais
           sous les plein écran de l'overlay de contact et du CV (`z-50`/`z-100`) :
-          ouvrir l'un d'eux masque donc le chat au lieu de le laisser flotter. */}
+          ouvrir l'un d'eux masque donc le chat au lieu de le laisser flotter.
+          L'ordre tient parce que les overlays sont désormais frères de la section
+          du cube, et non enfants : `z-10` + `relative` faisait de la section un
+          contexte d'empilement, où leurs `z-50` ne se comparaient qu'à lui. */}
       {open && (
         <section
+          id="chat-panel"
           aria-label="Assistant de Philippe"
           className="fixed inset-x-4 top-20 z-40 flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
         >
@@ -562,7 +578,7 @@ export function ChatWidget() {
               onClick={reset}
               aria-label="Effacer la conversation"
               disabled={messages.length === 0}
-              className="text-[#64748b] transition-colors duration-200 hover:text-[#00a5b0] disabled:cursor-not-allowed disabled:opacity-30"
+              className="text-[#7c8ca1] transition-colors duration-200 hover:text-[#00a5b0] disabled:cursor-not-allowed disabled:opacity-30"
             >
               <RotateCcw size={16} />
             </button>
@@ -600,7 +616,7 @@ export function ChatWidget() {
                       }
                     >
                       {isPending ? (
-                        <span className="flex items-center gap-2 py-1 text-[#64748b]">
+                        <span className="flex items-center gap-2 py-1 text-[#7c8ca1]">
                           <Loader2 size={14} className="animate-spin" />
                           {/* `retry` > 0 = la requête précédente a échoué et
                               repart. Sans ce libellé, le backoff est un silence
@@ -641,7 +657,7 @@ export function ChatWidget() {
                 placeholder="Votre question…"
                 maxLength={4000}
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-lg border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#64748b] focus:border-[#00a5b0] focus:outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#7c8ca1] focus:border-[#00a5b0] focus:outline-none"
               />
               <button
                 type="submit"
@@ -652,7 +668,7 @@ export function ChatWidget() {
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
               </button>
             </div>
-            <p className="mt-2 text-[10px] leading-relaxed text-[#64748b]">
+            <p className="mt-2 text-[10px] leading-relaxed text-[#7c8ca1]">
               Réponses générées par IA — vérifiez les informations importantes.
             </p>
           </form>
@@ -662,9 +678,11 @@ export function ChatWidget() {
       {/* Lanceur, en haut à droite. Le bouton « retour en haut » du cube reste
           en bas à droite : plus de conflit de coin, donc plus d'empilement. */}
       <button
+        ref={launcherRef}
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
+        aria-controls="chat-panel"
         aria-label={open ? "Fermer l'assistant" : "Ouvrir l'assistant"}
         className="fixed top-4 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
       >

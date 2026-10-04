@@ -25,6 +25,8 @@ import {
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
 import { FACE_MEDIA, faceSrcSet } from "../lib/cube-media";
+import { reduceMotion as readReducedMotion } from "../lib/reduced-motion";
+import { useDialogFocus } from "../lib/use-dialog-focus";
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
 // [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS].
@@ -184,11 +186,12 @@ const isRealMobileDevice = () => {
 // scrub de scroll n'est volontairement pas touché : c'est un pilotage direct de
 // l'utilisateur, pas une animation automatique, et le neutraliser figerait la
 // page sur la carte d'intro (cf. le commentaire de l'effet d'animation).
-// Neutralisé volontairement : les durées mobiles (autoplay 35 s, finale 15 s)
-// sont trop longues pour rester sous ce plafond, et l'utilisateur peut déjà
-// couper les animations au niveau système (Android > Accessibilité > Retirer
-// les animations). Point de restauration : retourner `matchMedia(...).matches`.
-const reduceMotion = () => false;
+//
+// La fonction vivait ici en `return false` — la préférence système n'était donc
+// lue nulle part en JS, et seul `.wheel-anim` y obéissait, en CSS. Elle est
+// extraite dans `lib/reduced-motion.js` : c'est de la logique, pas de la 3D, et
+// elle mérite ses tests.
+const reduceMotion = readReducedMotion;
 
 const sonarGeometry = (root, pointEl) => {
   const rect = root.getBoundingClientRect();
@@ -277,6 +280,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const currentPRef = useRef(0);
   const overlayRef = useRef(null);
   const overlayScrollRef = useRef(null);
+  // Nœuds des deux overlays plein écran, cibles du piège de focus et du
+  // gestionnaire Échap.
+  const projectDialogRef = useRef(null);
+  const contactDialogRef = useRef(null);
+  const orientationLockRef = useRef(null);
   const galleryLabelRef = useRef(null);
   const faceScrambleTlRef = useRef([]);
   const faceScrambleStateRef = useRef(["none", "none", "none", "none", "none", "none"]);
@@ -598,11 +606,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // de l'onde est plus courte sur mobile : le trajet est plus court sur un
     // petit écran, et le fond est le seul élément qui change au clic — le
     // laisser se propager 700 ms laissait l'écran vide trop longtemps.
+    // Sous `prefers-reduced-motion`, pas de durée explicite : le `??` de
+    // `buildSonarLayer` applique alors la durée quasi instantanée (60 ms), qui
+    // fait l'office du voile — plein avant le basculement du visuel, sinon
+    // pop — sans les 700 ms d'anneau. C'est l'appelant qui choisit : une durée
+    // explicite court-circuite la préférence, ce qui est voulu sur mobile
+    // (contrainte de lisibilité mesurée) mais pas ici.
     const mobile = isMobileDevice();
     const opts = sonarGeometry(bgRoot, cubeContainerRef.current);
     const layer = buildSonarLayer(bgRoot, true, {
       ...opts,
-      duration: mobile ? MOBILE_BG_WAVE_MS : BG_WAVE_MS,
+      ...(reduceMotion() ? {} : { duration: mobile ? MOBILE_BG_WAVE_MS : BG_WAVE_MS }),
     });
     const fire = () => layer.anime.play();
     bgSonarRef.current = { mask: layer.mask, ring: layer.ring, anime: layer.anime };
@@ -640,7 +654,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // La vidéo ne devient la couche affichée qu'ici, une fois lisible :
         // jusque-là c'est l'image précédente qui reste visible en fondu.
         bgIsVideoRef.current = true;
-        videoBg.play().catch(() => {});
+        // Sous `prefers-reduced-motion`, la vidéo reste figée sur sa première
+        // image : le contenu (le projet montré) est identique, seul le
+        // mouvement disparaît. `changeBackground` ne fait que révéler le
+        // visuel — la lecture suit le geste de l'utilisateur (le clic), donc
+        // ce n'est pas elle qu'on coupe, mais la boucle qui tourne ensuite.
+        if (reduceMotion()) videoBg.pause();
+        else videoBg.play().catch(() => {});
         if (delay > 0) {
           bgSonarRef.current.timeout = window.setTimeout(fire, delay);
         } else {
@@ -675,7 +695,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   // Remet le label à l'état « codé » : brouillage continu, jamais résolu.
   // C'est l'animation visible entre deux expositions et pendant le délai
-  // d'1 s avant décodage.
+  // d'1 s avant décodage. Sous `prefers-reduced-motion` le tick ne passe
+  // jamais par ici (branche directe qui pose le texte final) : `scrambleLabel`
+  // n'est appelé en mode `cipher` qu'en régime normal, où il renvoie toujours
+  // une timeline. Si `reduceMotion()` devenait vrai entre l'appel et le tick
+  // suivant, la ref contiendrait `null` — `stopScramble` (`if (tl) tl.kill()`),
+  // `stopFaceScramble` (`if (!tl) return`) et le `?.eventCallback` du tick
+  // l'acceptent déjà.
   const encodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
     if (!el) return;
@@ -718,11 +744,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // chacune suivie de son onde, puis un bref maintien et une sortie. Les instants
   // sont absolus et dérivés des constantes, jamais comptés à la main : une seule
   // durée à changer et les trois paliers suivent.
+  //
+  // Sous `prefers-reduced-motion`, pas d'icône de pointer : le geste (deux
+  // tapes + onde, ~2,3 s) est une animation imposée, et le texte adjacent dit
+  // déjà la même chose — « cliquez sur une face pour l'ouvrir ». On marque
+  // quand même le tir : sans cela l'enregistrement `onComplete` resterait armé
+  // et rejouerait le geste au décodage suivant, comme après une interruption.
   const playPointer = useCallback(() => {
+    pointerPlayedRef.current = true;
+    if (reduceMotion()) return;
     const el = pointerRef.current;
     if (!el) return;
     stopPointer();
-    pointerPlayedRef.current = true;
     const glyph = pointerGlyphRef.current;
     const ripple = pointerRippleRef.current;
     const label = pointerLabelRef.current;
@@ -943,7 +976,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     const video = (cubeRef.current?.children[i] || document).querySelector("video");
     if (video) {
       video.currentTime = 0;
-      video.play().catch(() => {});
+      // Même traitement que le fond : image figée sous `prefers-reduced-motion`,
+      // lecture sinon. Le visiteur a cliqué, le visuel est là dans les deux cas.
+      if (reduceMotion()) video.pause();
+      else video.play().catch(() => {});
     }
   }, [changeBackground, revealFaceMedia, unretractMedia, stopPointer]);
 
@@ -1059,8 +1095,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
     []
   );
 
-  // Fermeture de l'overlay projet, partagée par la flèche de la barre d'onglets
-  // et le bouton « ← RETOUR » en bas de page.
+  // Fermeture de l'overlay contact. Factorisée hors du JSX parce qu'elle a
+  // maintenant trois points d'entrée : le bouton RETOUR, l'onglet CONTACT de la
+  // barre, et la touche Échap branchée plus bas.
+  const closeContactOverlay = useCallback(() => {
+    setShowContact(false);
+    if (
+      typeof window !== "undefined" &&
+      window.history?.state?.ufoContact
+    ) {
+      try {
+        window.history.replaceState(null, "", window.location.href);
+      } catch {}
+    }
+  }, []);
+
+  // Fermeture de l'overlay projet, partagée par la flèche de la barre d'onglets,
+  // le bouton « ← RETOUR » en bas de page et la touche Échap.
   const closeProjectOverlay = useCallback(() => {
     if (
       typeof window !== "undefined" &&
@@ -1080,6 +1131,27 @@ export function HeroCube({ title, subtitle, images = [] }) {
       } catch {}
     }
   }, []);
+
+  // Les deux overlays ne peuvent pas être ouverts en même temps. Ils l'étaient :
+  // l'onglet CONTACT de la barre du projet appelle `onContactClick`, qui ne
+  // remet pas `selectedProject` à null. Visuellement ça ne se voyait pas — le
+  // contact est opaque et au-dessus — mais deux `aria-modal` simultanés sont
+  // invalides, et surtout deux pièges de focus se seraient disputé Échap, le
+  // fermant d'un coup sur les deux. Le projet reste donc en mémoire et se
+  // réaffiche au retour du contact, ce qui reproduit exactement ce que le
+  // visiteur voit aujourd'hui.
+  const projectOverlayOpen = selectedProject !== null && !showContact;
+
+  // Piège de focus, focus initial et touche Échap sur les deux overlays.
+  useDialogFocus(showContact, contactDialogRef, closeContactOverlay);
+  useDialogFocus(projectOverlayOpen, projectDialogRef, closeProjectOverlay);
+
+  // Verrou d'orientation : aucun contrôle à focaliser, donc on pose le focus sur
+  // le dialogue lui-même pour que son titre et sa description soient annoncés.
+  useEffect(() => {
+    if (!isMobileLandscape) return;
+    orientationLockRef.current?.focus?.({ preventScroll: true });
+  }, [isMobileLandscape]);
 
   useEffect(() => {
     const portraitQuery = window.matchMedia?.("(orientation: portrait)");
@@ -1382,13 +1454,25 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sweep gently rides up to the cube during the fold instead of jumping.
     let skipFrom = 0;
     let skipLate = false;
-    // Durées des séquences autonomes. Sous `prefers-reduced-motion`, elles sont
-    // raccourcies plutôt qu'annulées : la piste doit atteindre le bout (c'est ce
-    // qui dévoile les liens et CONTACT), mais sans leDeployment de 9 secondes
-    // d'une rotation imposée. 9 s -> 2 s laisse le temps de lire les noms.
-    // Sur mobile, la même finale se lit trop vite : le cube y occupe une fraction
-    // plus petite de l'écran, et la fin (showcase + spin + placement) se joue
-    // entièrement pendant ces 9 s. On lui donne un budget plus long côté mobile.
+    // Durées des séquences autonomes. Elles NE dépendent PAS de
+    // `prefers-reduced-motion`, et c'est délibéré.
+    //
+    // Le mode réduit raccourcissait ces trois budgets (2600/3200/1800 ->
+    // 400/500/300) sans toucher à l'angle parcouru : la showcase fait
+    // toujours 360° et le spin toujours une révolution. Réduire la durée sans
+    // réduire la distance n'annule pas le mouvement, ça l'ACCÉLÈRE — la
+    // showcase passait de 138 à 900 deg/s, le spin de 112 à 720 deg/s. Sur
+    // mobile, où « réduire les animations » est souvent actif par défaut,
+    // c'était la rotation automatique qui devenait beaucoup trop rapide.
+    //
+    // La piste doit toujours atteindre le bout — c'est ce qui dévoile les
+    // liens et CONTACT — et les fondus qui accompagnent ces segments restent
+    // en place. Seule l'onde de masquage garde sa durée réduite, parce que ce
+    // n'est qu'un fondu de voile et non un déplacement d'objet.
+    //
+    // Le sweep de la galerie, lui, est mis à zéro (voir `reduceSkip` plus bas)
+    // car c'est le segment le plus long du skip et il n'a pas de fonction de
+    // dévoilement — seule la finale dévoile.
     // Budgets de la fin écrite, segment par segment, et non plus un total unique.
     // La tête de timeline traversait `[CUBE_END, 1]` à vitesse égale, si bien que
     // le spin n'en recevait que 27,6 % (48,8 % sur le chemin du skip) et la
@@ -1416,9 +1500,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Ces trois durées couvrent les deux cas signalés : la fin écrite après le 6e
     // clic (SHOW+SPIN+TAIL) et la rotation de fin de skip (SPIN+TAIL). Du 6e
     // clic au dernier nom, mobile passe de ~14,8 s à ~9,9 s.
-    const SHOW_MS = reduceMotion() ? 400 : mobileScroll ? 3000 : 2600;
-    const SPIN_MS = reduceMotion() ? 500 : mobileScroll ? 3700 : 3200;
-    const TAIL_MS = reduceMotion() ? 300 : mobileScroll ? 2000 : 1800;
+    const SHOW_MS = mobileScroll ? 3000 : 2600;
+    const SPIN_MS = mobileScroll ? 3700 : 3200;
+    const TAIL_MS = mobileScroll ? 2000 : 1800;
     const FINALE_MS = SHOW_MS + SPIN_MS + TAIL_MS;
     // Budget du rattrapage entre le 6e clic et CUBE_END. La fin se cale sur la
     // PLAGE de timeline qu'elle joue réellement, pas sur le point de départ du
@@ -1457,16 +1541,28 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Skipped intro: faces come back out and each one is exposed frontally for
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
-    const SKIP_MORPH_MS = 900;
+    //
+    // Sous `prefers-reduced-motion`, la galerie ne défile pas : le sweep qui
+    // fait le tour des six faces est une animation imposée, pas un pilotage de
+    // l'utilisateur, et c'est le segment le plus long du skip (six holds + six
+    // rotations) sans fonction de dévoilement — seule la finale dévoile les
+    // liens. Les durées du sweep sont donc mises à zéro : `SKIP_HOLD_MS` n'est
+    // pas une constante de l'effet mais une constante partagée du découpage
+    // des holds (cf. `gallerySetup`, `SEG`), donc `galleryDur` reste non nul
+    // et le sweep stationne sur chaque pose au lieu de défiler. Le reste de
+    // la séquence (gap, finale) suit son cours, et le scrub qui porte ces
+    // durées reste atteignable au clavier par les flèches.
+    const reduceSkip = reduceMotion();
+    const SKIP_MORPH_MS = reduceSkip ? 0 : 900;
     // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
     // bascule trop vite après l'apposition des onglets : la transition est
     // allongée pour rester lisible sur un écran tactile. 800 ms était
     // cependant encore 2x le desktop, pour la même raison que les budgets de
     // fin ci-dessus : la lisibilité venait de l'easing par palier, qui
     // n'existe plus. On revient à 500 ms.
-    const SKIP_TURN_MS = isMobileDevice() ? 500 : 400;
-    const SKIP_LEAD_MS = 400;
-    const SKIP_GAP_MS = 1100;
+    const SKIP_TURN_MS = reduceSkip ? 0 : isMobileDevice() ? 500 : 400;
+    const SKIP_LEAD_MS = reduceSkip ? 0 : 400;
+    const SKIP_GAP_MS = reduceSkip ? 0 : 1100;
     // Durée totale du finale de skip. Elle ne sert plus qu'àborner la séquence
     // entière : le minutage lui-même est porté par `runFinale`, qui donne au spin
     // son budget propre. SPIN_START + 1 est atteint en SPIN_MS + TAIL_MS.
@@ -1675,7 +1771,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
           const nowMs = Date.now();
           if (nowMs - lastPinFix > 100) {
             lastPinFix = nowMs;
-            el.scrollTo({ top: pinP * sb, behavior: "smooth" });
+            // Sous `prefers-reduced-motion`, le rattrapage de verrou part sans
+            // glisse. C'est un repositionnement imposé par le code, pas un
+            // geste de l'utilisateur : l'animation ici est inutile et c'est
+            // précisément le type de mouvement que la préférence neutralise.
+            el.scrollTo({
+              top: pinP * sb,
+              behavior: reduceMotion() ? "auto" : "smooth",
+            });
           }
           targetP = pinP;
         }
@@ -1898,40 +2001,63 @@ export function HeroCube({ title, subtitle, images = [] }) {
             const el = clickLabelRefs.current[i];
             if (el) el.style.opacity = "1";
             if (nowVisible) {
-              if (
-                faceScrambleStateRef.current[i] === "none" ||
-                faceScrambleStateRef.current[i] === "decoded"
-              ) {
-                // Une seule fois par transition : `encodeFaceLabel` vide et
-                // recrée les spans du DOM, l'appeler à chaque frame pendant le
-                // compte à rebours reconstruirait le label en boucle.
-                encodeFaceLabel(i);
-                faceScrambleStateRef.current[i] = "encoded";
-              }
-              faceExposureElapsedRef.current[i] += dt;
-              if (
-                faceExposureElapsedRef.current[i] >= LABEL_DECODE_DELAY_MS &&
-                faceScrambleStateRef.current[i] === "encoded"
-              ) {
-                // `scrambleLabel` part d'un rendu entièrement aléatoire, donc le
-                // décodage démarre proprement même depuis l'état « none ».
-                decodeFaceLabel(i);
-                faceScrambleStateRef.current[i] = "decoded";
-                // Le pointer ne se montre qu'une fois par introduction, et sur la
-                // face dont le label se résout en premier. Il attend la FIN du
-                // décodage : c'est le mot entier, résolu, qu'il vient souligner —
-                // le déclencher au départ mettrait le geste sur un brouillage.
-                // `kill()` (voir `stopScramble`) ne déclenche pas `onComplete` :
-                // une interruption laisse donc la course entière sans icône, et le
-                // décodage suivant la rejouera.
+              if (reduceMotion()) {
+                // Sous `prefers-reduced-motion`, pas de brouillage : le label
+                // apparaît directement dans son état final. `stopFaceScramble`
+                // coupe la boucle éventuelle (`null` accepté) et restaure le
+                // texte exact via `textContent` — aucun état `"encoded"` /
+                // `"decoded"` n'est posé, le visiteur a lu le label sans
+                // transition. Le pointer suit la même voie : `playPointer`
+                // marque le tir et sort aussitôt, sans effet visuel.
+                stopFaceScramble(i);
+                faceExposureElapsedRef.current[i] = 0;
                 if (i === POINTER_FACE && !pointerPlayedRef.current) {
-                  faceScrambleTlRef.current[i]?.eventCallback("onComplete", playPointer);
+                  playPointer();
                 }
-              } else if (faceScrambleStateRef.current[i] === "encoded") {
-                pendingDecode = true;
+              } else {
+                if (
+                  faceScrambleStateRef.current[i] === "none" ||
+                  faceScrambleStateRef.current[i] === "decoded"
+                ) {
+                  // Une seule fois par transition : `encodeFaceLabel` vide et
+                  // recrée les spans du DOM, l'appeler à chaque frame pendant le
+                  // compte à rebours reconstruirait le label en boucle.
+                  encodeFaceLabel(i);
+                  faceScrambleStateRef.current[i] = "encoded";
+                }
+                faceExposureElapsedRef.current[i] += dt;
+                if (
+                  faceExposureElapsedRef.current[i] >= LABEL_DECODE_DELAY_MS &&
+                  faceScrambleStateRef.current[i] === "encoded"
+                ) {
+                  // `scrambleLabel` part d'un rendu entièrement aléatoire, donc
+                  // le décodage démarre proprement même depuis l'état « none ».
+                  decodeFaceLabel(i);
+                  faceScrambleStateRef.current[i] = "decoded";
+                  // Le pointer ne se montre qu'une fois par introduction, et sur
+                  // la face dont le label se résout en premier. Il attend la FIN
+                  // du décodage : c'est le mot entier, résolu, qu'il vient
+                  // souligner — le déclencher au départ mettrait le geste sur
+                  // un brouillage. `kill()` (voir `stopScramble`) ne déclenche
+                  // pas `onComplete` : une interruption laisse donc la course
+                  // entière sans icône, et le décodage suivant la rejouera.
+                  if (i === POINTER_FACE && !pointerPlayedRef.current) {
+                    faceScrambleTlRef.current[i]?.eventCallback(
+                      "onComplete",
+                      playPointer,
+                    );
+                  }
+                } else if (faceScrambleStateRef.current[i] === "encoded") {
+                  pendingDecode = true;
+                }
               }
             } else {
               faceExposureElapsedRef.current[i] = 0;
+              // Face sortie de vue : le label redevient « codé » au prochain
+              // passage, pour rejouer le cycle à la prochaine exposition. Sous
+              // `prefers-reduced-motion` le tick ne pose jamais l'état
+              // `"encoded"` (branche directe ci-dessus), donc ce cas ne se
+              // produit pas — pas de boucle à réarmer, pas d'image à figer.
               if (faceScrambleStateRef.current[i] === "decoded") {
                 encodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "encoded";
@@ -2029,7 +2155,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
               // l'onglet correspondant ne se révèle qu'à ce moment précis.
               labelReady = labelOn && loc >= SKIP_LABEL_READY_MS;
             } else if (j < galleryRot.length - 1) {
-              const tt = smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS));
+              const tt = SKIP_TURN_MS > 0
+                ? smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS))
+                : 1;
               galP = galleryRot[j] + (galleryRot[j + 1] - galleryRot[j]) * tt;
               labelIdx = -1;
             } else {
@@ -2053,10 +2181,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
             if (wantText !== lastGalleryLabelTextRef.current) {
               lastGalleryLabelTextRef.current = wantText;
               // Nouvelle face : le compteur repart de zéro et le label réentre en
-              // état « codé ».
+              // état « codé ». Sous `prefers-reduced-motion`, pas de brouillage :
+              // le texte est posé directement via `textContent`
+              // (`stopGalleryScramble` coupe la boucle éventuelle puis vide le
+              // label). Ce chemin ne survit en pratique que si le réglage change
+              // à chaud en cours de sweep, la galerie étant court-circuitée à
+              // l'armement (durées à 0) ; il absorbe ce cas sans image figée.
               galleryExposureElapsedRef.current = 0;
               if (wantText === "") {
                 stopGalleryScramble();
+              } else if (reduceMotion()) {
+                stopGalleryScramble();
+                galleryLabel.textContent = wantText;
               } else {
                 encodeGalleryLabel(wantText);
               }
@@ -2095,7 +2231,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
           lastGalleryLabelTextRef.current = "";
           stopGalleryScramble();
-          const gapK = smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS);
+          const gapK = SKIP_GAP_MS > 0
+            ? smoothstep((autoplayElapsed - SKIP_MORPH_MS - galleryDur) / SKIP_GAP_MS)
+            : 1;
           const galEnd = galleryRot.length > 0
             ? INTRO_END + galleryRot[galleryRot.length - 1] * CUBE_RANGE
             : start;
@@ -2941,7 +3079,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
       <section
         ref={sectionRef}
         className="relative z-10 h-[calc(var(--svh))] overflow-y-auto overflow-x-hidden scroll-none"
+        // Verrou d'orientation OU overlay ouvert : le contenu du cube devient
+        // alors inerte. `aria-hidden` seul ne suffit pas — il sort l'arbre
+        // d'accessibilité mais laisse les boutons focusables, et l'overlay le
+        // recouvre visuellement. `inert` fait les deux. React 19 le gère comme
+        // un attribut booléen natif.
         aria-hidden={isMobileLandscape}
+        inert={isMobileLandscape || showContact || selectedProject !== null}
         style={{
           clipPath: "inset(0)",
           pointerEvents: isMobileLandscape ? "none" : undefined,
@@ -2966,11 +3110,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
           <video
             ref={videoBgRef}
             className="w-full h-full object-cover"
-            autoPlay
+            // Pas d'`autoPlay` déclaratif : la lecture est déclenchée par
+            // `changeBackground` au clic, qui fige la vidéo sur sa première
+            // image sous `prefers-reduced-motion`. Un `autoPlay` rejouerait la
+            // boucle avant même le premier clic — donc avant tout geste.
             muted
             loop
             playsInline
             preload="metadata"
+            aria-hidden="true"
+            tabIndex={-1}
           />
         </div>
         <div className="absolute inset-0 bg-[#0a0f1c]/60" />
@@ -2999,7 +3148,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
         <div className="relative z-10 w-full">
           <div ref={scrollIndicatorRef} className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="relative">
+              {/* Icône de la « souris » : décorative, doublée par le texte
+                  « SCROLL DOWN » adjacent. Sans `aria-hidden`, certains
+                  lecteurs annoncent un « graphique » sans nom au milieu de
+                  l'intro. */}
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width={squareSize}
                 height={squareSize}
                 viewBox="0 0 300 300"
@@ -3081,6 +3236,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
               </svg>
               <div
                 ref={scrollHintRef}
+                // Même statut que le label du pointer : redondant avec
+                // l'`aria-label` de la zone de clic, et en anglais dans une
+                // page `lang="fr"`.
+                aria-hidden="true"
                 className="absolute left-1/2 -translate-x-1/2 text-sm text-[#00a5b0] tracking-[0.2em] leading-tight text-center whitespace-nowrap uppercase"
                 style={{ top: "calc(100% - 78px)" }}
               >
@@ -3090,7 +3249,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
               </div>
             </div>
           </div>
-              <nav className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
+              <nav aria-label="Rubriques du portfolio" className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
                 {PROJECT_LINKS.map((link, i) => {
                   const shown =
                     zoomedFaces[i] ||
@@ -3109,6 +3268,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
                         e.currentTarget.style.transform = "translateY(0)";
                         e.currentTarget.style.pointerEvents = "auto";
                       }}
+                      // Masqué = hors tabulation et hors arbre d'accessibilité.
+                      // Le `onFocus` ci-dessus reste le filet pour le cas où le
+                      // focus arriverait quand même (navigateur qui ignore
+                      // `tabIndex`, restauration de session…) : le bouton se
+                      // révèle au lieu de rester un arrêt invisible.
+                      tabIndex={shown ? 0 : -1}
+                      aria-hidden={shown ? undefined : true}
                       className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0f1c] cursor-pointer"
                       style={{
                         opacity: shown ? 1 : 0,
@@ -3125,6 +3291,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 })}
                 <button
                   onClick={onContactClick}
+                  // Invisible mais encore focusable : `opacity: 0` ne sort pas un
+                  // bouton de la tabulation, et `pointerEvents: none` n'en fait
+                  // pas un obstacle au clavier. CONTACT était donc atteignable —
+                  // et annoncé « bouton CONTACT » — bien avant que la
+                  // chorégraphie ne le révèle. On le sort de la tabulation et de
+                  // l'arbre d'accessibilité, pas du rendu : `visibility`
+                  // conviendrait mais tuerait le fondu de 0,6 s.
+                  tabIndex={contactDone ? 0 : -1}
+                  aria-hidden={contactDone ? undefined : true}
                   className="hidden text-center sm:inline-block bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:ml-6 hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
                   style={contactBtnStyle}
                 >
@@ -3140,6 +3315,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     ? "Revenir au début de l'animation"
                     : "Passer l'animation"
                 }
+                // Masqué mais encore focusable : `opacity: 0` ne sort pas un
+                // bouton de la tabulation, et `pointerEvents: none` n'en fait pas
+                // un obstacle au clavier. SKIP restait donc atteignable — et
+                // annoncé « passer l'animation » — une fois la chorégraphie
+                // terminée. Le bouton n'a pas de fondu — l'opacité passe de 1 à 0
+                // d'un coup — mais la correction retenue est la même que pour
+                // CONTACT, et pour la même raison : `visibility` conviendrait
+                // ici, mais il tuerait le fondu de 0,6 s du bouton voisin.
+                tabIndex={showReturn || (!contactDone && !skipped) ? 0 : -1}
+                aria-hidden={showReturn || (!contactDone && !skipped) ? undefined : true}
                 className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] transition-all duration-500 cursor-pointer hover:text-white rounded-full flex items-center justify-center"
                 style={{
                   opacity: showReturn || (!contactDone && !skipped) ? 1 : 0,
@@ -3162,6 +3347,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
               </button>
               <button
                 onClick={onContactClick}
+                tabIndex={contactDone ? 0 : -1}
+                aria-hidden={contactDone ? undefined : true}
                 className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
                 style={contactBtnStyle}
               >
@@ -3245,7 +3432,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
                                     <video
                                       src={faceImages[i]}
                                       className="w-full h-full object-cover"
-                                      autoPlay={zoomedFaces[i] && !mediaRetracted}
+                                      // Même raison que le fond : pas d'`autoPlay`
+                                      // déclaratif. La lecture est déclenchée par
+                                      // `handleFaceClick` au clic — qui fige sous
+                                      // `prefers-reduced-motion` — et non par le
+                                      // montage du nœud.
                                       muted
                                       loop
                                       playsInline
@@ -3294,6 +3485,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
                               ref={(el) => {
                                 clickLabelRefs.current[i] = el;
                               }}
+                              // Le contenu est réécrit à chaque frame pendant le
+                              // brouillage (caractères aléatoires) : sans
+                              // `aria-hidden`, le lecteur d'écran épelle des
+                              // suites comme « X Q 7 % » à chaque passage. Le
+                              // label n'est de toute façon pas interactif — la
+                              // zone de clic porte déjà le nom de la face via
+                              // son `aria-label`, et l'onglet correspondant
+                              // porte le nom stable.
+                              aria-hidden="true"
                               className="pointer-events-none select-none"
                               style={{
                                 position: "absolute",
@@ -3385,6 +3585,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     </div>
                     <div
                       ref={pointerLabelRef}
+                      // Texte redondant avec l'`aria-label` de la zone de clic
+                      // (« appuyez sur Entrée pour ouvrir la face ») et jamais
+                      // traduit (en anglais dans une page `lang="fr"`). Masqué
+                      // aux lecteurs, qui reçoivent la consigne en français via
+                      // la zone de clic.
+                      aria-hidden="true"
                       className="pointer-events-none select-none absolute left-1/2 -translate-x-1/2 text-[#00a5b0] tracking-[0.2em] leading-tight text-center uppercase whitespace-nowrap"
                       style={{
                         top: "calc(100% + 158px)",
@@ -3399,6 +3605,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
                     <div
                       ref={galleryLabelRef}
                       data-gallery-label=""
+                      // Même raison que les labels de face : contenu réécrit à
+                      // chaque frame pendant le brouillage du skip.
+                      aria-hidden="true"
                       className="pointer-events-none select-none"
                       style={{
                         position: "absolute",
@@ -3427,8 +3636,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
                         willChange: "opacity",
                       }}
                     />
+                    {/* Fil de fer du cube : trajectoire dessinée par le JS à
+                        chaque frame, sans équivalent textuel. Décoratif. */}
                     <svg
                       ref={wireRef}
+                      aria-hidden="true"
+                      focusable="false"
                       className="absolute inset-0 pointer-events-none"
                       width={300}
                       height={300}
@@ -3474,57 +3687,79 @@ export function HeroCube({ title, subtitle, images = [] }) {
           </div>
         </div>
 
-        {showContact && (
-          <div className="fixed inset-0 z-[60]">
-            <ContactOverlay
-              onClose={() => {
-                setShowContact(false);
-                if (
-                  typeof window !== "undefined" &&
-                  window.history?.state?.ufoContact
-                ) {
-                  try {
-                    window.history.replaceState(null, "", window.location.href);
-                  } catch {}
-                }
-              }}
-              onSelectProject={(i) => {
-                setShowContact(false);
-                openProjectFromOverlay(i);
-              }}
-            />
-          </div>
-        )}
+        </section>
 
-        {selectedProject !== null && (
-          <div
-            ref={overlayScrollRef}
-            className="fixed inset-0 z-50 overflow-y-auto scroll-none"
-            style={{ backgroundColor: "#0a0f1c" }}
-          >
-            <ProjectTabs
-              activeIndex={selectedProject}
-              onSelect={openProjectFromOverlay}
-              onContact={onContactClick}
-              onBack={closeProjectOverlay}
-            />
-            <div className="mx-auto max-w-4xl px-6 py-24">
-              {renderProjectContent(selectedProject, {
-                onContact: onContactClick,
-              })}
+      {/* Les deux overlays vivent ICI, en frères de la `<section>`, et non à
+          l'intérieur. Deux raisons, une visible et une structurelle.
 
-              {/* Retour en bas de page sur mobile, où la barre d'onglets est
-                  masquée et où rien d'autre n'assure le retour */}
-              <div className="text-center mt-20 sm:hidden">
-                <BackButton onClick={closeProjectOverlay} />
-              </div>
+          Visible : la section porte `z-10` et `position: relative`, donc elle
+          ouvre un contexte d'empilement. Ses enfants à `z-50` / `z-60` sont
+          donc comparés au contexte, pas à la racine — la bulle de l'assistant
+          (`z-40`, hors section) passait AU-DESSUS de l'overlay projet,
+          exactement ce que le commentaire de `chat-widget.jsx` affirme
+          éviter. Hors section, l'ordre réel est bien 10 < 40 < 50 < 60 < 100.
+
+          Structurelle : `inert` ne peut pas neutraliser un sous-arbre qui
+          contient le dialogue. Le `role` est sur ce div, donc la section doit
+          pouvoir être inerte à côté. */}
+      {showContact && (
+        <div
+          ref={contactDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="contact-overlay-title"
+          className="fixed inset-0 z-[60]"
+        >
+          <ContactOverlay
+            onClose={closeContactOverlay}
+            onSelectProject={(i) => {
+              setShowContact(false);
+              openProjectFromOverlay(i);
+            }}
+          />
+        </div>
+      )}
+
+      {projectOverlayOpen && (
+        <div
+          ref={(node) => {
+            overlayScrollRef.current = node;
+            projectDialogRef.current = node;
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="project-overlay-title"
+          className="fixed inset-0 z-50 overflow-y-auto scroll-none"
+          style={{ backgroundColor: "#0a0f1c" }}
+        >
+          <ProjectTabs
+            activeIndex={selectedProject}
+            onSelect={openProjectFromOverlay}
+            onContact={onContactClick}
+            onBack={closeProjectOverlay}
+          />
+          <div className="mx-auto max-w-4xl px-6 py-24">
+            {renderProjectContent(selectedProject, {
+              onContact: onContactClick,
+            })}
+
+            {/* Retour en bas de page sur mobile, où la barre d'onglets est
+                masquée et où rien d'autre n'assure le retour */}
+            <div className="text-center mt-20 sm:hidden">
+              <BackButton onClick={closeProjectOverlay} />
             </div>
           </div>
-        )}
-      </section>
+        </div>
+      )}
 
       {isMobileLandscape && (
         <div
+          // Le dialogue ne contient aucun contrôle : `tabIndex={-1}` le rend
+          // focusable par script, et le focus est posé au montage. Sans cela un
+          // lecteur d'écran ouvre la page sans jamais annoncer le verrou, et le
+          // visiteur doit deviner pourquoi la page ne réagit pas.
+          ref={orientationLockRef}
+          tabIndex={-1}
           className="fixed inset-0 z-[100] flex min-h-[calc(var(--svh))] items-center justify-center bg-[#0a0f1c] px-8 text-center"
           role="alertdialog"
           aria-modal="true"

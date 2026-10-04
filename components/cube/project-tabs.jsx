@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp } from "lucide-react";
+import { reduceMotion } from "../../lib/reduced-motion";
 
 // Les onglets sont pilotés par état, pas par route : l'URL `?project=N` est
 // réécrite par `openProject`, et `url` n'était jamais lu. Le conserver
@@ -97,7 +98,14 @@ export function ProjectTabs({
   // Retour animé plutôt qu'un saut sec : sur les pages longues, un `scrollTop`
   // direct ferait basculer le contenu d'un coup.
   const scrollToTop = useCallback(() => {
-    scrollerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    // `behavior: "smooth"` est une animation, donc soumis à la préférence
+    // système : sous `reduce`, on saute directement au sommet. Le reste du
+    // défilement de cette page est déjà piloté par la molette ou le tactile de
+    // l'utilisateur, rien à neutraliser.
+    scrollerRef.current?.scrollTo({
+      top: 0,
+      behavior: reduceMotion() ? "auto" : "smooth",
+    });
   }, []);
 
   return (
@@ -108,7 +116,13 @@ export function ProjectTabs({
           hidden ? "-translate-y-full" : "translate-y-0"
         }`}
       >
-        <nav className="relative flex w-full flex-wrap items-center justify-center gap-3 px-4 pt-6 pb-4">
+        {/* `aria-label` : la page contient deux `nav` (barre d'onglets + barre
+            du cube en fond, même masquée par `inert`), et un lecteur doit les
+            distinguer. Le nom reprend le contexte — rubrique ou contact. */}
+        <nav
+          aria-label={contactActive ? "Rubriques — page contact" : "Rubriques du portfolio"}
+          className="relative flex w-full flex-wrap items-center justify-center gap-3 px-4 pt-6 pb-4"
+        >
           {PROJECT_LINKS.map((link, i) => {
             const active = activeIndex === i;
             return (
