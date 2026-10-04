@@ -30,16 +30,16 @@ Site one-page immersif avec un **cube 3D interactif** qui présente les compéte
 - Responsive design (mobile, tablette, desktop)
 - Gestion des événements tactiles et pointer
 - SEO optimisé (metadata, Open Graph, JSON-LD)
+- Version textuelle indexable des rubriques (`/projects`), sans contenu dupliqué
 - Déploiement automatique sur GitHub Pages
 
 ## Démarrage
 
 ### Prérequis
 
-- Node.js **20.9+** — exigence de Next.js 16, déclarée dans le champ `engines`
-  de `package.json`. Node 18 est refusé dès l'installation. (Ce README
-  annonçait 18+ jusqu'à récemment : l'échec ne se voyait qu'au build.)
-- npm ou yarn
+- Node.js **20.9+** — minimum imposé par `next` 16 lui-même, reporté dans le champ
+  `engines` de `package.json`. En dessous, `npm install` n'émet qu'un avertissement
+  (`EBADENGINE`) : l'échec arrive au lancement de `next dev` ou `next build`.
 
 ### Installation
 
@@ -79,7 +79,7 @@ npm test           # une passe
 npm run test:watch # en continu
 ```
 
-Les tests couvrent quatre modules de `lib/` :
+Les tests couvrent quatre modules de `lib/` et le Worker :
 
 | Module | Fichier de test | Ce qui est vérifié |
 |---|---|---|
@@ -87,11 +87,21 @@ Les tests couvrent quatre modules de `lib/` :
 | `lib/reduced-motion.js` | `lib/reduced-motion.test.js` (6 tests) | la lecture de la préférence, y compris quand elle est absente |
 | `lib/scramble.js` | `lib/scramble-reduced-motion.test.js` (4 tests, jsdom) | branche `cipher` + `prefers-reduced-motion` : image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact |
 | `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (22 tests, jsdom) | piège de focus, Échap, restauration du focus |
+| `worker/src/index.js` | `worker/src/index.test.js` (16 tests) | l'**ordre** des refus du Worker : origine non autorisée rejetée avant la jauge et tout appel sortant, bornes de taille, validation des messages, fail-fast de la clé d'API |
+
+Le fichier du Worker ne teste pas les réponses — ce sont des réponses de modèle,
+sans intérêt ici — mais **ce que le Worker refuse de faire avant de décider**. Un
+test qui n'observerait que le statut HTTP passerait même avec une requête traitée
+jusqu'à l'appel d'inférence avant d'être refusée ; ces tests comptent donc les
+effets de bord (`limit()`, `fetch()`) et pas seulement la réponse. Ils ont échoué
+le jour où le garde-fou d'origine a été neutralisé : c'est ce qui fait qu'ils
+documentent la propriété de sécurité, et pas seulement le code.
 
 Non testés : `lib/cube-media.js` (simple table + `faceSrcSet()`),
 `lib/portfolio-content.js` (données pures, sans logique),
 `scripts/build-chat-content.mjs` (digest + troncature), ainsi que
-`components/` et `app/` — voir `vitest.config.js` (`include` limité à `lib/`).
+`components/` et `app/` — `vitest.config.js` nomme explicitement `lib/` et
+`worker/src/` dans son `include`.
 
 Le premier est le seul module testé sans DOM ; c'est aussi
 le seul où une régression passerait inaperçue, car une interpolation de pose
@@ -148,6 +158,43 @@ normalement, simplement sans bouton de chat.
   relancés (`retryable: false`), `stripMarkdown()` à l'affichage (le front rend
   le texte brut avec `whitespace-pre-wrap`). Panneau non modal : Échap pour
   fermer, page tabulable derrière.
+
+## Version textuelle (`/projects`)
+
+Le contenu des six rubriques ne vit que dans des boîtes de dialogue rendues par
+un composant client. Le HTML servi ne contenait donc aucun mot de contenu
+éditorial : un moteur de recherche n'indexait qu'un titre, un nom et six
+mots-clés.
+
+`app/projects/page.jsx` est la version en texte, pré-rendue au build. Deux
+contraintes ont guidé sa conception.
+
+**Elle n'a pas de source de contenu propre.** Elle appelle
+`renderProjectContent` (`components/cube/project-content.jsx`), la fonction qui
+produit les overlays, avec un décalage de titres. Le texte vient donc de la même
+source — `lib/portfolio-content.js` — et il est produit par le même code : une
+compétence qui change change sur les deux emplacements. Le décalage (`0` par
+défaut) sert à la page, où un seul `h1` doit nommer le document ; à `0`, le
+rendu de l'overlay est bit pour bit celui d'avant.
+
+**Elle ne rend aucun balisage d'overlay.** Ni `role="dialog"`, ni `aria-labelledby`,
+ni bouton d'appel à l'action sans gestionnaire. `onContact` n'est pas fourni, donc
+l'appel à l'action n'est simplement pas rendu.
+
+Deux détails qui ne sont pas visibles à la lecture du code :
+
+- La page a **son propre** conteneur de défilement (`fixed inset-0 overflow-y-auto`)
+  parce que `globals.css` verrouille `html, body` pour que la section du cube soit
+  le seul scroller. Réutiliser le verrou existant plutôt que le desserrer.
+- Le lien vers `/projects` est dans un `<noscript>` sur la page d'accueil, parce
+  que c'est le seul endroit du HTML servi où il peut figurer sans trouer la mise
+  en page du cube. Il y fait une vraie alternative, pas un lien caché : le cube
+  exige JavaScript, donc sans lui la page d'accueil est vide.
+- Il n'y a **pas** de lien vers `/projects` dans `contact-overlay.jsx`, et il ne
+  faut pas en ajouter un. Son HTML n'est pas servi au moment du crawl (il ne se
+  construit qu'à l'ouverture du panneau), et le `<noscript>` couvre déjà le
+  cas sans JavaScript — un second lien n'apporterait rien au visiteur. Le garder
+  visible était possible, le supprimer est plus simple.
 
 ## Structure du Projet
 
