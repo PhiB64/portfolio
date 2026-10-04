@@ -2168,13 +2168,17 @@ export function HeroCube({ title, subtitle, images = [] }) {
             if (wantText !== lastGalleryLabelTextRef.current) {
               lastGalleryLabelTextRef.current = wantText;
               // Nouvelle face : le compteur repart de zéro et le label réentre en
-              // état « codé » — une image fixe sous `prefers-reduced-motion`
-              // (pas de boucle infinie de re-brouillage), puis le décodage
-              // borné suit son cours normal. C'est le choix demandé : pas de
-              // brouillage continu sur le skip, mais le cycle reste lisible.
+              // état « codé ». Sous `prefers-reduced-motion`, pas de brouillage
+              // sur le skip : le texte est posé directement via `textContent`
+              // (`stopGalleryScramble` coupe la boucle éventuelle puis vide le
+              // label). La rotation, elle, garde son rythme normal : réduire la
+              // durée sans réduire l'arc l'accélérerait au lieu de l'adoucir.
               galleryExposureElapsedRef.current = 0;
               if (wantText === "") {
                 stopGalleryScramble();
+              } else if (reduceMotion()) {
+                stopGalleryScramble();
+                galleryLabel.textContent = wantText;
               } else {
                 encodeGalleryLabel(wantText);
               }
@@ -2183,10 +2187,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
           // Tant que le label est « codé », on cumule son temps d'exposition et
           // on déclenche le décodage une fois le délai écoulé, comme pour les
           // labels de face. Le texte est donc lisible avant le fondu de sortie.
+          // Sous `prefers-reduced-motion`, pas de décodage sur le skip : l'état
+          // reste « none » (texte posé directement ci-dessus), ce bloc ne se
+          // déclenche pas. Si la préférence s'active en cours de hold (état
+          // « encoded » déjà armé), on rabat sur le texte direct plutôt que de
+          // décoder.
           if (labelIdx >= 0 && galleryScrambleStateRef.current === "encoded") {
-            galleryExposureElapsedRef.current += dt;
-            if (galleryExposureElapsedRef.current >= SKIP_LABEL_CIPHER_MS) {
-              decodeGalleryLabel(FACE_LABELS[labelIdx]);
+            if (reduceMotion()) {
+              stopGalleryScramble();
+              galleryLabel.textContent = FACE_LABELS[labelIdx];
+            } else {
+              galleryExposureElapsedRef.current += dt;
+              if (galleryExposureElapsedRef.current >= SKIP_LABEL_CIPHER_MS) {
+                decodeGalleryLabel(FACE_LABELS[labelIdx]);
+              }
             }
           }
           for (let i = 0; i < 6; i++) {
