@@ -66,9 +66,6 @@ const SNAP_THRESHOLD = 0.0005;
 // reprend : assez court pour « dé-poser » le cube vite, assez long pour ne pas
 // sauter d'un coup.
 const DRAG_EASE_MS = 450;
-// Exposition requise avant qu'un label de face passe du brouillage au texte
-// lisible. Cumulée par `dt` (ms) ; 0 = décodage immédiat dès l'exposition.
-const LABEL_DECODE_DELAY_MS = 0;
 // Durée du décodage d'un label de face : le brouillage se résout de gauche à
 // droite sur ce temps. Aligné sur SKIP_LABEL_DECODE_MS — à 1 s le label mettait
 // presque deux fois plus longtemps à se résoudre que pendant le skip, pour le
@@ -227,7 +224,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const bgSonarRef = useRef(null);
   // Sonar en cours sur chaque face (un seul à la fois par face).
   const faceSonarRef = useRef({});
-  const [zoomedFace, setZoomedFace] = useState(-1);
+  // La face au premier plan n'est pas un état : c'est une valeur lue par la
+  // boucle (`computeWireframe`) et écrite à deux endroits, jamais rendue en
+  // JSX. Elle était déclarée en `useState` et recopiée dans la ref à chaque
+  // rendu — donc deux rendus React par clic pour rien. Elle est écrite directement
+  // dans `zoomedFaceRef` ; c'est aussi le seul endroit du composant qui ne passe
+  // plus par un état.
   const [zoomedFaces, setZoomedFaces] = useState([false, false, false, false, false, false]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showContact, setShowContact] = useState(false);
@@ -256,7 +258,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // relève le repli.
   const [mediaRetracted, setMediaRetracted] = useState(false);
   const mediaRetractedRef = useRef(false);
-  const vhRef = useRef(typeof window !== "undefined" ? window.innerHeight : 0);
   const skipRef = useRef(false);
   // Start position (timeline units) of the skipped sequence, captured on the
   // first skip frame so the gentle rotation begins exactly where we are.
@@ -273,12 +274,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const contactTabRevealedRef = useRef(false);
   const morphBodyRef = useRef(null);
   const morphWheelRef = useRef(null);
-  const scrollIndicatorRef = useRef(null);
   const scrollHintRef = useRef(null);
   const zoomedFacesRef = useRef(zoomedFaces);
   const zoomedFaceRef = useRef(-1);
   const currentPRef = useRef(0);
-  const overlayRef = useRef(null);
   const overlayScrollRef = useRef(null);
   // Nœuds des deux overlays plein écran, cibles du piège de focus et du
   // gestionnaire Échap.
@@ -298,7 +297,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const lastGalleryLabelTextRef = useRef("");
   const cubeContainerRef = useRef(null);
   const contentRef = useRef(null);
-  const restorePRef = useRef(null);
   const faceWasVisibleRef = useRef([false, false, false, false, false, false]);
   const faceVisibilityCountRef = useRef([0, 0, 0, 0, 0, 0]);
   const faceExposureElapsedRef = useRef([0, 0, 0, 0, 0, 0]);
@@ -373,7 +371,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   zoomedFacesRef.current = zoomedFaces;
   skipRevealedFacesRef.current = skipRevealedFaces;
   mediaRetractedRef.current = mediaRetracted;
-  zoomedFaceRef.current = zoomedFace;
 
   const faceImages = useMemo(() => {
     const srcs = images && images.length ? images : DEFAULT_FACE_MEDIA;
@@ -949,7 +946,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // sortie. `revealOverrideRef` neutralise le fondu jusqu'au prochain scroll.
     if (mediaRetractedRef.current) revealOverrideRef.current = true;
     unretractMedia();
-    setZoomedFace(i);
+    zoomedFaceRef.current = i;
     setZoomedFaces((prev) => {
       const n = [...prev];
       n[i] = true;
@@ -1227,10 +1224,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // React logs "A negative value is not valid". `w - 8` is the only term that
       // can go negative on an extremely narrow viewport.
       setSquareSize(Math.max(1, Math.min(343 * s, w - 8)));
-      // Refresh the locked height only on a real resize (rotation, desktop
-      // window) — the small jumps the URL bar causes on mobile are ignored so
-      // the section and the scroll targets never move during a gesture.
-      if (h > 0 && Math.abs(h - vhRef.current) > 130) vhRef.current = h;
     };
     compute();
     window.addEventListener("resize", compute);
@@ -1253,17 +1246,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // SKIP devient totalement inerte. On laisse donc toujours le système en
     // place ; seules les animations autonomes (skip, autoplay) sont doucement
     // plus graduées.
-    const restoreP = restorePRef.current;
-    restorePRef.current = null;
-
+    //
+    // Il existait ici une reprise de pose via `restorePRef` : l'effet devait
+    // pouvoir se réinstaller en cours de chorégraphie sans tout remettre à zéro.
+    // La ref n'était écrite par personne, donc `restoreP` valait toujours `null`,
+    // et les vingt-cinq lignes de restauration qu'elle conditionnait ne
+    // s'exécutaient jamais. Le mécanisme a été retiré avec son code : ce qui
+    // reste ici est le cas réel, c'est-à-dire un remontage à zéro.
     const el = sectionRef.current;
     const cube = cubeRef.current;
     if (!el || !cube) return;
     const mobileScroll = isMobileDevice();
 
-    if (restoreP === null) {
-      el.scrollTop = 0;
-    }
+    el.scrollTop = 0;
 
     const body = morphBodyRef.current;
     const wheel = morphWheelRef.current;
@@ -1278,6 +1273,50 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // The section is its own scroll container (height 100svh, content 10svh)
     // so the document itself never scrolls and the mobile browser bar stays
     // put. Scroll progress is read straight from the section's scrollTop.
+
+    // Étendue de la piste de scroll, en pixels : `scrollHeight - offsetHeight`,
+    // soit la distance entre le haut et le bas du parcours.
+    //
+    // Elle était relue à chaque frame, à sept endroits. C'est une lecture de
+    // layout, donc synchrone et bloquante, et elle intervenait après une
+    // écriture de `el.scrollTop` — c'est-à-dire un aller-retour forcé du moteur
+    // de rendu, deux fois par frame sur les chemins autoplay, reset et skip, et
+    // une fois de plus par événement de scroll dans `sync`.
+    //
+    // Elle est lue du track — la piste de scroll, pas la section. La section est
+    // le conteneur : sa boîte fait `100svh` quelle que soit la longueur du
+    // contenu, donc l'observer ne déclencherait rien d'utile. Mesurer le track
+    // (`10 * 100svh`) permet de recalculer à partir de la boîte qui produit
+    // vraiment le `scrollHeight`.
+    //
+    // Le recalcul est observersur la boîte, pas déduit d'un `resize` : c'est la
+    // seule façon d'être sûr de ne pas manquer une variation. La hauteur ne
+    // devrait dépendre que du CSS, et `svh` est la taille *réduite* — donc la
+    // barre d'adresse mobile ne la change pas — mais une fontechargée en
+    // différé, un overlay rendu dans le flux ou une règle CSS future le
+    // pourraient. Sur un cache périmé, l'autoplay écrirait `scrollTop` au
+    // mauvais endroit : la piste s'arrêterait avant la fin, ou le cube
+    //"sauterait" en fin de parcours. Observer la boîte rend ce cas impossible.
+    let scrollExtent = 0;
+    const measureScrollExtent = () => {
+      scrollExtent = el.scrollHeight - el.offsetHeight;
+    };
+    measureScrollExtent();
+    const track = el.firstElementChild;
+    const extentObserver =
+      typeof ResizeObserver !== "undefined" && track
+        ? new ResizeObserver(measureScrollExtent)
+        : null;
+    // Repli pour un environnement sans `ResizeObserver` : les deux seules causes
+    // attendues à la construction — rotation et redimensionnement de fenêtre.
+    // `orientationchange` couvre aussi le cas où `resize` ne se déclenche pas.
+    const onViewportChange = () => measureScrollExtent();
+    if (extentObserver) {
+      extentObserver.observe(track);
+    } else {
+      window.addEventListener("resize", onViewportChange);
+      window.addEventListener("orientationchange", onViewportChange);
+    }
 
     // Bascule du visuel vers le fond vide (couleur de base), sans aucun pop :
     // l'image est retirée pendant que la transparence repasse en douceur.
@@ -1420,8 +1459,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
       })
       .add({ duration: W.lineMorph }, LINE_POS);
 
-    let targetP = restoreP !== null ? restoreP : 0;
-    let currentP = restoreP !== null ? restoreP : 0;
+    // L'effet repart toujours de zéro : pas de reprise de pose (voir le commentaire
+    // en tête d'effet). Les refs survivent au remontage, pas ces deux variables.
+    let targetP = 0;
+    let currentP = 0;
     let rafId = null;
     let lastTickTime = 0;
     // Pose du cube au moment du déverrouillage (6e clic) : `lockedCubeP` est la
@@ -1657,35 +1698,18 @@ export function HeroCube({ title, subtitle, images = [] }) {
       };
     });
 
-    if (restoreP !== null) {
-      const rot = getCubeRotation(Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE));
-      cube.style.transform = `translateZ(0) rotateX(${rot.rx}deg) rotateY(${rot.ry}deg)`;
-      currentPRef.current = Math.max(0, (restoreP - INTRO_END) / CUBE_RANGE);
-      const { path: pathData } = computeWireframe(rot.rx, rot.ry, zoomedFaceRef.current);
-      lastWireRotRef.current = { rx: rot.rx, ry: rot.ry };
-      if (wireRef.current) {
-        if (!wirePathRef.current) {
-          const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          p.setAttribute("fill", "none");
-          p.setAttribute("stroke", "#00a5b0");
-          p.setAttribute("stroke-width", "2");
-          p.setAttribute("vector-effect", "non-scaling-stroke");
-          wireRef.current.appendChild(p);
-          wirePathRef.current = p;
-        }
-        wirePathRef.current.setAttribute("d", pathData);
-      }
-    }
-
     const sync = () => {
       // While the skip sweep runs, always steer toward the end of the section.
       if (skipRef.current) {
         targetP = 1;
         return;
       }
-      const sb = el.scrollHeight - el.offsetHeight;
+      const sb = scrollExtent;
       // Reading the section's own scrollTop avoids the layout read of
       // getBoundingClientRect on every scroll frame — smoother on mobile.
+      // `scrollExtent` is cached for the same reason, one step further: it used
+      // to be `el.scrollHeight - el.offsetHeight`, read here on every scroll
+      // event. See `measureScrollExtent`.
       const pos = el.scrollTop;
       const real = sb > 0 ? Math.min(1, Math.max(0, pos / sb)) : 0;
       // Le scroll automatique est IMPOSÉ : la position est pilotée par l'autoplay
@@ -1822,7 +1846,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           // rien ne bouge à l'écran pendant cette seconde.
           autoplayElapsed = 0;
           targetP = currentP;
-          const sbGrace = el.scrollHeight - el.offsetHeight;
+          const sbGrace = scrollExtent;
           if (sbGrace > 0) {
             autoScrollPx = currentP * sbGrace;
             el.scrollTop = autoScrollPx;
@@ -1896,7 +1920,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         const k = Math.min(1, resetElapsed / RESET_MS);
         currentP = resetFrom * (1 - k);
         targetP = currentP;
-        let sbReset = el.scrollHeight - el.offsetHeight;
+        let sbReset = scrollExtent;
         if (sbReset > 0) el.scrollTop = currentP * sbReset;
         // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
         // dès le début du retour (fondu + glissement vers le bas), avant que la
@@ -1969,9 +1993,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
       // starts at Infinity to force the first wireframe build, hence the guard.
       const wireRot = lastWireRotRef.current;
       const visRot = Number.isFinite(wireRot.rx) ? wireRot : { rx: 0, ry: 0 };
-      // Tant qu'une face attend son décodage, la boucle doit rester vivante :
-      // sans elle, le cube à l'arrêt se parke et le délai n'aboutirait jamais.
-      let pendingDecode = false;
       if (!skipActiveRef.current && !resetPlay) {
         // Rembobinage (scroll inverse) : la tête redescend, `diff` devient
         // négatif. Les comptes d'exposition se dé-font alors en miroir — une
@@ -2017,10 +2038,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 faceScrambleStateRef.current[i] = "encoded";
               }
               faceExposureElapsedRef.current[i] += dt;
-              if (
-                faceExposureElapsedRef.current[i] >= LABEL_DECODE_DELAY_MS &&
-                faceScrambleStateRef.current[i] === "encoded"
-              ) {
+              // Décodage immédiat dès l'exposition. Il existait ici un délai
+              // (`LABEL_DECODE_DELAY_MS`) qui retardait le passage au texte lisible,
+              // avec une branche d'attente et un drapeau `pendingDecode` pour tenir
+              // la boucle d'animation en vie le temps de ce délai. Le délai avait
+              // été ramené à 0 : la branche d'attente était donc inatteignable et
+              // le drapeau ne servait plus à rien. Le décodage n'a pas besoin
+              // d'une frame de plus, donc les deux ont été retirés.
+              if (faceScrambleStateRef.current[i] === "encoded") {
                   // `scrambleLabel` part d'un rendu entièrement aléatoire, donc
                   // le décodage démarre proprement même depuis l'état « none ».
                   decodeFaceLabel(i);
@@ -2038,8 +2063,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
                       playPointer,
                     );
                   }
-                } else if (faceScrambleStateRef.current[i] === "encoded") {
-                  pendingDecode = true;
                 }
             } else {
               faceExposureElapsedRef.current[i] = 0;
@@ -2273,14 +2296,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
           reverseEffort = 0;
         }
         rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < SNAP_THRESHOLD && !pendingDecode && !autoplay) {
-        // The cube is at rest: park the loop. `pendingDecode` holds it alive for
-        // the remainder of a face's exposure delay so its label still resolves.
-        // The wait is bounded by `LABEL_DECODE_DELAY_MS`, so the loop always
-        // parks again once every pending label has resolved. `!autoplay` évite de
-        // garer pendant le scroll automatique : `targetP` y relit la position
-        // avec un frame de retard, donc `diff` peut être nul alors que la tête
-        // doit encore descendre.
+      } else if (Math.abs(diff) < SNAP_THRESHOLD && !autoplay) {
+        // The cube is at rest: park the loop.
+        // `!autoplay` évite de garer pendant le scroll automatique : `targetP` y
+        // relit la position avec un frame de retard, donc `diff` peut être nul
+        // alors que la tête doit encore descendre.
         currentP = targetP;
         lastTickTime = 0;
         rafId = null;
@@ -2339,7 +2359,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // On aligne tout de suite la position de scroll réelle sur la tête, et on
         // note cette écriture : c'est elle que `sync` comparera à la position
         // lue pour distinguer notre scroll d'un geste réel.
-        const sbArm = el.scrollHeight - el.offsetHeight;
+        const sbArm = scrollExtent;
         if (sbArm > 0) {
           el.scrollTop = currentP * sbArm;
           autoScrollPx = el.scrollTop;
@@ -2793,7 +2813,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       contactTabRevealedRef.current = false;
       mediaRetractedRef.current = false;
       setMediaRetracted(false);
-      setZoomedFace(-1);
+      zoomedFaceRef.current = -1;
       setZoomedFaces([false, false, false, false, false, false]);
       setContactDone(false);
       setSkipped(false);
@@ -2836,7 +2856,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       reverseDeepest = CUBE_END;
       currentP = CUBE_END;
       targetP = CUBE_END;
-      const sbReset = el.scrollHeight - el.offsetHeight;
+      const sbReset = scrollExtent;
       if (sbReset > 0) el.scrollTop = currentP * sbReset;
       if (!rafId) rafId = requestAnimationFrame(tick);
     };
@@ -2872,15 +2892,20 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // son propre `preventDefault` plus bas, il n'en dépend pas.
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("wheel", blockManualScroll, { passive: false });
-    if (restoreP !== null) {
-      el.scrollTop = restoreP * (el.scrollHeight - el.offsetHeight);
-    }
     sync();
     rafId = requestAnimationFrame(tick);
 
     return () => {
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("wheel", blockManualScroll);
+      // `disconnect()` et non `unobserve()` : l'observateur n'appartient qu'à cet
+      // effet, il n'a rien à observer après.
+      if (extentObserver) {
+        extentObserver.disconnect();
+      } else {
+        window.removeEventListener("resize", onViewportChange);
+        window.removeEventListener("orientationchange", onViewportChange);
+      }
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [faceImages, changeBackground, runFaceSonar, buildSonarLayer, retractMedia, playPointer, stopPointer]);
@@ -3137,7 +3162,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         </button>
 
         <div className="relative z-10 w-full">
-          <div ref={scrollIndicatorRef} className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="relative">
               {/* Icône de la « souris » : décorative, doublée par le texte
                   « SCROLL DOWN » adjacent. Sans `aria-hidden`, certains
@@ -3640,7 +3665,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
                       style={{ zIndex: 5, overflow: "visible" }}
                     />
                     <div
-                      ref={overlayRef}
                       style={{
                         position: "absolute",
                         inset: 0,
