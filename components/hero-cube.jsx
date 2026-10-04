@@ -2139,8 +2139,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
               const labelOn = loc >= SKIP_LABEL_DELAY_MS && loc < SKIP_HOLD_MS - SKIP_LABEL_EXIT_MS;
               labelIdx = labelOn ? galleryFace[j] : -1;
               // Le label n'est « montrable » qu'une fois son décodage terminé :
-              // l'onglet correspondant ne se révèle qu'à ce moment précis.
-              labelReady = labelOn && loc >= SKIP_LABEL_READY_MS;
+              // l'onglet correspondant ne se révèle qu'à ce moment précis. En
+              // pose directe (mobile ou `prefers-reduced-motion`), pas de
+              // décodage : l'onglet se révèle avec le label, dès son apparition.
+              labelReady =
+                labelOn &&
+                (reduceMotion() || isMobileDevice() || loc >= SKIP_LABEL_READY_MS);
             } else if (j < galleryRot.length - 1) {
               const tt = SKIP_TURN_MS > 0
                 ? smoothstep(Math.min(1, (loc - SKIP_HOLD_MS) / SKIP_TURN_MS))
@@ -2168,15 +2172,16 @@ export function HeroCube({ title, subtitle, images = [] }) {
             if (wantText !== lastGalleryLabelTextRef.current) {
               lastGalleryLabelTextRef.current = wantText;
               // Nouvelle face : le compteur repart de zéro et le label réentre en
-              // état « codé ». Sous `prefers-reduced-motion`, pas de brouillage
-              // sur le skip : le texte est posé directement via `textContent`
-              // (`stopGalleryScramble` coupe la boucle éventuelle puis vide le
-              // label). La rotation, elle, garde son rythme normal : réduire la
-              // durée sans réduire l'arc l'accélérerait au lieu de l'adoucir.
+              // état « codé ». Sur mobile ou sous `prefers-reduced-motion`,
+              // pas de brouillage sur le skip : le texte est posé directement
+              // via `textContent` (`stopGalleryScramble` coupe la boucle
+              // éventuelle puis vide le label). La rotation, elle, garde son
+              // rythme normal : réduire la durée sans réduire l'arc
+              // l'accélérerait au lieu de l'adoucir.
               galleryExposureElapsedRef.current = 0;
               if (wantText === "") {
                 stopGalleryScramble();
-              } else if (reduceMotion()) {
+              } else if (reduceMotion() || isMobileDevice()) {
                 stopGalleryScramble();
                 galleryLabel.textContent = wantText;
               } else {
@@ -2187,13 +2192,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
           // Tant que le label est « codé », on cumule son temps d'exposition et
           // on déclenche le décodage une fois le délai écoulé, comme pour les
           // labels de face. Le texte est donc lisible avant le fondu de sortie.
-          // Sous `prefers-reduced-motion`, pas de décodage sur le skip : l'état
-          // reste « none » (texte posé directement ci-dessus), ce bloc ne se
-          // déclenche pas. Si la préférence s'active en cours de hold (état
-          // « encoded » déjà armé), on rabat sur le texte direct plutôt que de
-          // décoder.
+          // Sur mobile ou sous `prefers-reduced-motion`, pas de décodage sur
+          // le skip : l'état reste « none » (texte posé directement
+          // ci-dessus), ce bloc ne se déclenche pas. Si le réglage s'active en
+          // cours de hold (état « encoded » déjà armé), on rabat sur le texte
+          // direct plutôt que de décoder.
           if (labelIdx >= 0 && galleryScrambleStateRef.current === "encoded") {
-            if (reduceMotion()) {
+            if (reduceMotion() || isMobileDevice()) {
               stopGalleryScramble();
               galleryLabel.textContent = FACE_LABELS[labelIdx];
             } else {

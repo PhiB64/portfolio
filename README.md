@@ -178,7 +178,7 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   | Élément | Traitement | Pourquoi |
   |---|---|---|
   | Finale d'autoplay (SHOW+SPIN+TAIL) | durées normales, comme sans la préférence | raccourcir accélérait la rotation (même angle en moins de temps) ; la piste doit atteindre le bout pour dévoiler les liens |
-  | Galerie du skip (tour des 6 faces) | durées normales, rotation conservée ; pas de décodage (texte posé directement) | réduire la durée sans réduire l'arc l'accélérait ; figer les rotations stationnait sur chaque pose sans tour entre les labels |
+  | Galerie du skip (tour des 6 faces) | durées normales, rotation conservée ; pas de décodage (texte posé directement) sur mobile ou sous la préférence | réduire la durée sans réduire l'arc l'accélérait ; figer les rotations stationnait sur chaque pose sans tour entre les labels |
   | Ondes sonar (faces) | quasi instantanées (700/480 ms → 60 ms) | le voile doit être plein avant le basculement du visuel, sinon pop ; seul l'anneau disparaît |
   | Onde de fond | quasi instantanée (700/420 ms → 60 ms) | même raison ; pas de durée explicite sous `reduce`, pour laisser le `??` appliquer la durée réduite |
   | Brouillage des labels de face | état « codé » en image fixe, décodage borné inchangé | le contenu est identique ; seule la boucle infinie de re-brouillage (la seule hors CSS) disparaît |
@@ -189,9 +189,12 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   | **Scrub de scroll du cube** | **non concerné** | contrôle direct de l'utilisateur, pas une animation automatique ; le neutraliser figerait la page sur la carte d'intro |
 
   La préférence est relue à chaque appel, pas au montage : un visiteur qui la
-  change en cours de page voit la séquence suivante en tenir compte. Seule
+  change en cours de page voit la séquence suivante en tenir compte. Le mode
+  mobile suit la même règle : le skip y pose les labels directement, sans
+  décodage. Seule
   exception, les durées du skip (`SKIP_MORPH_MS`, `SKIP_TURN_MS`, `SKIP_LEAD_MS`,
-  `SKIP_GAP_MS`) sont figées à l'armement de l'effet — changer le réglage en
+  `SKIP_GAP_MS`) sont figées à l'armement de l'effet — changer le réglage ou
+  basculer desktop/mobile en
   cours de sweep ne change que le brouillage du label courant (posé
   directement), pas le minutage.
 - **Les deux overlays plein écran sont des `dialog` modaux.** `role="dialog"`,
