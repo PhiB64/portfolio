@@ -719,10 +719,12 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   const stopFaceScramble = (i) => {
     const tl = faceScrambleTlRef.current[i];
-    // `undefined` = aucune animation active, rien à restaurer. `null` = état
-    // « codé » statique sous `prefers-reduced-motion` (`scrambleLabel` en mode
-    // `cipher` y rend une image fixe sans boucle) : le texte affiché est
-    // brouillé, il faut quand même restaurer le libellé final.
+    // `undefined` = aucune animation active, rien à restaurer : c'est l'état
+    // dans lequel `encodeFaceLabel` laisse la ref juste avant de rappeler
+    // `scrambleLabel`. Ce guard accepte aussi `null` parce que le mode `cipher`
+    // en rendait une ici sous `prefers-reduced-motion` — il rend désormais une
+    // timeline dans tous les cas, mais la tolérance reste inoffensive et évite
+    // qu'un retour à `null` rende le texte figé au lieu du libellé final.
     if (tl === undefined) return;
     stopScramble(tl);
     faceScrambleTlRef.current[i] = undefined;
@@ -732,13 +734,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   // Remet le label à l'état « codé » : brouillage continu, jamais résolu.
   // C'est l'animation visible sur toutes les faces tant qu'elles ne sont pas la
-  // plus exposée, et sur celle-ci avant que le décodage ne prenne. Sous
-  // `prefers-reduced-motion`, `scrambleLabel` en mode `cipher` rend une image
-  // fixe et renvoie `null` (pas de boucle infinie) : le label reste brouillé
-  // sans scintiller, puis le décodage borné (`decodeFaceLabel`, ~1 s) suit son
-  // cours normal. `stopScramble`
-  // (`if (tl) tl.kill()`), `stopFaceScramble` (restaure aussi sur `null`) et
-  // le `?.eventCallback` du tick l'acceptent déjà.
+  // plus exposée, et sur celle-ci avant que le décodage ne prenne. La boucle
+  // tourne jusqu'à ce que `decodeFaceLabel` la tue pour lancer la résolution :
+  // un label encodé n'est donc jamais figé, y compris sous
+  // `prefers-reduced-motion` (voir l'arbitrage dans `lib/scramble.js`).
+  // `scrambleLabel` renvoie toujours une timeline en mode `cipher`, et
+  // `stopScramble` / `stopFaceScramble` / le `?.eventCallback` du tick
+  // l'acceptent déjà.
   const encodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
     if (!el) return;
@@ -1575,9 +1577,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Le sweep de la galerie suit la même règle : mêmes durées qu'en régime
     // normal. Le réduire sans réduire l'arc parcouru (six poses + six
     // rotations) l'accélérerait au lieu de l'adoucir, et le figer à zéro
-    // stationnait sur chaque pose sans rotation entre les labels. Seul le
-    // re-brouillage continu est neutralisé : l'état « codé » devient une
-    // image fixe, puis le décodage borné suit son cours normal.
+    // stationnait sur chaque pose sans rotation entre les labels. Le
+    // re-brouillage continu, lui, n'est pas neutralisé : il tourne jusqu'au
+    // décodage de chaque pose, comme en régime normal.
     // Budgets de la fin écrite, segment par segment, et non plus un total unique.
     // La tête de timeline traversait `[CUBE_END, 1]` à vitesse égale, si bien que
     // le spin n'en recevait que 27,6 % (48,8 % sur le chemin du skip) et la
@@ -1650,10 +1652,10 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Les durées du sweep NE dépendent PAS de `prefers-reduced-motion` :
     // réduire la durée sans réduire l'arc parcouru n'adoucit rien, ça
     // accélère (même angle en moins de temps), et les mettre à zéro fige le
-    // cube sur chaque pose sans rotation entre les labels. Seul le
-    // re-brouillage continu est neutralisé sous `reduce` (image fixe, cf.
-    // `scramble.js`) — le décodage borné suit son cours, et la rotation garde
-    // son rythme normal, comme la finale.
+    // cube sur chaque pose sans rotation entre les labels. Le
+    // re-brouillage continu n'est pas neutralisé sous `reduce` : il tourne
+    // jusqu'au décodage de chaque pose (cf. `scramble.js`), et la rotation
+    // garde son rythme normal, comme la finale.
     const SKIP_MORPH_MS = 900;
     // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
     // bascule trop vite après l'apposition des onglets : la transition est
@@ -2195,11 +2197,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
                 // continu s'installe et le texte redevient illisible. Une seule
                 // fois par transition : `encodeFaceLabel` vide et recrée les
                 // spans du DOM, l'appeler à chaque frame reconstruirait le label
-                // en boucle. Sous `prefers-reduced-motion`, c'est une image fixe
-                // (pas de boucle infinie de re-brouillage) : le texte reste codé
-                // sans scintiller, et la face qui devient la plus exposée se
-                // résout normalement — le décodage, lui, est borné et piloté par
-                // l'exposition, donc la préférence ne l'atteint pas.
+                // en boucle. La boucle ainsi armée se poursuit d'elle-même
+                // jusqu'à ce que cette face devienne la plus exposée : c'est
+                // alors `decodeFaceLabel` qui la tue pour lancer la résolution.
                 encodeFaceLabel(i);
                 faceScrambleStateRef.current[i] = "encoded";
               }
