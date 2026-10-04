@@ -37,9 +37,6 @@
     //
     // `localhost:3000` permet de développer le site contre le Worker local
     // (`npm run dev` dans worker/ → http://127.0.0.1:8787).
-    //
-    // Workers AI n'a besoin d'aucune clé : l'authentification passait par le
-    // binding `AI`, désormais retiré.
     "ALLOWED_ORIGINS": "https://phib64.github.io,http://localhost:3000",
 
     // Page d'attribution affichée par OpenRouter sur les appels faite avec la

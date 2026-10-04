@@ -289,9 +289,8 @@ function createLeakFilter() {
 
 /**
  * Lit un flux SSE au format OpenAI et appelle `onDelta` à chaque fragment de
- * texte. Les fournisseurs du Worker (OpenRouter, Workers AI) émettent déjà ce
- * format, le Worker le relaie tel quel — le front n'a donc à connaître aucun des
- * deux.
+ * texte. OpenRouter émet déjà ce format, le Worker le relaie tel quel — le
+ * front n'a donc pas à connaître ce détail.
  *
  * Indique en retour si le flux a produit autre chose que des blancs. Sans ce
  * signal, l'appelant ne peut pas distinguer une réponse vide d'une réponse

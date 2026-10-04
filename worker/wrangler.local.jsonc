@@ -5,7 +5,6 @@
   "name": "portfolio-chat",
   "main": "src/index.js",
   "compatibility_date": "2025-09-01",
-  "ai": { "binding": "AI" },
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:3000",
     "SITE_CONTENT_URL": "http://127.0.0.1:8899/content.json",

@@ -5,6 +5,6 @@
 # posé avec `npm run secret` (soit `wrangler secret put OPENROUTER_API_KEY`).
 # Ce fichier est ignoré par .gitignore.
 #
-# Absente, le Worker saute OpenRouter et répond avec Workers AI : le chat reste
-# disponible, en moins bien.
+# Absente, le Worker répond une erreur explicite (« service non configuré »)
+# au lieu d'appeler sans autorisation.
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

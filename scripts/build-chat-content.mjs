@@ -45,8 +45,8 @@ const OUT = path.join(DIST, "content.json");
  * celui-ci ne soit pas tronqué — le remonter plus que nécessaire coûterait des
  * tokens sans rien apprendre au modèle.
  *
- * Le coût reste marginal : 16 000 caractères font environ 4 000 tokens, contre
- * une allocation de 10 000 neurons par jour.
+ * Le coût reste marginal : 16 000 caractères font environ 4 000 tokens par
+ * requête.
  */
 const MAX_CHARS = 16000;
 
