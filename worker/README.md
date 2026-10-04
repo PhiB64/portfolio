@@ -163,9 +163,10 @@ Une section de douze lignes, et c'est la réponse à « je suis perdu », « je 
 pas à défiler », « où sont les onglets ? », « comment on écrit à Philippe ? ».
 
 Le digest ne décrivait que Philippe et ses projets. La navigation du site n'y
-était pas, et aucune autre source ne pouvait y répondre : le digest est la seule
-source de vérité, le Worker ne lit pas le dépôt. L'assistant disait donc qu'il
-n'avait pas l'information sous les yeux — à raison, elle n'y était pas.
+était pas, et aucune autre source ne pouvait y répondre à l'exécution : le digest
+est la seule source de vérité lue pendant la requête, le Worker n'a pas d'accès
+réseau au dépôt. L'assistant disait donc qu'il n'avait pas l'information sous les
+yeux — à raison, elle n'y était pas.
 
 La section vit dans `USAGE_CONTENT`, dans `lib/portfolio-content.js`, et comme
 `CAREER_CONTENT` elle n'est rendue nulle part sur le site : son seul destinataire
@@ -220,6 +221,23 @@ neutres :
   document.
 
 Une information périmée est moins fausse qu'une date fausse.
+
+#### La seule exception : `CONTACT`
+
+Le Worker importe un bloc du dépôt : `CONTACT`, dans `lib/portfolio-content.js`.
+C'est la seule dépendance de `worker/src/index.js` vers le reste du dépôt.
+
+Il alimente le flux de repli, celui qui s'affiche quand le site est
+injoignable — donc quand le visiteur ne peut aller vérifier l'adresse nulle
+part. Les coordonnées y étaient écrites en dur, et aussi dans
+`components/contact-overlay.jsx`, dans le JSON-LD et dans `USAGE_CONTENT` :
+cinq copies, aucune ne le signalant. Changer d'adresse n'en changeait qu'une.
+
+L'import est résolu au déploiement : esbuild inline le bloc dans le bundle, et
+le Worker n'a rien à charger au moment de la requête (vérifié au
+`wrangler deploy --dry-run` : aucun import résiduel). C'est compatible avec la
+règle ci-dessus — le Worker ne lit pas le dépôt *à l'exécution*, seulement au
+build.
 
 ### 2. Les dépôts GitHub (optionnel, mais plus frais que le site)
 
