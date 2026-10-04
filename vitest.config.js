@@ -15,6 +15,10 @@ export default defineConfig({
     // `// @vitest-environment jsdom` en tête — plus ciblé qu'un environnement
     // global, et plus rapide sur la majorité des tests.
     environment: "node",
-    include: ["lib/**/*.test.{js,jsx}"],
+    // `lib/` pour la logique extraite, `worker/src/` pour le proxy : c'est la
+    // surface d'attaque du déploiement, et elle n'était couverte par rien. Un
+    // `include` qui ne la nomme pas la laisse en dehors par défaut, donc le
+    // motif est explicite plutôt que dérivé.
+    include: ["lib/**/*.test.{js,jsx}", "worker/src/**/*.test.js"],
   },
 });

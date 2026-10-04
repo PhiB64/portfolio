@@ -69,6 +69,67 @@ const LIMITS = {
 };
 
 /**
+ * Délais imposés aux appels sortants.
+ *
+ * Aucun n'existait. `request.signal` ne s'abandonne que si le visiteur ferme la
+ * connexion : un amont lent ou bloqué — GitHub Pages en plein redéploiement,
+ * OpenRouter qui ne répond plus — immobilisait donc un sous-requête pendant
+ * toute la fenêtre d'exécution de la plateforme, et l'échec remontait comme une
+ * panne de plateforme plutôt que comme une panne du service qu'on interroge.
+ *
+ * Les deux valeurs sont séparées parce que les trois appels n'ont pas le même
+ * rôle : le contenu du site est une donnée publics (digest, GitHub) et son
+ * absence est déjà gérée, donc le quelques secondes suffisent ; l'appel
+ * d'inférence, lui, porte la réponse du visiteur.
+ */
+const CONTENT_TIMEOUT_MS = 5_000;
+const INFERENCE_TIMEOUT_MS = 15_000;
+
+/**
+ * Signal qui abandonne une requête sortante après `ms`, en reprenant le
+ * signal du client.
+ *
+ * `AbortSignal.timeout()` ne convient pas au flux d'inférence : il expirerait
+ * quinze secondes après le *début* de la requête, donc au milieu du corps
+ * streaming que l'on renvoie ensuite au visiteur — une réponse longue serait
+ * coupée en cours de route. Le minuteur est donc armé à part et `disarm()` est
+ * appelé dès que les en-têtes arrivent : la borne couvre l'attente, et le flux
+ * ensuite.
+ *
+ * L'écoute du signal du client, elle, n'est jamais désarmée : c'est elle qui
+ * propage l'annulation du visiteur jusqu'au bout du flux, comme le faisait
+ * `signal: request.signal` avant que le délai existe.
+ *
+ * @param {number} ms
+ * @param {AbortSignal} [parent] - signal du client
+ * @returns {{signal: AbortSignal, didTimeOut: () => boolean, disarm: () => void}}
+ */
+function timeoutSignal(ms, parent) {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, ms);
+
+  if (parent?.aborted) {
+    controller.abort();
+  } else {
+    parent?.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    // `AbortError` ne distingue pas les deux causes : le nom du signal est le
+    // même si c'est le délai qui a expiré ou le visiteur qui est parti. C'est à
+    // ça que sert ce prédicat — 499 d'un côté, 502 de l'autre.
+    didTimeOut: () => timedOut,
+    disarm: () => clearTimeout(timer),
+  };
+}
+
+/**
  * Identité et garde-fous du chatbot — c'est-à-dire tout ce que le contenu du
  * site ne peut pas dire.
  *
@@ -186,6 +247,11 @@ async function getSiteDigest(env) {
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
       cf: { cacheTtl: 0, cacheEverything: false },
+      // GitHub Pages peut être en cours de redéploiement, ce qui le rend lent ou
+      // muet quelques secondes. Le `catch` ci-dessous est déjà le comportement
+      // voulu dans ce cas — digest périmé conservé, repli après une fenêtre
+      // courte — mais sans borne il lui fallait attendre que l'amont abandonne.
+      signal: AbortSignal.timeout(CONTENT_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -252,6 +318,10 @@ async function getGithubDigest(env) {
         "User-Agent": "portfolio-chat-worker",
       },
       cf: { cacheTtl: 0, cacheEverything: false },
+      // Même borne que le digest : cette lecture est optionnelle, elle ne doit
+      // pas pouvoir retenir la réponse du visiteur plus d'une réponse ne le
+      // ferait sur son fond.
+      signal: AbortSignal.timeout(CONTENT_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -471,6 +541,34 @@ function withCors(request, env, response) {
   return response;
 }
 
+/**
+ * L'origine de la requête est-elle autorisée à appeler le Worker ?
+ *
+ * Cette question est distincte de celle que pose `withCors`, et il faut les deux
+ * réponses. CORS règle ce que le *navigateur* laisse lire ; il ne dit rien de ce
+ * que le Worker *exécute*. Une requête « simple » — `Content-Type: text/plain`,
+ * donc sans preflight — peut être émise par n'importe quel site en `mode: "no-cors"`
+ * ou via `navigator.sendBeacon` : elle arrive, elle est traitée jusqu'au bout,
+ * OpenRouter est appelé et les tokens sont consommés. Le navigateur n'interdit
+ * ensuite que la *lecture* de la réponse, ce qui n'a aucun effet sur la facture.
+ *
+ * Sans ce rejet, `ALLOWED_ORIGINS` ne protège que les sites honnêtes, et le
+ * quota d'inférence du portfolio reste un relais ouvert pour n'importe quel site
+ * tiers. Rejeter ici coûte un jeton de rate limiting et un appel d'inférence.
+ *
+ * Une requête sans en-tête `Origin` reste acceptée, pour la même raison que dans
+ * `withCors` : le contrôle porte sur les origines listées, pas sur l'absence
+ * d'origine.
+ *
+ * @param {Request} request
+ * @param {{ALLOWED_ORIGINS?: string}} env
+ * @returns {boolean}
+ */
+function originAllowed(request, env) {
+  const origin = request.headers.get("Origin");
+  return !origin || allowedOrigins(env).includes(origin);
+}
+
 function json(request, env, body, status = 200, extraHeaders = {}) {
   return withCors(
     request,
@@ -569,6 +667,16 @@ export default {
       return json(request, env, { error: "Méthode non autorisée." }, 405, { Allow: "POST, OPTIONS" });
     }
 
+    // Rejet avant la jauge, donc avant le moindre coût : une origine inconnue
+    // ne doit consommer ni jeton de rate limiting, ni lecture de digest, ni
+    // requête d'inférence. Voir `originAllowed` — le navigateur n'aurait pas
+    // autorisé la lecture de la réponse, mais il n'empêche pas la requête
+    // d'aboutir, et c'est bien cela qu'il faut empêcher.
+    if (!originAllowed(request, env)) {
+      console.warn("Origine refusée :", request.headers.get("Origin"));
+      return json(request, env, { error: "Origine non autorisée." }, 403);
+    }
+
     // `CF-Connecting-IP` est posé par CloudEdge et n'est pas falsifiable par le
     // client, contrairement à `X-Forwarded-For` — c'est lui qui sert de clé
     // de jauge. La taille du corps est pré-vérifiée via l'en-tête pour rejeter
@@ -657,6 +765,13 @@ export default {
     // Un appel, un modèle, un flux. Le `signal` propage l'annulation : si le
     // visiteur ferme l'onglet, la requête amont est abandonnée au lieu de
     // continuer à consommer des tokens pour rien.
+    //
+    // `timeoutSignal` ajoute la borne d'attente qui manquait. Elle est disarmée
+    // dès que les en-têtes arrivent, et pas avant : le corps est renvoyé en
+    // flux au visiteur, et un minuteur qui courait pendant le streaming couperait
+    // en plein milieu les réponses longues — qui sont la règle ici, pas
+    // l'exception. Le signal du visiteur, lui, reste branché jusqu'au bout.
+    const upstream = timeoutSignal(INFERENCE_TIMEOUT_MS, request.signal);
     let response;
     try {
       response = await fetch(OPENROUTER_ENDPOINT, {
@@ -686,15 +801,26 @@ export default {
           // rappelle la même consigne au modèle.
           reasoning: { enabled: false },
         }),
-        signal: request.signal,
+        signal: upstream.signal,
       });
     } catch (error) {
+      upstream.disarm();
       // 499 : convention nginx pour « fermé par le client ». Le visiteur est
       // parti, il n'a plus personne à prévenir.
-      if (error?.name === "AbortError") return new Response(null, { status: 499 });
+      if (request.signal.aborted) return new Response(null, { status: 499 });
+      // Le délai a expiré : c'est une panne de service, pas un départ. Elle est
+      // dite comme telle dans les logs, parce qu'elle se distingue d'un 5xx
+      // d'OpenRouter et qu'il ne faudra pas les confondre au premier incident.
+      if (upstream.didTimeOut()) {
+        console.error(`OpenRouter n'a pas répondu en ${INFERENCE_TIMEOUT_MS} ms.`);
+        return json(request, env, { error: "Le service de discussion met trop de temps à répondre." }, 504);
+      }
       console.error("Appel OpenRouter impossible :", error?.message ?? error);
       return json(request, env, { error: "Le service de discussion ne répond pas." }, 502);
     }
+    // En-têtes reçus : le minuteur n'a plus rien à surveiller. Le signal reste
+    // armé côté client, donc fermer l'onglet abandonne toujours le flux.
+    upstream.disarm();
 
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => "");

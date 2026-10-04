@@ -416,10 +416,25 @@ curl -i https://portfolio-chat.<subdomain>.workers.dev \
   -d '{"messages":[{"role":"user","content":"Bonjour"}]}'
 ```
 
-Attendu : `200` et un flux `text/event-stream`. Un `403` signifie que l'origine
-n'est pas dans `ALLOWED_ORIGINS` (CORS refusé) ou que la demande a été refusée
-par la modération OpenRouter (voir « Les refus de modération ») — le corps
-`{ error }` dit lequel.
+Attendu : `200` et un flux `text/event-stream`.
+
+Un `403` a deux causes distinctes, et le corps `{ error }` dit laquelle :
+
+- **« Origine non autorisée. »** — l'origine n'est pas dans `ALLOWED_ORIGINS`.
+  Le Worker rejette la requête *avant* la jauge de rate limiting, donc sans
+  consommer de jeton ni de quota d'inférence. Ce rejet est côté serveur, et pas
+  seulement l'absence d'en-tête `Access-Control-Allow-Origin` : une requête
+  « simple » (`text/plain`, sans preflight) émise par un site tiers en
+  `no-cors` ou via `sendBeacon` arrive malgré tout au Worker et serait traitée
+  jusqu'à l'appel d'inférence. CORS n'empêche que la *lecture* de la réponse, il
+  n'empêche pas la requête d'aboutir.
+- **« Je ne peux pas répondre à cette question. »** — la demande a été lue puis
+  refusée par la modération OpenRouter (voir « Les refus de modération »).
+
+Un `429` signifie que la jauge par IP est à cran ; le `Retry-After` indique
+combien de secondes attendre. Un `504` signifie qu'OpenRouter n'a pas renvoyé
+d'en-têtes en 15 secondes — c'est une panne de service, distincte d'un `502`
+qui relèverait d'une erreur renvoyée par l'amont.
 
 Si la clé est absente, la réponse est un `500` (« service non configuré »),
 visible dans `npm run tail`.

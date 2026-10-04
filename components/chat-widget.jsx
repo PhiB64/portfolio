@@ -488,9 +488,13 @@ export function ChatWidget() {
             }
             // 403 : la demande a été lue puis refusée (modération, garde-fou,
             // permissions). Le message du Worker est alors définitif, et surtout
-            // identique à chaque tentative : on ne le relance pas. Les autres
-            // statuts sont des pannes ou des limites, qui se résorbent.
-            if (res.status === 403) retryable = false;
+            // identique à chaque tentative : on ne le relance pas.
+            //
+            // 429 : la jauge du Worker est à cran, et le message dit « Réessayez
+            // dans 60 s ». Relancer tout de suite produirait deux requêtes
+            //parties dans la même minute, donc deux nouveaux 429, et le visiteur
+            // verrait son message contredit par trois tentatives inutiles.
+            if (res.status === 403 || res.status === 429) retryable = false;
 
             throw Object.assign(new Error(message), { retryable });
           }
