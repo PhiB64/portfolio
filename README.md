@@ -178,7 +178,7 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   | Élément | Traitement | Pourquoi |
   |---|---|---|
   | Finale d'autoplay (SHOW+SPIN+TAIL) | durées normales, comme sans la préférence | raccourcir accélérait la rotation (même angle en moins de temps) ; la piste doit atteindre le bout pour dévoiler les liens |
-  | Galerie du skip (tour des 6 faces) | sweep sans défilement (morph, rotations, lead et gap à 0 ; holds conservés) | animation imposée la plus longue du skip ; la finale suit son cours et dévoile les liens |
+  | Galerie du skip (tour des 6 faces) | durées normales, rotation conservée ; seul le brouillage du label est neutralisé (texte posé directement) | réduire la durée sans réduire l'arc l'accélérait ; figer les rotations stationnait sur chaque pose sans tour entre les labels |
   | Ondes sonar (faces) | quasi instantanées (700/480 ms → 60 ms) | le voile doit être plein avant le basculement du visuel, sinon pop ; seul l'anneau disparaît |
   | Onde de fond | quasi instantanée (700/420 ms → 60 ms) | même raison ; pas de durée explicite sous `reduce`, pour laisser le `??` appliquer la durée réduite |
   | Brouillage des labels (faces + galerie) | texte posé directement, pas de boucle `cipher` | le contenu est identique, seule la transition disparaît ; la boucle infinie de re-brouillage est la seule hors CSS |
@@ -191,11 +191,9 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   La préférence est relue à chaque appel, pas au montage : un visiteur qui la
   change en cours de page voit la séquence suivante en tenir compte. Seule
   exception, les durées du skip (`SKIP_MORPH_MS`, `SKIP_TURN_MS`, `SKIP_LEAD_MS`,
-  `SKIP_GAP_MS`) sont figées à l'armement de l'effet — `SKIP_HOLD_MS` (1500 ms,
-  constante partagée du découpage des holds) ne l'est pas, mais sans rotations
-  ni gap le sweep ne défile plus : changer le réglage en cours de sweep ne
-  rebranche pas la galerie, le cas est absorbé sans image figée (label posé
-  directement).
+  `SKIP_GAP_MS`) sont figées à l'armement de l'effet — changer le réglage en
+  cours de sweep ne change que le brouillage du label courant (posé
+  directement), pas le minutage.
 - **Les deux overlays plein écran sont des `dialog` modaux.** `role="dialog"`,
   `aria-modal="true"`, `aria-labelledby` sur le titre de la page, piège de focus
   (Tab reboucle sur le dernier et le premier contrôle), **touche Échap** pour

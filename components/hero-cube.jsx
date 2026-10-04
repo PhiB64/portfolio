@@ -1470,9 +1470,11 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // en place. Seule l'onde de masquage garde sa durée réduite, parce que ce
     // n'est qu'un fondu de voile et non un déplacement d'objet.
     //
-    // Le sweep de la galerie, lui, est mis à zéro (voir `reduceSkip` plus bas)
-    // car c'est le segment le plus long du skip et il n'a pas de fonction de
-    // dévoilement — seule la finale dévoile.
+    // Le sweep de la galerie suit la même règle : mêmes durées qu'en régime
+    // normal. Le réduire sans réduire l'arc parcouru (six poses + six
+    // rotations) l'accélérerait au lieu de l'adoucir, et le figer à zéro
+    // stationnait sur chaque pose sans rotation entre les labels. Seul le
+    // brouillage du label est neutralisé (texte posé directement).
     // Budgets de la fin écrite, segment par segment, et non plus un total unique.
     // La tête de timeline traversait `[CUBE_END, 1]` à vitesse égale, si bien que
     // le spin n'en recevait que 27,6 % (48,8 % sur le chemin du skip) et la
@@ -1542,27 +1544,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // a moment (roughly two seconds, label included), then the cube folds and
     // the finale plays at its own readable pace.
     //
-    // Sous `prefers-reduced-motion`, la galerie ne défile pas : le sweep qui
-    // fait le tour des six faces est une animation imposée, pas un pilotage de
-    // l'utilisateur, et c'est le segment le plus long du skip (six holds + six
-    // rotations) sans fonction de dévoilement — seule la finale dévoile les
-    // liens. Les durées du sweep sont donc mises à zéro : `SKIP_HOLD_MS` n'est
-    // pas une constante de l'effet mais une constante partagée du découpage
-    // des holds (cf. `gallerySetup`, `SEG`), donc `galleryDur` reste non nul
-    // et le sweep stationne sur chaque pose au lieu de défiler. Le reste de
-    // la séquence (gap, finale) suit son cours, et le scrub qui porte ces
-    // durées reste atteignable au clavier par les flèches.
-    const reduceSkip = reduceMotion();
-    const SKIP_MORPH_MS = reduceSkip ? 0 : 900;
+    // Les durées du sweep NE dépendent PAS de `prefers-reduced-motion` :
+    // réduire la durée sans réduire l'arc parcouru n'adoucit rien, ça
+    // accélère (même angle en moins de temps), et les mettre à zéro fige le
+    // cube sur chaque pose sans rotation entre les labels. Seul le brouillage
+    // du label est neutralisé sous `reduce` (texte posé directement, cf. le
+    // tick de la galerie plus bas) — la rotation, elle, garde son rythme
+    // normal, comme la finale.
+    const SKIP_MORPH_MS = 900;
     // Sur mobile, 400 ms de rotation entre deux faces donnaient un cube qui
     // bascule trop vite après l'apposition des onglets : la transition est
     // allongée pour rester lisible sur un écran tactile. 800 ms était
     // cependant encore 2x le desktop, pour la même raison que les budgets de
     // fin ci-dessus : la lisibilité venait de l'easing par palier, qui
     // n'existe plus. On revient à 500 ms.
-    const SKIP_TURN_MS = reduceSkip ? 0 : isMobileDevice() ? 500 : 400;
-    const SKIP_LEAD_MS = reduceSkip ? 0 : 400;
-    const SKIP_GAP_MS = reduceSkip ? 0 : 1100;
+    const SKIP_TURN_MS = isMobileDevice() ? 500 : 400;
+    const SKIP_LEAD_MS = 400;
+    const SKIP_GAP_MS = 1100;
     // Durée totale du finale de skip. Elle ne sert plus qu'àborner la séquence
     // entière : le minutage lui-même est porté par `runFinale`, qui donne au spin
     // son budget propre. SPIN_START + 1 est atteint en SPIN_MS + TAIL_MS.
@@ -2184,9 +2182,8 @@ export function HeroCube({ title, subtitle, images = [] }) {
               // état « codé ». Sous `prefers-reduced-motion`, pas de brouillage :
               // le texte est posé directement via `textContent`
               // (`stopGalleryScramble` coupe la boucle éventuelle puis vide le
-              // label). Ce chemin ne survit en pratique que si le réglage change
-              // à chaud en cours de sweep, la galerie étant court-circuitée à
-              // l'armement (durées à 0) ; il absorbe ce cas sans image figée.
+              // label). La rotation, elle, garde son rythme normal : réduire la
+              // durée sans réduire l'arc l'accélérerait au lieu de l'adoucir.
               galleryExposureElapsedRef.current = 0;
               if (wantText === "") {
                 stopGalleryScramble();
