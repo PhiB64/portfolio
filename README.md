@@ -84,6 +84,7 @@ Les tests couvrent quatre modules de `lib/` et le Worker :
 | Module | Fichier de test | Ce qui est vérifié |
 |---|---|---|
 | `lib/cube-math.js` | `lib/cube-math.test.js` (58 tests) | la géométrie du cube (rotations, paliers de scroll, projection, hit-test) |
+| `lib/face-labels.js` | `lib/face-labels.test.js` (21 tests) | l'élection de la face dont le label se décode : seuil d'exposition, hystérésis, et le fait que **les six** labels passent par une phase codée |
 | `lib/reduced-motion.js` | `lib/reduced-motion.test.js` (6 tests) | la lecture de la préférence, y compris quand elle est absente |
 | `lib/scramble.js` | `lib/scramble-reduced-motion.test.js` (4 tests, jsdom) | branche `cipher` + `prefers-reduced-motion` : image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact |
 | `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (22 tests, jsdom) | piège de focus, Échap, restauration du focus |
@@ -215,6 +216,7 @@ portfolio/
 ├── lib/                      # Logique pure et données (testée par vitest)
 │   ├── cube-math.js          # Calculs géométriques du cube (+ .test.js, 58 tests)
 │   ├── cube-media.js         # Source unique des médias des 6 faces
+│   ├── face-labels.js        # Élection de la face qui décode (+ .test.js, 21 tests)
 │   ├── portfolio-content.js  # Données éditoriales (cube + digest chat)
 │   ├── reduced-motion.js     # Lecture prefers-reduced-motion (+ .test.js)
 │   ├── scramble.js           # Animation de brouillage de texte (+ .test.js partiel)
@@ -255,6 +257,13 @@ fichier doit donc rester lisible — `web.webm` et non `web-dev-2.webm`.
 ### Modifier les labels
 
 Les labels des faces sont définis dans `lib/cube-math.js` via `FACE_LABELS`.
+
+Une face ne se décode que si son label est révélé **et** qu'elle est réellement
+présentée à l'écran : au-delà de `FACE_LABEL_DECODE_MIN_EXPOSURE` (0,5), dans
+`lib/face-labels.js`. Ce seuil n'est pas cosmétique — sans lui, la première face
+révélée était élue d'office, encore bieu, et son label s'affichait déjà décodé
+sans jamais avoir été brouillé. La raison est détaillée dans le module, et le
+comportement est verrouillé par `lib/face-labels.test.js`.
 
 ### Modifier les couleurs
 

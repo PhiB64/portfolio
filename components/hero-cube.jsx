@@ -18,12 +18,12 @@ import {
   faceTransform,
   findClickedFace,
   getCubeRotation,
-  isFaceVisible,
   isVideoUrl,
   nextCubeStepBound,
   rotateVecByXY,
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
+import { electDecodingFace, readFaceExposure } from "../lib/face-labels";
 import { FACE_MEDIA, faceSrcSet } from "../lib/cube-media";
 import { reduceMotion as readReducedMotion } from "../lib/reduced-motion";
 import { useDialogFocus } from "../lib/use-dialog-focus";
@@ -183,18 +183,10 @@ const DRAG_EASE_MS = 450;
 // la tween (`onComplete`), il apparaît donc désormais à 1 s, bien après que le
 // mot est lisible — voir le commentaire dans la boucle de labels.
 const FACE_LABEL_DECODE_MS = 1000;
-// Marge de rétention de la face décodée, en « exposition » (composante z de la
-// normale après rotation, cf. `faceFrontAmount`). Près d'une vue de coin, les
-// expositions de deux faces se croisent à ~0,025 par degré de rotation : sans
-// marge, l'argmax changerait de camp au moindre jitter de scroll ou de drag et
-// les deux labels se re-coderaient sans arrêt, sur des faces qu'aucun ne
-// distingue. La détentrice ne cède donc qu'à un rival qui la dépasse franchement.
-// 0,02 absorbe ~0,8° de rotation, soit ~3 px de scroll — large devant le bruit
-// d'un trackpad. Et le handover réel n'en sufferte pas : une face doit
-// dépasser de 0,02 pour prendre le relais, donc ~0,8° de rotation de plus, sur
-// une piste qui en parcourt 1080°. Au repos la marge n'est même pas engagée,
-// le cube étant épinglé sur une pose nette (exposition 1,000 contre 0,000).
-const FRONT_FACE_HYSTERESIS = 0.02;
+// La face qui détient le décodage ne le rend qu'à un rival franchement plus
+// exposé, et ne l'obtient qu'une fois réellement présentée à l'écran. Les deux
+// seuils — rétention et exposition minimale — vivent dans `lib/face-labels.js`,
+// avec l'élection elle-même : c'est de la logique, elle est testée là-bas.
 // Facteur de projection perspective : une face frontale (translateZ 150px, cube
 // 300px) sous une perspective de 1200px est rendue 1200/(1200-150) = 8/7 plus
 // grande que l'overlay 2D. C'est l'échelle qu'il faut au label du skip pour
@@ -417,8 +409,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // données de ses propres faces. Un tableau de ref plutôt qu'une allocation par
   // frame, cette boucle tournant à 60 Hz.
   const faceVisibleRef = useRef([false, false, false, false, false, false]);
-  // Face qui détient le décodage, et qui ne le rend qu'à un rival franchement
-  // plus exposé (`FRONT_FACE_HYSTERESIS`). `-1` = personne.
+  // Face qui détient le décodage. Elle ne le rend qu'à un rival franchement plus
+  // exposé, et ne l'obtient qu'une fois réellement présentée à l'écran — les
+  // deux seuils sont dans `lib/face-labels.js`. `-1` = personne.
   const frontFaceRef = useRef(-1);
   const clickLabelRefs = useRef([]);
   // Icône de pointer : le conteneur porte l'entrée et la sortie, le glyphe le
@@ -2119,22 +2112,19 @@ export function HeroCube({ title, subtitle, images = [] }) {
         // et soient re-découverts au prochain passage avant.
         const rewinding = diff < 0;
         const nowVisible = faceVisibleRef.current;
+        const exposure = readFaceExposure(visRot);
+        for (let i = 0; i < 6; i++) nowVisible[i] = exposure.visible[i];
 
         // Phase de lecture. Le cube en expose trois d'un coup : dire laquelle est
         // la plus exposée demande de les avoir toutes mesurées, alors que la
         // machine à états se joue face par face. D'où les deux passes — on
         // désigne d'abord, on n'écrit qu'ensuite.
-        let bestIndex = -1;
-        let bestAmount = -Infinity;
+        //
+        // Le compte d'expositions se met à jour dans la même passe, avant
+        // l'élection : une face qui vient d'atteindre le seuil doit pouvoir
+        // concourir dès cette frame, sans quoi son label attendrait la suivante.
         for (let i = 0; i < 6; i++) {
-          const visible = isFaceVisible(
-            FACE_NORMALS[i][0],
-            FACE_NORMALS[i][1],
-            FACE_NORMALS[i][2],
-            visRot.rx,
-            visRot.ry,
-          );
-          nowVisible[i] = visible;
+          const visible = exposure.visible[i];
           if (visible && !faceWasVisibleRef.current[i]) {
             if (!rewinding) {
               faceVisibilityCountRef.current[i]++;
@@ -2147,47 +2137,13 @@ export function HeroCube({ title, subtitle, images = [] }) {
               faceVisibilityCountRef.current[i] - 1,
             );
           }
-          // Seules les faces au label révélé concourent. Pendant l'introduction
-          // (aucun compte atteint le seuil) un argmax global désignerait une face
-          // muette, et le label d'une face voisine resterait codé : le décodage
-          // n'existerait que par accident, à la rotation près du seuil.
-          if (visible && labelRevealed(i)) {
-            const amount = faceFrontAmount(
-              FACE_NORMALS[i][0],
-              FACE_NORMALS[i][1],
-              FACE_NORMALS[i][2],
-              visRot.rx,
-              visRot.ry,
-            );
-            if (amount > bestAmount) {
-              bestAmount = amount;
-              bestIndex = i;
-            }
-          }
         }
 
-        // Hystérésis : la détentrice ne cède qu'à un rival franchement plus
-        // exposé. Les poses où deux faces sont exactement à égalité sont isolées
-        // dans le plan (rx, ry) — ce sont les vues de coin, le long d'une
-        // diagonale du cube — mais on en traverse une en scrollant, et de part
-        // et d'autre les deux expositions se croisent à environ 0,025 par degré.
-        // Sans marge, le moindre jitter de scroll ou de drag y ferait changer
-        // l'argmax de camp : deux labels se re-codant et se résolvant sans arrêt,
-        // sur des faces qu'aucun ne distingue. Au repos la question ne se pose
-        // pas — le cube est épinglé sur une pose nette, exposition 1,000 contre
-        // 0,000 pour la suivante. Voir `FRONT_FACE_HYSTERESIS`.
-        let frontFace = bestIndex;
-        const held = frontFaceRef.current;
-        if (held >= 0 && nowVisible[held] && labelRevealed(held)) {
-          const heldAmount = faceFrontAmount(
-            FACE_NORMALS[held][0],
-            FACE_NORMALS[held][1],
-            FACE_NORMALS[held][2],
-            visRot.rx,
-            visRot.ry,
-          );
-          if (heldAmount >= bestAmount - FRONT_FACE_HYSTERESIS) frontFace = held;
-        }
+        // Qui se décode : la plus exposée des faces éligibles, la détentrice
+        // reconduite tant qu'aucun rival ne la dépasse franchement. Le seuil
+        // d'exposition minimale est ce qui manquait pour que le PREMIER label
+        // ait, lui aussi, sa phase codée — voir `lib/face-labels.js`.
+        const { index: frontFace } = electDecodingFace(exposure, labelRevealed, frontFaceRef.current);
         frontFaceRef.current = frontFace;
 
         // Phase d'écriture.
@@ -2199,11 +2155,15 @@ export function HeroCube({ title, subtitle, images = [] }) {
               faceExposureElapsedRef.current[i] += dt;
               if (i === frontFace) {
                 // La plus exposée : le brouillage se résout de gauche à droite.
-                // Le passage par « encoded » est sauté — `scrambleLabel` part
-                // d'un rendu entièrement aléatoire, donc le décodage démarre
-                // proprement aussi depuis l'état « none », et l'encodage que la
-                // même frame annule ne ferait que reconstruire les spans du DOM
-                // pour les détruire aussitôt.
+                // Le passage par « encoded » est sauté quand la face vient de
+                // l'état « none » — `scrambleLabel` part d'un rendu entièrement
+                // aléatoire, donc le décodage démarre proprement aussi sans
+                // passer par le codage, et l'encodage que la même frame annule
+                // ne ferait que reconstruire les spans du DOM pour les détruire
+                // aussitôt. Sans effet de bord désormais : l'élection ne
+                // désigne plus une face bieuuse, donc ce « none » n'est atteint que
+                // sur une face réellement présentée — voir
+                // `FACE_LABEL_DECODE_MIN_EXPOSURE`.
                 if (
                   faceScrambleStateRef.current[i] !== "decoding" &&
                   faceScrambleStateRef.current[i] !== "decoded"
