@@ -25,8 +25,11 @@ Site one-page immersif avec un **cube 3D interactif** qui présente les compéte
 - Assistant de chat (optionnel) : `NEXT_PUBLIC_CHAT_ENDPOINT` vers un Worker
   Cloudflare qui relaie OpenRouter — sans cette variable, le bouton de chat
   n'est pas rendu (voir `worker/README.md`)
-- Formulaire de contact via Formspree (`NEXT_PUBLIC_FORMSPREE_ENDPOINT`,
-  repli `mailto` en cas d'échec — voir `components/contact-overlay.jsx`)
+- Formulaire de contact via Formspree (`NEXT_PUBLIC_FORMSPREE_ENDPOINT`),
+  repli `mailto` en cas d'échec — voir `components/contact-overlay.jsx`.
+  L'envoi est filtré côté client avant tout appel réseau : pot de miel,
+  délai minimal de remplissage, bornes de longueur, délai d'expiration.
+  Les règles sont dans `lib/contact-form.js`, sans React, donc testées.
 - Responsive design (mobile, tablette, desktop)
 - Gestion des événements tactiles et pointer
 - SEO optimisé (metadata, Open Graph, JSON-LD)
@@ -79,16 +82,52 @@ npm test           # une passe
 npm run test:watch # en continu
 ```
 
-Les tests couvrent quatre modules de `lib/` et le Worker :
+Les tests couvrent `lib/` et le Worker — 293 tests, 16 fichiers :
 
 | Module | Fichier de test | Ce qui est vérifié |
 |---|---|---|
 | `lib/cube-math.js` | `lib/cube-math.test.js` (58 tests) | la géométrie du cube (rotations, paliers de scroll, projection, hit-test) |
+| `lib/cube-finale.js` | `lib/cube-finale.test.js` (18 tests) | le contrat de temps de la fin : budgets d'animation, ordre des paliers, skip |
+| `lib/cube-timeline.js` | `lib/cube-timeline.test.js` (13 tests) | la construction de la chronologie des apparitions |
+| `lib/cube-tour.js` | `lib/cube-tour.test.js` (15 tests) | la tournée tirée au sort des faces |
+| `lib/cube-sonar.js` | `lib/cube-sonar.test.js` (10 tests) | la détection du survol et de la distance |
+| `lib/cube-viewport.js` | `lib/cube-viewport.test.js` (14 tests) | le contrat de fenêtre : métriques, orientation, verrouillage paysage |
 | `lib/face-labels.js` | `lib/face-labels.test.js` (21 tests) | l'élection de la face dont le label se décode : seuil d'exposition, hystérésis, et le fait que **les six** labels passent par une phase codée |
+| `lib/leak-filter.js` | `lib/leak-filter.test.js` (30 tests) | le filtrage des fuites de modération sur un flux fragmenté |
+| `lib/device.js` | `lib/device.test.js` (11 tests) | la détection de capacité et de préférence |
 | `lib/reduced-motion.js` | `lib/reduced-motion.test.js` (6 tests) | la lecture de la préférence, y compris quand elle est absente |
 | `lib/scramble.js` | `lib/scramble-reduced-motion.test.js` (4 tests, jsdom) | branche `cipher` + `prefers-reduced-motion` : image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact |
 | `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (22 tests, jsdom) | piège de focus, Échap, restauration du focus |
-| `worker/src/index.js` | `worker/src/index.test.js` (16 tests) | l'**ordre** des refus du Worker : origine non autorisée rejetée avant la jauge et tout appel sortant, bornes de taille, validation des messages, fail-fast de la clé d'API |
+| `lib/chat-request.js` | `lib/chat-request.test.jsx` (12 tests) | le cycle de vie d'une requête du chat : course sur le contrôleur d'annulation, délai, distinction fermeture / expiration |
+| `lib/contact-form.js` | `lib/contact-form.test.js` (18 tests) | les décisions d'envoi du formulaire : pot de miel, délai de remplissage, bornes de longueur |
+| `components/contact-overlay.jsx` | `lib/contact-overlay.test.jsx` (9 tests, jsdom) | le câblage de ces décisions dans le composant : le piège est soumis, les bornes atteignent le HTML, un envoi automatique ne part pas |
+| `worker/src/index.js` | `worker/src/index.test.js` (32 tests) | l'**ordre** des refus du Worker, la borne du flux, la reconstruction du prompt, et le traitement d'un refus amont |
+
+### Ce que valent ces tests
+
+Un test qui n'a jamais échoué ne prouve rien. Les fichiers ci-dessus ont été
+soumis à **mutation** : on réintroduit le défaut, on vérifie que la suite le voit,
+on restaure. Les cas vérifiés :
+
+| Défaut réintroduit | Tests qui échouent |
+|---|---|
+| le Worker laisse passer quand `CHAT_LIMIT` manque | 3 |
+| la coupure des tours `assistant` fabriqués est retirée | 1 |
+| le refus sans `CF-Connecting-IP` devient une clé partagée | 1 |
+| la borne de flux (`capStream`) est neutralisée | 1 |
+| le pot de miel du formulaire est supprimé | 2 |
+| le délai de remplissage est ignoré | 2 |
+| le champ-piège est renvoyé dans le corps de la requête | 2 |
+| le piège du formulaire revient à un `onChange` générique | 1 |
+| le filtre automatique du formulaire est retiré | 2 |
+| la validation de saisie ne s'exécute plus | 2 |
+| `chat-request` retombe sur un `finally` inconditionnel | 3 |
+
+Deux défauts sont apparus **dans du code écrit dans cette même vague**, trouvés
+par ces tests : `lib/chat-request.js` écrasait le minuteur précédent sans
+l'annuler, et le champ-piège du formulaire était présent, soumis, et jamais lu
+(l'état et le DOM portaient deux noms différents). Les deux sont des défauts
+qu'aucune relecture ne voit.
 
 Le fichier du Worker ne teste pas les réponses — ce sont des réponses de modèle,
 sans intérêt ici — mais **ce que le Worker refuse de faire avant de décider**. Un
@@ -101,8 +140,8 @@ documentent la propriété de sécurité, et pas seulement le code.
 Non testés : `lib/cube-media.js` (simple table + `faceSrcSet()`),
 `lib/portfolio-content.js` (données pures, sans logique),
 `scripts/build-chat-content.mjs` (digest + troncature), ainsi que
-`components/` et `app/` — `vitest.config.js` nomme explicitement `lib/` et
-`worker/src/` dans son `include`.
+`app/` — `vitest.config.js` nomme explicitement `lib/` et `worker/src/` dans son
+`include`.
 
 Le premier est le seul module testé sans DOM ; c'est aussi
 le seul où une régression passerait inaperçue, car une interpolation de pose
@@ -110,11 +149,10 @@ erronée ne produit aucune erreur, seulement un cube qui tourne mal. Les chiffre
 cités dans ses commentaires — pointe de vitesse, inégalité des paliers — sont
 vérifiés par ces tests.
 
-Les deux fichiers sur DOM portent le pragma `// @vitest-environment jsdom`
-en tête (`vitest.config.js` reste en environnement `node` par défaut : le pragma
-n'est payé que par les fichiers qui en ont besoin). Le dernier
-(`use-dialog-focus`) a en plus exigé `@testing-library/react` et le réglage
-JSX automatique du config.
+Les fichiers sur DOM portent le pragma `// @vitest-environment jsdom` en tête
+(`vitest.config.js` reste en environnement `node` par défaut : le pragma n'est
+payé que par les fichiers qui en ont besoin). Trois d'entre eux ont en plus
+exigé `@testing-library/react` et le réglage JSX automatique du config.
 
 ## Déploiement
 
@@ -151,14 +189,26 @@ normalement, simplement sans bouton de chat.
 - **Relais.** `worker/` (Cloudflare Worker `portfolio-chat`, voir
   `worker/README.md` et `worker/wrangler.jsonc`) lit ce digest (cache 10 min)
   plus les dépôts GitHub publics (`GITHUB_USER`, cache 1 h, forks écartés) et
-  relaie OpenRouter (`openrouter/free`, `max_tokens: 500`). Réponses limitées à
-  10 requêtes/min par IP (binding `CHAT_LIMIT`), CORS restreint à
-  `ALLOWED_ORIGINS`, system prompt injecté côté Worker.
+  relaie OpenRouter (`openrouter/free`, `max_tokens: 500`). Garde-fous du
+  relais : 10 requêtes/min par IP via le binding `CHAT_LIMIT`, CORS restreint à
+  `ALLOWED_ORIGINS`, system prompt reconstruit côté Worker, corps de requête lu
+  en bornant la mémoire, flux de réponse plafonné à 256 KiB.
+- **Fail-closed.** L'absence de `CHAT_LIMIT` renvoie un **503**, pas un refus
+  de quota : le binding manquant est une erreur de déploiement, or c'est
+  précisément le cas qui exposerait le relais le plus. Une requête sans
+  `CF-Connecting-IP` est refusée (400) plutôt que regroupée sous une clé de
+  jauge partagée — sinon un attaquant sans en-tête vide le seau de tous les
+  visiteurs légitimes.
 - **Interface.** `components/chat-widget.jsx` : historique limité aux 16
   derniers messages, 2 relances (`MAX_RETRIES = 2`), refus de modération non
   relancés (`retryable: false`), `stripMarkdown()` à l'affichage (le front rend
   le texte brut avec `whitespace-pre-wrap`). Panneau non modal : Échap pour
   fermer, page tabulable derrière.
+- **Cycle de vie.** `lib/chat-request.js` porte le contrôleur d'annulation, son
+  délai (`REQUEST_TIMEOUT_MS = 40 s`, couvrant le `send` entier et non chaque
+  tentative) et la distinction entre fermeture du panneau et expiration — les
+  deux produisent la même `AbortError`, et sans cette distinction une panne du
+  service s'affichait comme un geste du visiteur, donc en silence.
 
 ## Version textuelle (`/projects`)
 
@@ -207,24 +257,39 @@ portfolio/
 │   ├── globals.css           # Styles globaux et thème
 │   └── manifest.js           # Manifeste PWA
 ├── components/               # Composants React
-│   ├── hero-cube.jsx         # Cube 3D interactif principal (~3800 lignes)
+│   ├── hero-cube.jsx         # Cube 3D interactif principal (3192 lignes)
 │   ├── chat-widget.jsx       # Panneau de l'assistant (non modal)
 │   ├── contact-overlay.jsx   # Overlay de contact (Formspree + mailto)
 │   └── cube/
-│       ├── project-content.jsx # Rendu des 6 rubriques depuis PROJECT_CONTENT
-│       └── project-tabs.jsx    # Onglets + bouton retour
+│       ├── cube-face.jsx        # Les 6 faces : média, label, orientation
+│       ├── cube-nav.jsx          # Flèches de navigation entre faces
+│       ├── click-pointer.jsx     # Pointeur de survol
+│       ├── intro-marker.jsx      # Marqueur d'introduction
+│       ├── orientation-lock.jsx  # Verrouillage paysage
+│       ├── project-content.jsx   # Rendu des 6 rubriques depuis PROJECT_CONTENT
+│       └── project-tabs.jsx      # Onglets + bouton retour
 ├── lib/                      # Logique pure et données (testée par vitest)
 │   ├── cube-math.js          # Calculs géométriques du cube (+ .test.js, 58 tests)
 │   ├── cube-media.js         # Source unique des médias des 6 faces
+│   ├── cube-finale.js        # Contrat de temps de la fin (+ .test.js, 18 tests)
+│   ├── cube-timeline.js      # Chronologie des apparitions (+ .test.js, 13)
+│   ├── cube-tour.js          # Tournée tirée au sort (+ .test.js, 15)
+│   ├── cube-sonar.js         # Survol et distance (+ .test.js, 10)
+│   ├── cube-viewport.js      # Contrat de fenêtre (+ .test.js, 14)
 │   ├── face-labels.js        # Élection de la face qui décode (+ .test.js, 21 tests)
+│   ├── leak-filter.js        # Filtrage des fuites de modération (+ .test.js, 30)
+│   ├── chat-request.js       # Cycle de vie d'une requête du chat (+ .test.jsx, 12)
+│   ├── contact-form.js       # Décisions d'envoi du formulaire (+ .test.js, 18)
+│   ├── device.js             # Détection de capacité (+ .test.js, 11)
 │   ├── portfolio-content.js  # Données éditoriales (cube + digest chat)
 │   ├── reduced-motion.js     # Lecture prefers-reduced-motion (+ .test.js)
 │   ├── scramble.js           # Animation de brouillage de texte (+ .test.js partiel)
+│   ├── site-url.js           # Racine publique du site (canonical, OG, JSON-LD)
 │   └── use-dialog-focus.js   # Piège de focus + Échap (+ .test.jsx)
 ├── scripts/
 │   └── build-chat-content.mjs # Digest dist/content.json (postbuild)
 ├── worker/                   # Proxy OpenRouter (Cloudflare, voir son README)
-│   ├── src/index.js          # Relais + system prompt + garde-fous
+│   ├── src/index.js          # Relais + system prompt + garde-fous (1102 lignes)
 │   ├── wrangler.jsonc        # Config (origines, digest, GitHub, rate limit)
 │   └── README.md             # Mise en place, sources, streaming, rate limiting
 ├── public/                   # Assets statiques (recopiés tels quels dans dist/)
@@ -237,8 +302,8 @@ portfolio/
 │   ├── cv.pdf                # CV téléchargeable
 │   └── icon.webp / favicon.webp # Icônes PWA
 ├── eslint.config.js          # Lint (ignore dist, .next, node_modules, .wrangler)
-├── vitest.config.js          # Tests (env node, include lib/, pragma jsdom ciblé)
-└── .github/workflows/        # CI/CD GitHub Actions (lint + tests informatifs, build dist/)
+├── vitest.config.js          # Tests (env node, include lib/ et worker/src/, pragma jsdom ciblé)
+└── .github/workflows/        # CI/CD GitHub Actions (lint + tests bloquants, build dist/)
 ```
 
 ## Personnalisation
