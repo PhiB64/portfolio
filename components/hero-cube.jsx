@@ -2,11 +2,16 @@
 
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import anime from "animejs";
-import { Undo2, MousePointer2 } from "lucide-react";
+
 
 import { renderProjectContent } from "./cube/project-content";
-import { ProjectTabs, BackButton, PROJECT_LINKS } from "./cube/project-tabs";
+import { ProjectTabs, BackButton } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
+import { OrientationLock } from "./cube/orientation-lock";
+import { ClickPointer } from "./cube/click-pointer";
+import { CubeFaces } from "./cube/cube-face";
+import { IntroMarker } from "./cube/intro-marker";
+import { CubeNav } from "./cube/cube-nav";
 import {
   FACE_LABELS,
   FACE_NORMALS,
@@ -14,7 +19,6 @@ import {
   LIGHT_DIR,
   computeWireframe,
   faceFrontAmount,
-  faceTransform,
   findClickedFace,
   getCubeRotation,
   isVideoUrl,
@@ -23,7 +27,7 @@ import {
 } from "../lib/cube-math";
 import { scrambleLabel, stopScramble } from "../lib/scramble";
 import { electDecodingFace, readFaceExposure } from "../lib/face-labels";
-import { FACE_MEDIA, faceSrcSet } from "../lib/cube-media";
+import { FACE_MEDIA } from "../lib/cube-media";
 import { reduceMotion as readReducedMotion } from "../lib/reduced-motion";
 import { useDialogFocus } from "../lib/use-dialog-focus";
 import {
@@ -104,20 +108,6 @@ const FACE_LABEL_DECODE_MS = 1000;
 // grande que l'overlay 2D. C'est l'échelle qu'il faut au label du skip pour
 // égaliser sa taille réelle avec celle des labels de face, mobile comme desktop.
 const CUBE_FACE_PROJECTION_SCALE = 1200 / 1050;
-// Épaisseur et taille de police des labels de face, ramenées à celle du label du
-// skip. Palette, halo et échelle rendue sont désormais identiques : ce qui
-// restait était le rendu. Le label du skip est une couche 2D, rasterisée à sa
-// taille finale et en anticrénelage LCD (le navigateur réserve l'antialiasing à
-// sous-pixels aux surfaces non transformées) ; le label de face vit dans le
-// sous-arbre `preserve-3d`, où la transform est réécrite à chaque frame. Il est
-// donc rasterisé à sa taille source puis agrandi par la perspective, en
-// anticrénelage grayscale : traits plus fins, halo dilué — d'où l'air plus petit
-// et plus terne, que les deux égalisations suivantes corrigent ensemble.
-// 100 % du facteur de projection (1.14) restore l'épaisseur de trait mais rend le
-// label franchement trop grand, car ce même facteur s'applique déjà au rendu. On
-// prend donc une compensation partielle, calée à l'œil : c'est le seul endroit
-// à toucher pour retoucher ce rendu.
-const FACE_LABEL_FONT_SCALE = 1.07;
 // Nombre d'expositions avant qu'un label de face apparaisse et se mette à
 // brouiller. Constante partagée car trois sites en dépendent (affichage du
 // label, clic sur la face, levée du pin) et doivent rester alignés.
@@ -141,18 +131,6 @@ const POINTER_TAP_MS = 130;
 const POINTER_RELEASE_MS = 300;
 const POINTER_HOLD_MS = 700;
 const POINTER_EXIT_MS = 400;
-// Géométrie du pointer, rassemblée ici parce que les trois valeurs se répondent :
-// la pointe de la flèche, le centre de l'anneau et le décalage du glyphe. Les
-// dupliquer dans deux styles les désynchroniserait au premier ajustement.
-const POINTER_GLYPH_SIZE = 26;
-const POINTER_RING_SIZE = 72;
-// `MousePointer2` est tracée dans une viewBox 24, pointe en haut à gauche. Sa
-// pointe est le coin arrondi qui relie le début du tracé à la première oblique,
-// à 4.14 sur chaque axe — pas 12, le milieu de la boîte. C'est ce point qui
-// doit viser le centre de l'anneau : l'onde part du contact, pas du milieu du
-// glyphe. D'où la conversion en px, pour que changer `POINTER_GLYPH_SIZE` ne
-// déplace pas la pointe.
-const POINTER_TIP = (4.14 * POINTER_GLYPH_SIZE) / 24;
 // Retard de l'onde de fond après le clic sur une face, et durée de l'onde
 // elle-même. Sur mobile les deux sont raccourcis : le fond est la seule chose
 // qui change au clic, et 380 ms d'attente plus 700 ms de propagation laissaient
@@ -3001,213 +2979,29 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
         <div className="relative z-10 w-full">
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="relative">
-              {/* Icône de la « souris » : décorative, doublée par le texte
-                  « SCROLL DOWN » adjacent. Sans `aria-hidden`, certains
-                  lecteurs annoncent un « graphique » sans nom au milieu de
-                  l'intro. */}
-              <svg
-                aria-hidden="true"
-                focusable="false"
-                width={squareSize}
-                height={squareSize}
-                viewBox="0 0 300 300"
-                style={{ overflow: "visible" }}
-              >
-                <polygon
-                  ref={morphBodyRef}
-                  points="135,150 136,144 139,139 144,136 150,135 156,136 161,139 164,144 165,150 165,155 165,160 165,165 165,170 164,176 161,181 156,184 150,185 144,184 139,181 136,176 135,170 135,165 135,160 135,155"
-                  fill="#0a0f1c"
-                  stroke="#00a5b0"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  vectorEffect="non-scaling-stroke"
-                  style={{ transformOrigin: "150px 150px" }}
-                />
-                <g ref={morphWheelRef}>
-                  <line
-                    x1="150"
-                    y1="146"
-                    x2="150"
-                    y2="152"
-                    stroke="#00a5b0"
-                    strokeWidth={4}
-                    strokeLinecap="round"
-                    className="wheel-anim"
-                  />
-                </g>
-                <defs>
-                  <clipPath id="line-clip">
-                    <rect x="0" y="0" width="300" height="150" />
-                  </clipPath>
-                  <clipPath id="line-clip-below">
-                    <rect x="0" y="150" width="300" height="150" />
-                  </clipPath>
-                </defs>
-                <g clipPath="url(#line-clip)">
-                  <g ref={namesRef} style={{ transform: "translateY(70px)" }}>
-                    <text
-                      x="150"
-                      y="136"
-                      textAnchor="middle"
-                      textLength="300"
-                      lengthAdjust="spacingAndGlyphs"
-                      fill="#00a5b0"
-                      stroke="none"
-                      style={{
-                        fontSize: 42,
-                        fontWeight: 200,
-                        fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
-                        userSelect: "none",
-                      }}
-                    >
-                      {title}
-                    </text>
-                  </g>
-                </g>
-                <g clipPath="url(#line-clip-below)">
-                  <g ref={subtitleRef} style={{ transform: "translateY(-70px)" }}>
-                    <text
-                      x="150"
-                      y="178"
-                      textAnchor="middle"
-                      textLength="300"
-                      lengthAdjust="spacingAndGlyphs"
-                      fill="#ffffff"
-                      stroke="none"
-                      style={{
-                        fontSize: 30,
-                        fontWeight: 200,
-                        fontFamily: "Helvetica Neue, Helvetica, Arial, sans-serif",
-                        userSelect: "none",
-                      }}
-                    >
-                      {subtitle}
-                    </text>
-                  </g>
-                </g>
-              </svg>
-              <div
-                ref={scrollHintRef}
-                // Même statut que le label du pointer : redondant avec
-                // l'`aria-label` de la zone de clic, et en anglais dans une
-                // page `lang="fr"`.
-                aria-hidden="true"
-                className="absolute left-1/2 -translate-x-1/2 text-sm text-[#00a5b0] tracking-[0.2em] leading-tight text-center whitespace-nowrap uppercase"
-                style={{ top: "calc(100% - 78px)" }}
-              >
-                SCROLL
-                <br />
-                DOWN
-              </div>
-            </div>
+            <IntroMarker
+              squareSize={squareSize}
+              title={title}
+              subtitle={subtitle}
+              morphBodyRef={morphBodyRef}
+              morphWheelRef={morphWheelRef}
+              namesRef={namesRef}
+              subtitleRef={subtitleRef}
+              hintRef={scrollHintRef}
+            />
           </div>
-              <nav aria-label="Rubriques du portfolio" className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4">
-                {PROJECT_LINKS.map((link, i) => {
-                  const shown =
-                    zoomedFaces[i] ||
-                    (skipped && (skipRevealedFaces[i] || contactDone));
-                  return (
-                    <button
-                      key={link.name}
-                      onClick={() => openProject(i)}
-                      onFocus={(e) => {
-                        // `opacity: 0` n'empêche ni le focus ni l'activation au
-                        // clavier : sans ce correctif, la tabulation menait à six
-                        // boutons invisibles. On les révèle au focus (comme un
-                        // lien d'évitement) ; le style inline est réécrit au
-                        // prochain render, qui restaure l'opacité d'origine.
-                        e.currentTarget.style.opacity = "1";
-                        e.currentTarget.style.transform = "translateY(0)";
-                        e.currentTarget.style.pointerEvents = "auto";
-                      }}
-                      // Masqué = hors tabulation et hors arbre d'accessibilité.
-                      // Le `onFocus` ci-dessus reste le filet pour le cas où le
-                      // focus arriverait quand même (navigateur qui ignore
-                      // `tabIndex`, restauration de session…) : le bouton se
-                      // révèle au lieu de rester un arrêt invisible.
-                      tabIndex={shown ? 0 : -1}
-                      aria-hidden={shown ? undefined : true}
-                      className="w-full sm:w-auto text-center whitespace-nowrap bg-[#0a0f1c] border border-[#00a5b0]/60 text-[#00a5b0] tracking-[0.2em] uppercase rounded-full px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs transition-all duration-500 hover:bg-[#00a5b0]/10 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0f1c] cursor-pointer"
-                      style={{
-                        opacity: shown ? 1 : 0,
-                        transform: shown
-                          ? "translateY(0)"
-                          : "translateY(-15px)",
-                        transition: `opacity 0.5s ease ${i * 0.1}s, transform 0.5s ease ${i * 0.1}s`,
-                        pointerEvents: shown ? "auto" : "none",
-                      }}
-                    >
-                      {link.name}
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={onContactClick}
-                  // Invisible mais encore focusable : `opacity: 0` ne sort pas un
-                  // bouton de la tabulation, et `pointerEvents: none` n'en fait
-                  // pas un obstacle au clavier. CONTACT était donc atteignable —
-                  // et annoncé « bouton CONTACT » — bien avant que la
-                  // chorégraphie ne le révèle. On le sort de la tabulation et de
-                  // l'arbre d'accessibilité, pas du rendu : `visibility`
-                  // conviendrait mais tuerait le fondu de 0,6 s.
-                  tabIndex={contactDone ? 0 : -1}
-                  aria-hidden={contactDone ? undefined : true}
-                  className="hidden text-center sm:inline-block bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs sm:ml-6 hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
-                  style={contactBtnStyle}
-                >
-                  CONTACT
-                </button>
-              </nav>
-              <button
-                onClick={
-                  showReturn ? () => goToStartRef.current?.() : skipIntro
-                }
-                aria-label={
-                  showReturn
-                    ? "Revenir au début de l'animation"
-                    : "Passer l'animation"
-                }
-                // Masqué mais encore focusable : `opacity: 0` ne sort pas un
-                // bouton de la tabulation, et `pointerEvents: none` n'en fait pas
-                // un obstacle au clavier. SKIP restait donc atteignable — et
-                // annoncé « passer l'animation » — une fois la chorégraphie
-                // terminée. Le bouton n'a pas de fondu — l'opacité passe de 1 à 0
-                // d'un coup — mais la correction retenue est la même que pour
-                // CONTACT, et pour la même raison : `visibility` conviendrait
-                // ici, mais il tuerait le fondu de 0,6 s du bouton voisin.
-                tabIndex={showReturn || (!contactDone && !skipped) ? 0 : -1}
-                aria-hidden={showReturn || (!contactDone && !skipped) ? undefined : true}
-                className="absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] right-3 sm:bottom-[calc(env(safe-area-inset-bottom)+32px)] sm:right-8 z-30 bg-[#0a0f1c]/70 text-[#00a5b0] transition-all duration-500 cursor-pointer hover:text-white rounded-full flex items-center justify-center"
-                style={{
-                  opacity: showReturn || (!contactDone && !skipped) ? 1 : 0,
-                  pointerEvents:
-                    showReturn || (!contactDone && !skipped) ? "auto" : "none",
-                }}
-              >
-                {showReturn ? (
-                  <span className="h-10 w-10 sm:h-11 sm:w-11 flex items-center justify-center">
-                    <Undo2
-                      className="h-6 w-6 sm:h-7 sm:w-7"
-                      aria-hidden="true"
-                    />
-                  </span>
-                ) : (
-                  <span className="tracking-[0.2em] uppercase text-[11px] sm:text-xs px-4 py-2">
-                    SKIP
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={onContactClick}
-                tabIndex={contactDone ? 0 : -1}
-                aria-hidden={contactDone ? undefined : true}
-                className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
-                style={contactBtnStyle}
-              >
-                CONTACT
-              </button>
+              <CubeNav
+                zoomedFaces={zoomedFaces}
+                skipped={skipped}
+                skipRevealedFaces={skipRevealedFaces}
+                contactDone={contactDone}
+                onOpenProject={openProject}
+                onContactClick={onContactClick}
+                onSkip={skipIntro}
+                onRestart={() => goToStartRef.current?.()}
+                showReturn={showReturn}
+                contactBtnStyle={contactBtnStyle}
+              />
               <div
                 ref={contentRef}
                 className="relative mx-auto w-full opacity-0"
@@ -3239,223 +3033,23 @@ export function HeroCube({ title, subtitle, images = [] }) {
                           willChange: "transform",
                         }}
                       >
-                        {FACES.map((face, i) => (
-                          <div
-                            key={face}
-                            className="absolute overflow-hidden box-border"
-                            style={{
-                              width: 300,
-                              height: 300,
-                              background: "#0a0f1c",
-                              boxShadow:
-                                zoomedFaces[i] && !mediaRetracted
-                                  ? "0 0 15px rgba(0,0,0,0.3)"
-                                  : "none",
-                              transition: "box-shadow 0.3s ease",
-                              backfaceVisibility: "hidden",
-                              transform: faceTransform(face),
-                              WebkitTransform: faceTransform(face),
-                              isolation: "isolate",
-                              willChange: "transform",
-                            }}
-                          >
-                            {/* Couche éclairée : elle porte le fond ET le filtre
-                            d'éclairage. Le label reste frère au-dessus, hors de
-                            cette couche — sinon le `filter` de la face
-                            l'assombrirait avec l'image. */}
-                            <div
-                              className="face-lit"
-                              style={{
-                                position: "absolute",
-                                inset: 0,
-                                background: "#0a0f1c",
-                                overflow: "hidden",
-                              }}
-                            >
-                              {faceImages[i] && (
-                                <div
-                                  className="face-media-wrapper"
-                                  style={{
-                                    transition: "transform 0.6s ease",
-                                    width: "100%",
-                                    height: "100%",
-                                    pointerEvents: "none",
-                                  }}
-                                >
-                                  {isVideoUrl(faceImages[i]) ? (
-                                    <video
-                                      src={faceImages[i]}
-                                      className="w-full h-full object-cover"
-                                      // Même raison que le fond : pas d'`autoPlay`
-                                      // déclaratif. La lecture est déclenchée par
-                                      // `handleFaceClick` au clic — qui fige sous
-                                      // `prefers-reduced-motion` — et non par le
-                                      // montage du nœud.
-                                      muted
-                                      loop
-                                      playsInline
-                                      preload="metadata"
-                                    />
-                                  ) : (
-                                    <img
-                                      src={faceImages[i]}
-                                      srcSet={faceSrcSet(faceImages[i])}
-                                      // `sizes` suit l'état de zoom : la face mesure 343 px
-                                      // au repos (300 × 8/7 de projection perspective, cf.
-                                      // CUBE_FACE_PROJECTION_SCALE) et occupe le viewport une
-                                      // fois ouverte. Sans cette bascule, le navigateur
-                                      // figerait son choix de variante sur la petite et le
-                                      // plein écran serait flou. La variante d'origine
-                                      // Referme le `srcset`, donc la qualité d'aujourd'hui est
-                                      // garantie même si ce dimensionnement évolue.
-                                      sizes={
-                                        zoomedFaces[i] && !mediaRetracted
-                                          ? "100vw"
-                                          : "343px"
-                                      }
-                                      alt=""
-                                      className="w-full h-full object-cover"
-                                      draggable={false}
-                                      // `eager` volontairement conservé : les faces
-                                      // sont repliées en `transform: scale(0)`, donc
-                                      // hors du viewport au sens d'IntersectionObserver
-                                      // — un `lazy` les différerait, et `revealFaceMedia`
-                                      // n'ouvrirait la face qu'au bout de son timeout de
-                                      // 1400 ms, le visuel restant vide. Le coût initial
-                                      // est mesuré : 31 Ko en DPR1, 57 Ko en DPR2 (contre
-                                      // ~248 Ko avant) — le `srcset` ne télécharge que la
-                                      // variante utile au repos, la grande étant réservée
-                                      // au zoom.
-                                      loading="eager"
-                                      // Décodage hors du thread principal : évite de
-                                      // bloquer le premier rendu du cube.
-                                      decoding="async"
-                                    />
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            <div
-                              ref={(el) => {
-                                clickLabelRefs.current[i] = el;
-                              }}
-                              // Le contenu est réécrit à chaque frame pendant le
-                              // brouillage (caractères aléatoires) : sans
-                              // `aria-hidden`, le lecteur d'écran épelle des
-                              // suites comme « X Q 7 % » à chaque passage. Le
-                              // label n'est de toute façon pas interactif — la
-                              // zone de clic porte déjà le nom de la face via
-                              // son `aria-label`, et l'onglet correspondant
-                              // porte le nom stable.
-                              aria-hidden="true"
-                              className="pointer-events-none select-none"
-                              style={{
-                                position: "absolute",
-                                inset: 0,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: "#33d1c8",
-                                // Compense le rendu grayscale de la face pour rejoindre
-                                // l'épaisseur du label du skip — voir
-                                // `FACE_LABEL_FONT_SCALE`.
-                                fontSize: `${1.25 * FACE_LABEL_FONT_SCALE}rem`,
-                                fontFamily:
-                                  "var(--font-share-tech-mono), monospace",
-                                letterSpacing: "0.3em",
-                                // Même halo que l'overlay du skip : sans lui, le
-                                // turquoise se fond dans le fond et le label paraît
-                                // terne par rapport au label du skip.
-                                textShadow: "0 0 14px rgba(51,209,200,0.5)",
-                                opacity: 0,
-                                transition: "opacity 0.35s ease",
-                                zIndex: 5,
-                              }}
-                            >
-                              {FACE_LABELS[i]}
-                            </div>
-
-                          </div>
-                        ))}
+                        <CubeFaces
+                          images={faceImages}
+                          zoomed={zoomedFaces}
+                          mediaRetracted={mediaRetracted}
+                          labelRefs={clickLabelRefs}
+                        />
                       </div>
                     </div>
                     {/* Incitateur de clic, HORS du cube : posé sur une face, il
                     se superposait au média qu'il invitait à ouvrir. Il se place
                     maintenant sous le cube, centré, et pointe vers le haut. */}
-                    <div
-                      ref={pointerRef}
-                      data-pointer=""
-                      className="pointer-events-none select-none"
-                      style={{
-                        position: "absolute",
-                        left: "50%",
-                        top: "calc(100% + 72px)",
-                        width: POINTER_RING_SIZE,
-                        height: POINTER_RING_SIZE,
-                        marginLeft: -POINTER_RING_SIZE / 2,
-                        zIndex: 6,
-                        opacity: 0,
-                      }}
-                    >
-                      <div
-                        ref={pointerRippleRef}
-                        style={{
-                          position: "absolute",
-                          inset: 0,
-                          borderRadius: "50%",
-                          border: "2px solid #33d1c8",
-                          boxShadow:
-                            "0 0 18px rgba(0,165,176,0.85), inset 0 0 18px rgba(0,165,176,0.55)",
-                          transform: "scale(0.35)",
-                          opacity: 0,
-                        }}
-                      />
-                      <div
-                        ref={pointerGlyphRef}
-                        data-pointer-glyph=""
-                        style={{
-                          position: "absolute",
-                          left: "50%",
-                          top: "50%",
-                          // Décalages par marges, jamais par transform : la
-                          // transform appartient à `anime`, qui la réécrit
-                          // entièrement à chaque frame. On recule la boîte de
-                          // `POINTER_TIP` — la pointe elle-même — au lieu de
-                          // l'avancer, si bien que le coin du curseur, et non
-                          // son axe médian, tombe au centre de l'anneau.
-                          marginLeft: -POINTER_TIP,
-                          marginTop: -POINTER_TIP,
-                          color: "#33d1c8",
-                          filter: "drop-shadow(0 0 10px rgba(51,209,200,0.65))",
-                          lineHeight: 0,
-                        }}
-                      >
-                        <MousePointer2
-                          size={POINTER_GLYPH_SIZE}
-                          strokeWidth={2.4}
-                          aria-hidden="true"
-                        />
-                      </div>
-                    </div>
-                    <div
-                      ref={pointerLabelRef}
-                      // Texte redondant avec l'`aria-label` de la zone de clic
-                      // (« appuyez sur Entrée pour ouvrir la face ») et jamais
-                      // traduit (en anglais dans une page `lang="fr"`). Masqué
-                      // aux lecteurs, qui reçoivent la consigne en français via
-                      // la zone de clic.
-                      aria-hidden="true"
-                      className="pointer-events-none select-none absolute left-1/2 -translate-x-1/2 text-[#00a5b0] tracking-[0.2em] leading-tight text-center uppercase whitespace-nowrap"
-                      style={{
-                        top: "calc(100% + 158px)",
-                        fontSize: "0.875rem",
-                        fontFamily: "var(--font-share-tech-mono), monospace",
-                        opacity: 0,
-                        transition: "opacity 0.35s ease",
-                      }}
-                    >
-                      CLICK TO EXPLORE
-                    </div>
+                    <ClickPointer
+                      ringRef={pointerRef}
+                      rippleRef={pointerRippleRef}
+                      glyphRef={pointerGlyphRef}
+                      labelRef={pointerLabelRef}
+                    />
                     <div
                       ref={galleryLabelRef}
                       data-gallery-label=""
@@ -3606,31 +3200,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
       )}
 
       {isMobileLandscape && (
-        <div
-          // Le dialogue ne contient aucun contrôle : `tabIndex={-1}` le rend
-          // focusable par script, et le focus est posé au montage. Sans cela un
-          // lecteur d'écran ouvre la page sans jamais annoncer le verrou, et le
-          // visiteur doit deviner pourquoi la page ne réagit pas.
-          ref={orientationLockRef}
-          tabIndex={-1}
-          className="fixed inset-0 z-[100] flex min-h-[calc(var(--svh))] items-center justify-center bg-[#0a0f1c] px-8 text-center"
-          role="alertdialog"
-          aria-modal="true"
-          aria-labelledby="orientation-lock-title"
-          aria-describedby="orientation-lock-description"
-        >
-          <div className="max-w-sm">
-            <div className="relative mx-auto mb-8 h-20 w-12 rounded-[10px] border-2 border-[#00a5b0] shadow-[0_0_24px_rgba(0,165,176,0.25)]">
-              <div className="absolute left-1/2 top-1 h-1 w-3 -translate-x-1/2 rounded-full bg-[#00a5b0]" />
-              <div className="absolute inset-x-2 bottom-3 h-1 rounded-full bg-[#00a5b0]/50" />
-            </div>
-            <p className="mb-3 text-xs font-light tracking-[0.3em] text-[#00a5b0] uppercase">Orientation requise</p>
-            <h1 id="orientation-lock-title" className="mb-4 text-3xl font-light text-white">Tournez votre appareil</h1>
-            <p id="orientation-lock-description" className="text-sm leading-relaxed text-[#94a3b8]">
-              Le portfolio est disponible en format portrait.
-            </p>
-          </div>
-        </div>
+        <OrientationLock dialogRef={orientationLockRef} />
       )}
     </>
   );
