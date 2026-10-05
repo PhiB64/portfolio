@@ -1,5 +1,6 @@
 import { FACE_LABELS, FACES, faceTransform, isVideoUrl } from "../../lib/cube-math";
 import { faceSrcSet } from "../../lib/cube-media";
+import { uiFor } from "../../lib/content/ui.js";
 
 // Épaisseur et taille de police des labels de face, ramenées à celle du label du
 // skip. Palette, halo et échelle rendue sont désormais identiques : ce qui
@@ -16,12 +17,28 @@ import { faceSrcSet } from "../../lib/cube-media";
 // à toucher pour retoucher ce rendu.
 const FACE_LABEL_FONT_SCALE = 1.07;
 
+// Les six libellés affichés sur le cube, pour une langue donnée.
+//
+// Fonction, et non constante : cinq des six sont des noms de technologies,
+// écrits pareil dans les deux langues, mais pas le dernier — « PROJETS » est
+// français, « PROJECTS » anglais. Même découpage que `projectLinks` dans
+// `project-tabs.jsx`, et pour la même raison.
+//
+// `FACE_LABELS` reste exportée telle quelle, car elle sert aussi à
+// l'appariement des médias par nom de fichier dans `hero-cube.jsx`, où les
+// assets sont nommés d'après la forme française (`public/projets.webp`). Cette
+// fonction ne sert qu'à l'affichage.
+export function faceLabels(lang) {
+  return [...FACE_LABELS.slice(0, 5), uiFor(lang).tabs.projects];
+}
+
 // Une face du cube : média, puis son label en surimpression.
 //
 // Affichage seul. La face est positionnée par `faceTransform` (calcul pur, testé
 // dans `lib/cube-math.js`) et son label est réécrit à chaque frame par la
 // chorégraphie via `labelRef` — le parent garde le nœud, pas l'état.
 export function CubeFace({
+  lang,
   face,
   index,
   image,
@@ -30,6 +47,7 @@ export function CubeFace({
   labelRef,
 }) {
   const opened = zoomed && !mediaRetracted;
+  const labels = faceLabels(lang);
 
   return (
     <div
@@ -144,19 +162,20 @@ export function CubeFace({
           zIndex: 5,
         }}
       >
-        {FACE_LABELS[index]}
+        {labels[index]}
       </div>
     </div>
   );
 }
 
 // Le cube lui-même : les six faces, chacune posée par sa transform.
-export function CubeFaces({ images, zoomed, mediaRetracted, labelRefs }) {
+export function CubeFaces({ lang, images, zoomed, mediaRetracted, labelRefs }) {
   return (
     <>
       {FACES.map((face, i) => (
         <CubeFace
           key={face}
+          lang={lang}
           face={face}
           index={i}
           image={images[i]}

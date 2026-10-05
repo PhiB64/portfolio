@@ -108,7 +108,7 @@ export function CubeNav({
           </span>
         ) : (
           <span className="tracking-[0.2em] uppercase text-[11px] sm:text-xs px-4 py-2">
-            SKIP
+            {t.skipShort}
           </span>
         )}
       </button>

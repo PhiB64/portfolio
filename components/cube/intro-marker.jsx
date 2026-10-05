@@ -1,10 +1,20 @@
+import { uiFor } from "../../lib/content/ui.js";
+
 // La « souris » du début : carré de vue 300×300 mis à l'échelle du viewport, à
 // l'intérieur duquel le logo se morphose et le titre se révèle.
 //
 // Affichage seul. Cinq nœuds sont exposés au parent, tous animés par la
 // chorégraphie via `anime` (morphing du polygone, fil de roue, entrée/sortie du
 // titre et du sous-titre) : ce composant ne garde aucun état.
+//
+// L'invite « SCROLLEZ / VERS / LE BAS » vient du dictionnaire, en lignes : le
+// français tient sur trois lignes là où l'anglais (« SCROLL / DOWN ») en tient
+// deux. `whitespace-nowrap` a donc été retiré — il était calibré sur deux
+// lignes et aurait laissé déborder « SCROLLEZ ». La position verticale est
+// calée sur le bas du texte (`top: calc(100% - 78px)`), donc elle encaisse le
+// changement de hauteur sans ajusteur : les lignes montent vers le carré.
 export function IntroMarker({
+  lang,
   squareSize,
   title,
   subtitle,
@@ -104,14 +114,18 @@ export function IntroMarker({
       <div
         ref={hintRef}
         // Même statut que le label du pointer : redondant avec l'`aria-label` de
-        // la zone de clic, et en anglais dans une page `lang="fr"`.
+        // la zone de clic, qui porte déjà la consigne en français. Masqué aux
+        // lecteurs, mais traduit pour l'œil, qui voit l'invite dans la langue de
+        // la page.
         aria-hidden="true"
-        className="absolute left-1/2 -translate-x-1/2 text-sm text-[#00a5b0] tracking-[0.2em] leading-tight text-center whitespace-nowrap uppercase"
+        className="absolute left-1/2 -translate-x-1/2 text-sm text-[#00a5b0] tracking-[0.2em] leading-tight text-center uppercase"
         style={{ top: "calc(100% - 78px)" }}
       >
-        SCROLL
-        <br />
-        DOWN
+        {uiFor(lang).cube.scrollDown.map((line) => (
+          <span key={line} className="block">
+            {line}
+          </span>
+        ))}
       </div>
     </div>
   );

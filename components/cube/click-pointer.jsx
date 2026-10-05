@@ -1,4 +1,5 @@
 import { MousePointer2 } from "lucide-react";
+import { uiFor } from "../../lib/content/ui.js";
 
 // Géométrie du pointer, rassemblée ici parce que les trois valeurs se répondent :
 // la pointe de la flèche, le centre de l'anneau et le décalage du glyphe. Les
@@ -19,7 +20,7 @@ const POINTER_TIP = (4.14 * POINTER_GLYPH_SIZE) / 24;
 // au parent et n'affiche rien de son propre chef.
 //
 // L'opacité de départ est à 0 sur les trois nœuds — la chorégraphie les allume.
-export function ClickPointer({ ringRef, rippleRef, glyphRef, labelRef }) {
+export function ClickPointer({ lang, ringRef, rippleRef, glyphRef, labelRef }) {
   return (
     <>
       <div
@@ -75,9 +76,10 @@ export function ClickPointer({ ringRef, rippleRef, glyphRef, labelRef }) {
       <div
         ref={labelRef}
         // Texte redondant avec l'`aria-label` de la zone de clic (« appuyez sur
-        // Entrée pour ouvrir la face ») et jamais traduit (en anglais dans une
-        // page `lang="fr"`). Masqué aux lecteurs, qui reçoivent la consigne en
-        // français via la zone de clic.
+        // Entrée pour ouvrir la face ») : masqué aux lecteurs, qui reçoivent la
+        // consigne via cette zone. Traduit malgré tout — c'est l'un des deux
+        // seuls textes visibles de ce composant, il était en anglais dans une
+        // page `lang="fr"`.
         aria-hidden="true"
         className="pointer-events-none select-none absolute left-1/2 -translate-x-1/2 text-[#00a5b0] tracking-[0.2em] leading-tight text-center uppercase whitespace-nowrap"
         style={{
@@ -88,7 +90,7 @@ export function ClickPointer({ ringRef, rippleRef, glyphRef, labelRef }) {
           transition: "opacity 0.35s ease",
         }}
       >
-        CLICK TO EXPLORE
+        {uiFor(lang).cube.clickToExplore}
       </div>
     </>
   );

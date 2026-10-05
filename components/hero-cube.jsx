@@ -10,7 +10,7 @@ import { ProjectTabs, BackButton } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
 import { OrientationLock } from "./cube/orientation-lock";
 import { ClickPointer } from "./cube/click-pointer";
-import { CubeFaces } from "./cube/cube-face";
+import { CubeFaces, faceLabels } from "./cube/cube-face";
 import { IntroMarker } from "./cube/intro-marker";
 import { CubeNav } from "./cube/cube-nav";
 import {
@@ -337,6 +337,10 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   const faceImages = useMemo(() => {
     const srcs = images && images.length ? images : DEFAULT_FACE_MEDIA;
 
+    // `FACE_LABELS`, et non `labels` : ces tokens servent à apparier des noms de
+    // fichiers, pas à afficher. Les assets sont nommés d'après la forme
+    // canonique — `public/projets.webp` — donc apparier sur « PROJECTS » ferait
+    // perdre la face aux deux passes ci-dessous.
     const tokensByLabel = FACE_LABELS.map((l) => l.toLowerCase());
 
     // Nom de fichier (avec extension) et nom sans extension : le premier sert
@@ -643,6 +647,24 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     }
   }, [faceImages, buildSonarLayer]);
 
+  // Libellés à afficher, résolus pour la langue de la page.
+  //
+  // Passés par une ref plutôt que par une closure : les trois helpers
+  // ci-dessous (`stopFaceScramble`, `encodeFaceLabel`, `decodeFaceLabel`) sont
+  // eux-mêmes encapsulés dans des `useCallback` / `useEffect`, dont les tableaux
+  // de dépendances sont déjà longs et imbriqués. Y ajouter `labels` —
+  // recalculé à chaque changement de langue — les aurait rendues instables, et
+  // avec elles la chorégraphie. La ref se lit au moment de l'écriture du
+  // `textContent`, donc elle voit toujours la langue courante sans jamais
+  // invalider une animation en cours.
+  //
+  // Distinction avec `FACE_LABELS`, toujours utilisé plus bas pour l'appariement
+  // des médias : celui-ci reste la forme canonique française, car les assets sont
+  // nommés d'après elle (`public/projets.webp`). Seul ce tableau, qui part à
+  // l'écran et dans le brouillage, suit la langue.
+  const labelsRef = useRef(faceLabels(lang));
+  labelsRef.current = faceLabels(lang);
+
   const stopFaceScramble = (i) => {
     const tl = faceScrambleTlRef.current[i];
     // `undefined` = aucune animation active, rien à restaurer : c'est l'état
@@ -655,7 +677,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     stopScramble(tl);
     faceScrambleTlRef.current[i] = undefined;
     const el = clickLabelRefs.current[i];
-    if (el) el.textContent = FACE_LABELS[i];
+    if (el) el.textContent = labelsRef.current[i];
   };
 
   // Remet le label à l'état « codé » : brouillage continu, jamais résolu.
@@ -672,7 +694,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     if (!el) return;
     stopScramble(faceScrambleTlRef.current[i]);
     faceScrambleTlRef.current[i] = undefined;
-    faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
+    faceScrambleTlRef.current[i] = scrambleLabel(el, labelsRef.current[i], {
       cipher: true,
     });
   };
@@ -690,7 +712,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     if (!el) return null;
     stopScramble(faceScrambleTlRef.current[i]);
     faceScrambleTlRef.current[i] = undefined;
-    faceScrambleTlRef.current[i] = scrambleLabel(el, FACE_LABELS[i], {
+    faceScrambleTlRef.current[i] = scrambleLabel(el, labelsRef.current[i], {
       duration: FACE_LABEL_DECODE_MS / 1000,
     });
     return faceScrambleTlRef.current[i];
@@ -2972,6 +2994,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         <div className="relative z-10 w-full">
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <IntroMarker
+              lang={lang}
               squareSize={squareSize}
               title={title}
               subtitle={subtitle}
@@ -3027,6 +3050,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
                         }}
                       >
                         <CubeFaces
+                          lang={lang}
                           images={faceImages}
                           zoomed={zoomedFaces}
                           mediaRetracted={mediaRetracted}
@@ -3038,6 +3062,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
                     se superposait au média qu'il invitait à ouvrir. Il se place
                     maintenant sous le cube, centré, et pointe vers le haut. */}
                     <ClickPointer
+                      lang={lang}
                       ringRef={pointerRef}
                       rippleRef={pointerRippleRef}
                       glyphRef={pointerGlyphRef}

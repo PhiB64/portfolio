@@ -76,8 +76,6 @@ function sleep(ms, signal) {
   });
 }
 
-const GREETING = "Bonjour ! Je suis l'assistant de Philippe. Posez-moi une question sur ses projets, ses compétences ou son parcours.";
-
 /**
  * Retire la syntaxe Markdown d'un texte destiné à être affiché tel quel.
  *
@@ -516,7 +514,9 @@ export function ChatWidget({ lang }) {
           <header className="flex items-center justify-between gap-3 border-b border-[#1e293b] px-4 py-3">
             <div className="flex items-center gap-2">
               <MessageCircle size={16} className="text-[#00a5b0]" />
-              <p className="text-xs uppercase tracking-widest text-[#94a3b8]">Assistant</p>
+              <p className="text-xs uppercase tracking-widest text-[#94a3b8]">
+                {t.heading}
+              </p>
             </div>
             <button
               type="button"
@@ -539,7 +539,9 @@ export function ChatWidget({ lang }) {
             className="scroll-none flex-1 overflow-y-auto px-4 py-4"
           >
             {messages.length === 0 && (
-              <p className="text-sm leading-relaxed text-[#94a3b8]">{GREETING}</p>
+              <p className="text-sm leading-relaxed text-[#94a3b8]">
+                {t.greeting}
+              </p>
             )}
 
             <ul className="space-y-4">
@@ -591,7 +593,7 @@ export function ChatWidget({ lang }) {
           <form onSubmit={send} className="border-t border-[#1e293b] p-3">
             <div className="flex items-center gap-2">
               <label htmlFor="chat-input" className="sr-only">
-                Votre message
+                {t.inputLabel}
               </label>
               <input
                 id="chat-input"
@@ -614,7 +616,7 @@ export function ChatWidget({ lang }) {
               </button>
             </div>
             <p className="mt-2 text-[10px] leading-relaxed text-[#7c8ca1]">
-              Réponses générées par IA — vérifiez les informations importantes.
+              {t.disclaimer}
             </p>
           </form>
         </section>
@@ -628,7 +630,7 @@ export function ChatWidget({ lang }) {
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-controls="chat-panel"
-        aria-label={open ? "Fermer l'assistant" : "Ouvrir l'assistant"}
+        aria-label={open ? t.close : t.open}
         className="fixed top-4 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
       >
         {open ? <X size={20} /> : <MessageCircle size={20} />}
