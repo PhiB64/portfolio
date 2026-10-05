@@ -82,7 +82,7 @@ npm test           # une passe
 npm run test:watch # en continu
 ```
 
-Les tests couvrent `lib/` et le Worker — 293 tests, 16 fichiers :
+Les tests couvrent `lib/` et le Worker — 322 tests, 17 fichiers :
 
 | Module | Fichier de test | Ce qui est vérifié |
 |---|---|---|
@@ -100,7 +100,8 @@ Les tests couvrent `lib/` et le Worker — 293 tests, 16 fichiers :
 | `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (22 tests, jsdom) | piège de focus, Échap, restauration du focus |
 | `lib/chat-request.js` | `lib/chat-request.test.jsx` (12 tests) | le cycle de vie d'une requête du chat : course sur le contrôleur d'annulation, délai, distinction fermeture / expiration |
 | `lib/contact-form.js` | `lib/contact-form.test.js` (18 tests) | les décisions d'envoi du formulaire : pot de miel, délai de remplissage, bornes de longueur |
-| `components/contact-overlay.jsx` | `lib/contact-overlay.test.jsx` (9 tests, jsdom) | le câblage de ces décisions dans le composant : le piège est soumis, les bornes atteignent le HTML, un envoi automatique ne part pas |
+| `lib/contact-overlay.jsx` | `lib/contact-overlay.test.jsx` (9 tests, jsdom) | le câblage de ces décisions dans le composant : le piège est soumis, les bornes atteignent le HTML, un envoi automatique ne part pas |
+| `lib/chat-digest.js` | `lib/chat-digest.test.js` (29 tests) | la construction du digest du chatbot : troncature annoncée et coupée sur une fin de ligne, ordre des sections, exclusions volontaires |
 | `worker/src/index.js` | `worker/src/index.test.js` (32 tests) | l'**ordre** des refus du Worker, la borne du flux, la reconstruction du prompt, et le traitement d'un refus amont |
 
 ### Ce que valent ces tests
@@ -122,12 +123,22 @@ on restaure. Les cas vérifiés :
 | le filtre automatique du formulaire est retiré | 2 |
 | la validation de saisie ne s'exécute plus | 2 |
 | `chat-request` retombe sur un `finally` inconditionnel | 3 |
+| le digest se coupe au plafond sans chercher la fin de ligne | 1 |
+| le marqueur de troncature du digest est retiré | 3 |
+| un plafond nul est traité comme un plafond vide | 1 |
+| le parcours est replacé en fin de digest | 2 |
 
 Deux défauts sont apparus **dans du code écrit dans cette même vague**, trouvés
 par ces tests : `lib/chat-request.js` écrasait le minuteur précédent sans
 l'annuler, et le champ-piège du formulaire était présent, soumis, et jamais lu
 (l'état et le DOM portaient deux noms différents). Les deux sont des défauts
 qu'aucune relecture ne voit.
+
+Une troisième vague a produit deux faux signaux, dans les deux cas parce que la
+mutation n'avait pas été appliquée et que la commande renvoyait 0 faute d'avoir
+cassé quoi que ce soit. C'est le piège du procédé : un test « mutant » qui ne
+mutait rien valide la suite sans rien prouver. Il faut toujours confirmer que la
+modification a pris avant de croire au résultat.
 
 Le fichier du Worker ne teste pas les réponses — ce sont des réponses de modèle,
 sans intérêt ici — mais **ce que le Worker refuse de faire avant de décider**. Un
@@ -138,10 +149,17 @@ le jour où le garde-fou d'origine a été neutralisé : c'est ce qui fait qu'il
 documentent la propriété de sécurité, et pas seulement le code.
 
 Non testés : `lib/cube-media.js` (simple table + `faceSrcSet()`),
-`lib/portfolio-content.js` (données pures, sans logique),
-`scripts/build-chat-content.mjs` (digest + troncature), ainsi que
-`app/` — `vitest.config.js` nomme explicitement `lib/` et `worker/src/` dans son
-`include`.
+`lib/portfolio-content.js` (données pures, sans logique), ainsi que
+`app/` et le reste de `components/` — `vitest.config.js` nomme explicitement
+`lib/` et `worker/src/` dans son `include`. Le seul composant monté par un test
+est `contact-overlay.jsx`, parce que c'est le seul dont la logique ait été
+extraite en un module testable.
+
+`scripts/build-chat-content.mjs` n'est plus dans cette liste : sa partie
+décisionnelle est dans `lib/chat-digest.js`, testée. Le script restant se limite
+à écrire le fichier, et c'est bien cette partie qui ne l'est pas — un chemin
+d'écriture faux produirait un digest absent, ce que la CI vérifie par
+`test -f dist/content.json`.
 
 Le premier est le seul module testé sans DOM ; c'est aussi
 le seul où une régression passerait inaperçue, car une interpolation de pose
@@ -181,11 +199,15 @@ Les gabarits à copier sont `.env.example` (racine) et `worker/.dev.vars.example
 Optionnel et découplé : sans `NEXT_PUBLIC_CHAT_ENDPOINT`, le site fonctionne
 normalement, simplement sans bouton de chat.
 
-- **Contenu.** `scripts/build-chat-content.mjs` (lancé en `postbuild`) lit la
-  source unique `lib/portfolio-content.js` (`PROJECT_CONTENT`, `CAREER_CONTENT`,
-  `STACK_CONTENT`, `USAGE_CONTENT`) et publie `dist/content.json` : un objet
+- **Contenu.** `lib/chat-digest.js` lit la source unique
+  `lib/portfolio-content.js` (`PROJECT_CONTENT`, `CAREER_CONTENT`,
+  `STACK_CONTENT`, `USAGE_CONTENT`) et produit le digest ;
+  `scripts/build-chat-content.mjs` (lancé en `postbuild`) ne fait plus que
+  l'écrire dans `dist/content.json`. Le digest est un objet
   `{ "digest": "…" }` plafonné à `MAX_CHARS = 16000` caractères (troncature sur
-  fin de ligne, signalée dans le texte ; digest actuel : ~15 700 caractères).
+  fin de ligne, signalée dans le texte ; digest actuel : ~15 700 caractères,
+  soit 270 de marge — ajouter une seule ligne à une rubrique peut le faire
+  mordre).
 - **Relais.** `worker/` (Cloudflare Worker `portfolio-chat`, voir
   `worker/README.md` et `worker/wrangler.jsonc`) lit ce digest (cache 10 min)
   plus les dépôts GitHub publics (`GITHUB_USER`, cache 1 h, forks écartés) et
@@ -279,6 +301,7 @@ portfolio/
 │   ├── face-labels.js        # Élection de la face qui décode (+ .test.js, 21 tests)
 │   ├── leak-filter.js        # Filtrage des fuites de modération (+ .test.js, 30)
 │   ├── chat-request.js       # Cycle de vie d'une requête du chat (+ .test.jsx, 12)
+│   ├── chat-digest.js        # Digest du chatbot pour le system prompt (+ .test.js, 29)
 │   ├── contact-form.js       # Décisions d'envoi du formulaire (+ .test.js, 18)
 │   ├── device.js             # Détection de capacité (+ .test.js, 11)
 │   ├── portfolio-content.js  # Données éditoriales (cube + digest chat)
@@ -287,7 +310,7 @@ portfolio/
 │   ├── site-url.js           # Racine publique du site (canonical, OG, JSON-LD)
 │   └── use-dialog-focus.js   # Piège de focus + Échap (+ .test.jsx)
 ├── scripts/
-│   └── build-chat-content.mjs # Digest dist/content.json (postbuild)
+│   └── build-chat-content.mjs # Écrit dist/content.json (postbuild, logique dans lib/)
 ├── worker/                   # Proxy OpenRouter (Cloudflare, voir son README)
 │   ├── src/index.js          # Relais + system prompt + garde-fous (1102 lignes)
 │   ├── wrangler.jsonc        # Config (origines, digest, GitHub, rate limit)
