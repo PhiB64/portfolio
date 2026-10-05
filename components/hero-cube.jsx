@@ -10,7 +10,6 @@ import { ContactOverlay } from "./contact-overlay";
 import {
   FACE_LABELS,
   FACE_NORMALS,
-  FACE_ROTATIONS,
   FACES,
   LIGHT_DIR,
   computeWireframe,
@@ -27,6 +26,27 @@ import { electDecodingFace, readFaceExposure } from "../lib/face-labels";
 import { FACE_MEDIA, faceSrcSet } from "../lib/cube-media";
 import { reduceMotion as readReducedMotion } from "../lib/reduced-motion";
 import { useDialogFocus } from "../lib/use-dialog-focus";
+import {
+  SQUARE_POINTS,
+  MOUSE_POINTS,
+  W,
+  TOTAL,
+  INTRO_END,
+  CUBE_END,
+  SHOW_START,
+  SHOW_END,
+  SPIN_START,
+  SPIN_END,
+  LINE_POS,
+  NAMES_START,
+  NAMES_END,
+  CUBE_RANGE,
+  ROT_END,
+  interpolatePoints,
+} from "../lib/cube-timeline";
+import { buildSpinTour } from "../lib/cube-tour";
+import { isMobileDevice, isRealMobileDevice } from "../lib/device";
+import { sonarGeometry } from "../lib/cube-sonar";
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
 // [WEB, REACT, BACKEND, DATABASE, MOBILE, PROJETS].
@@ -40,124 +60,6 @@ const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const smoothstep = (t) => {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
-};
-
-// Plus court chemin signé de `a` vers `b`, sur (-180, 180]. Un tour entier ne
-// change rien à l'orientation : c'est ce qui permet de ramener n'importe quelle
-// pose sur un multiple de 360 sans que le cube bouge d'un pixel.
-const shortAngle = (deg) => ((deg % 360) + 540) % 360 - 180;
-
-// Index de la pose frontale que `rot` décrit exactement, ou -1. Une face n'est
-// carrée devant la caméra que sur l'une des six poses de `FACE_ROTATIONS` :
-// entre deux poses le cube est de biais, sur une arête. C'est la contrainte qui
-// gouverne le spin plus bas : montrer les six faces oblige à traverser les coins.
-const poseIndexOf = (rot) =>
-  FACE_ROTATIONS.findIndex((p) => p.rx === rot.rx && p.ry === rot.ry);
-
-// Plafond de parcours du spin, en degrés cumulés (longueur des lignes tracées en
-// (rx, ry)). Il ne sert pas à raccourcir le spin mais à l'égaliser : sans lui un
-// ordre qui relie deux faces par un quart de tour simple fait traverser l'angle en
-// un clin d'œil, et un ordre qui passe par les coins le fait payer en six temps.
-// La vitesse doit être la même d'un tirage à l'autre.
-const SPIN_TOUR_BUDGET = 780;
-
-const spinTourIsOpposite = (a, b) =>
-  FACE_ROTATIONS[a].rx === -FACE_ROTATIONS[b].rx &&
-  FACE_ROTATIONS[a].ry === -FACE_ROTATIONS[b].ry;
-
-// Tirage de la tournée du spin, une fois, à son entrée.
-//
-// Le cube quitte `from`, montre les cinq faces qu'il ne montre pas, dans un ordre
-// tiré au sort, puis revient sur la face avant : tout ce qui suit — le carré, la
-// ligne, les noms — est écrit pour un cube aligné, donc le retour n'est pas un
-// choix de mise en scène mais une contrainte.
-//
-// L'ordre est tiré parmi les seules permutations qui n'enchaînent jamais deux
-// faces opposées (un tour de 180° au lieu de ~127°), qui n'ouvrent pas la
-// tournée sur l'opposé de `from`, et dont le parcours total reste sous le plafond.
-// Il en reste assez pour que deux spins successifs ne se ressemblent pas, sans
-// qu'aucun ne sorte plus vite que les autres.
-//
-// Le tirage se fait ICI et non à chaque frame : un tirage par frame rebattrait la
-// cible à chaque image et le cube vibrerait sur place au lieu de voyager.
-const buildSpinTour = (from) => {
-  // Chaîne les poses du tirage en gardant un courant « levé ».
-  //
-  // Le levage est ce qui rend la suite CONTINUE. `shortAngle(180)` rend -180, et
-  // une face à ry = -180 est la même image qu'une face à ry = +180 — mais si le
-  // segment suivant repartait de la pose cible réinjectée (+180), les nombres
-  // sauteraient de 360° d'un palier à l'autre. À l'écran on ne verrait rien ; en
-  // revanche tout ce qui raisonne sur ces valeurs (vitesse, contrôle de
-  // continuité, détection de pose) verrait un à-coup de 360°. On additionne donc
-  // le delta au courant : la pose d'arrivée est exactement `courant + delta`, et
-  // le segment suivant en repart.
-  const chain = (order) => {
-    const steps = [];
-    let cur = { rx: from.rx, ry: from.ry };
-    for (const faceIndex of [...order, 0]) {
-      const target = FACE_ROTATIONS[faceIndex];
-      const drx = shortAngle(target.rx - cur.rx);
-      const dry = shortAngle(target.ry - cur.ry);
-      const len = Math.hypot(drx, dry);
-      steps.push({ rx: cur.rx, ry: cur.ry, drx, dry, len });
-      cur = { rx: cur.rx + drx, ry: cur.ry + dry };
-    }
-    return steps;
-  };
-  // Coût d'un ordre : la somme des distances angulaires de ses six transitions.
-  const costOf = (order) =>
-    chain(order).reduce((total, step) => total + step.len, 0);
-  const orders = [];
-  const walk = (rest, acc) => {
-    if (!rest.length) {
-      orders.push(acc);
-      return;
-    }
-    for (let i = 0; i < rest.length; i++) {
-      const next = rest[i];
-      if (acc.length && spinTourIsOpposite(acc[acc.length - 1], next)) continue;
-      walk(
-        rest.filter((x) => x !== next),
-        [...acc, next],
-      );
-    }
-  };
-  walk([1, 2, 3, 4, 5], []);
-  const startFace = poseIndexOf(from);
-  const usable = orders.filter(
-    (o) =>
-      costOf(o) <= SPIN_TOUR_BUDGET &&
-      // Ouvrir sur l'opposé de `from` coûterait un demi-tour d'entrée. `-1` veut
-      // dire que `from` n'est pas une pose exacte : dans ce cas on n'a rien à
-      // reprocher au premier tirage.
-      (startFace < 0 || !spinTourIsOpposite(startFace, o[0])),
-  );
-  // Repli : droite, fond, dessus, gauche, dessous — un ordre vérifié, sans
-  // opposées ni dépassement. Il ne sert que si `from` est une pose si rare
-  // qu'aucun tirage ne satisfait les filtres.
-  const order =
-    usable.length > 0
-      ? usable[Math.floor(Math.random() * usable.length)]
-      : [5, 3, 1, 2, 4];
-  // Chaque transition reçoit une part de fenêtre proportionnelle à sa longueur :
-  // la vitesse angulaire est donc constante de bout en bout. Le cube ne s'arrête
-  // sur aucune face et ne rattrape pas le dernier quart de tour.
-  const steps = chain(order);
-  return { steps, total: costOf(order) };
-};
-
-// Interpolation coordonnée par coordonnée entre deux chaînes de points SVG de
-// même longeur (24 sommets), utilisée pour faire glisser le carré de fin sur la
-// silhouette de la « souris » pendant le retour.
-const interpolatePoints = (from, to, t) => {
-  const a = from.split(" ").map((p) => p.split(",").map(Number));
-  const b = to.split(" ").map((p) => p.split(",").map(Number));
-  return a
-    .map((pt, i) => [
-      (pt[0] + (b[i][0] - pt[0]) * t).toFixed(1),
-      (pt[1] + (b[i][1] - pt[1]) * t).toFixed(1),
-    ].join(","))
-    .join(" ");
 };
 
 const WEB_SCROLL_SMOOTHING_MS = 80;
@@ -241,7 +143,6 @@ const POINTER_RING_SIZE = 72;
 // glyphe. D'où la conversion en px, pour que changer `POINTER_GLYPH_SIZE` ne
 // déplace pas la pointe.
 const POINTER_TIP = (4.14 * POINTER_GLYPH_SIZE) / 24;
-const MOBILE_USER_AGENT = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i;
 const MOBILE_CUBE_MAX_SCALE = 0.8;
 // Retard de l'onde de fond après le clic sur une face, et durée de l'onde
 // elle-même. Sur mobile les deux sont raccourcis : le fond est la seule chose
@@ -251,26 +152,6 @@ const BG_REVEAL_DELAY_MS = 380;
 const MOBILE_BG_REVEAL_DELAY_MS = 120;
 const BG_WAVE_MS = 700;
 const MOBILE_BG_WAVE_MS = 420;
-
-const isMobileDevice = () => {
-  if (typeof window === "undefined") return false;
-  const userAgent = window.navigator.userAgent || "";
-  const mobileUserAgent = MOBILE_USER_AGENT.test(userAgent) || window.navigator.userAgentData?.mobile === true;
-  const touchDevice = window.navigator.maxTouchPoints > 0 || "ontouchstart" in window;
-  const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches === true;
-  const compactViewport = Math.max(window.innerWidth, window.innerHeight) <= 1100;
-  return mobileUserAgent || ((touchDevice || coarsePointer) && compactViewport);
-};
-
-// Strict mobile check, reserved for the orientation lock: real mobile UA
-// only. The looser `isMobileDevice()` (touch + compact viewport) also
-// matches touch laptops and narrow desktop windows, which produced
-// false-positive "rotate your device" locks on non-mobile screens.
-const isRealMobileDevice = () => {
-  if (typeof window === "undefined") return false;
-  const userAgent = window.navigator.userAgent || "";
-  return MOBILE_USER_AGENT.test(userAgent) || window.navigator.userAgentData?.mobile === true;
-};
 
 // `prefers-reduced-motion` : ne concerne QUE les animations autonomes —
 // l'autoplay de fin, la chorégraphie du skip, les ondes sonar, la molette. Le
@@ -283,28 +164,6 @@ const isRealMobileDevice = () => {
 // extraite dans `lib/reduced-motion.js` : c'est de la logique, pas de la 3D, et
 // elle mérite ses tests.
 const reduceMotion = readReducedMotion;
-
-const sonarGeometry = (root, pointEl) => {
-  const rect = root.getBoundingClientRect();
-  if (!pointEl) {
-    const hw = rect.width / 2;
-    const hh = rect.height / 2;
-    const half = Math.sqrt(hw * hw + hh * hh) / rect.width;
-    return { maxR: half * 100, scaleMax: half * 2 };
-  }
-  const c = pointEl.getBoundingClientRect();
-  const cx = c.left + c.width / 2 - rect.left;
-  const cy = c.top + c.height / 2 - rect.top;
-  const d = Math.max(
-    Math.hypot(cx, cy),
-    Math.hypot(rect.width - cx, cy),
-    Math.hypot(cx, rect.height - cy),
-    Math.hypot(rect.width - cx, rect.height - cy),
-  );
-  return {
-    center: { x: Math.round(cx), y: Math.round(cy), dmax: Math.round(d) },
-  };
-};
 
 export function HeroCube({ title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
@@ -1476,62 +1335,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     // Every stage of the animation lives in this one timeline. Its playhead is
     // driven by scroll progress (tl.seek), so the entire animation scrubs
     // forwards and backwards and is fully reversible.
-    const SQUARE_POINTS =
-      "0,0 50,0 100,0 150,0 200,0 250,0 300,0 300,50 300,100 300,150 300,200 300,250 300,300 250,300 200,300 150,300 100,300 50,300 0,300 0,250 0,200 0,150 0,100 0,50";
-    // Pose initiale de la « souris » (silhouette arrondie + molette) portée par
-    // le même polygone. Pendant le retour, la ligne de fin d'animation repart en
-    // carré puis glisse vers cette silhouette au lieu d'un simple fondu.
-    const MOUSE_POINTS =
-      "135,150 136,144 139,139 144,136 150,135 156,136 161,139 164,144 165,150 165,155 165,160 165,165 165,170 164,176 161,181 156,184 150,185 144,184 139,181 136,176 135,170 135,165 135,160 135,155";
-
-    const W = {
-      wheelFade: 200,
-      morph: 1600,
-      fadeIn: 120,
-      idle: 5000,
-      showcase: 3200,
-      facesOut: 900,
-      cubeFade: 600,
-      spin: 3000,
-      squareIn: 250,
-      cubeOut: 500,
-      lineMorph: 900,
-      namesRise: 1500,
-    };
-    const TOTAL =
-      W.wheelFade +
-      W.morph +
-      W.fadeIn +
-      W.idle +
-      W.showcase +
-      W.facesOut +
-      W.cubeFade +
-      W.spin +
-      W.squareIn +
-      W.cubeOut +
-      W.lineMorph +
-      W.namesRise;
-    const INTRO_END = (W.wheelFade + W.morph + W.fadeIn) / TOTAL;
-    const CUBE_END = (W.wheelFade + W.morph + W.fadeIn + W.idle) / TOTAL;
-    // Phase showcase : le cube fait un tour complet EN MONTRANT les six visuels,
-    // avant leur fondu. Elle est pilotée par la tête de timeline, comme le spin
-    // qui suit.
-    const SHOW_START = CUBE_END;
-    const SHOW_END = CUBE_END + W.showcase / TOTAL;
-    // La fenêtre de fondu des visuels est désormais celle qui suit la
-    // showcase, et non plus celle qui précède le spin.
-    const SPIN_START = SHOW_END + (W.facesOut + W.cubeFade) / TOTAL;
-    const SPIN_END = SPIN_START + W.spin / TOTAL;
-    const LINE_POS = TOTAL - (W.lineMorph + W.namesRise);
-    const NAMES_START = (LINE_POS + W.lineMorph) / TOTAL;
-    const NAMES_END = NAMES_START + W.namesRise / TOTAL;
-    // The cube only rotates on the part of the scroll that comes after the intro.
-    const CUBE_RANGE = 1 - INTRO_END;
-    // Dernière pose de rotation du cube : le spin l'emporte au-delà. Sert de
-    // borne haute à la pose de base pendant la galerie du skip, pour qu'aucune
-    // de ses six poses ne dépasse la fin du spin.
-    const ROT_END = (SPIN_END - INTRO_END) / CUBE_RANGE;
-
     const tl = anime.timeline({ autoplay: false });
     tl.add({
       targets: [wheel, hint],
