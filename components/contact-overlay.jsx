@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, CheckCircle, AlertCircle } from "lucide-react";
 import { ProjectTabs, BackButton } from "./cube/project-tabs";
+import { HONEYPOT_FIELD, LIMITS, buildPayload, looksAutomated, validateDraft } from "../lib/contact-form";
 import { CONTACT, CONTACT_LOCATION } from "../lib/portfolio-content";
 
 // Icônes de liaison (GitHub, LinkedIn) : décoratives, le lien adjacent porte
@@ -22,19 +23,71 @@ const IconLinkedin = () => (
 const FORMSPREE_ENDPOINT =
   process.env.NEXT_PUBLIC_FORMSPREE_ENDPOINT || "https://formspree.io/f/xbglwdny";
 
+/**
+ * Délai maximal d'un envoi au formulaire, en millisecondes.
+ *
+ * Aucun n'existait : un service qui accepte la connexion et n'envoie rien
+ * laisse le bouton « Envoi... » affiché indéfiniment, avec aucun moyen pour le
+ * visiteur de savoir que la demande est perdue — et le formulaire reste
+ * verrouillé, puisqu'il est `disabled` pendant l'envoi.
+ */
+const SEND_TIMEOUT_MS = 15_000;
+
 export function ContactOverlay({ onClose, onSelectProject }) {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [status, setStatus] = useState("idle");
+  // Erreur de saisie, distincte de `status === "error"` : un envoi refusé par
+  // Formspree propose de passer par le courriel, alors qu'une adresse mal saisie
+  // demande de la corriger sur place. Les deux dans le même état donneraient au
+  // visiteur une consigne qui ne s'applique pas à son cas.
+  const [formError, setFormError] = useState(null);
+
+  // Instant d'ouverture du formulaire, pour le filtre de délai. Une `ref` et pas
+  // un état : c'est une mesure prise au montage, jamais lue au rendu, donc elle
+  // n'a pas sa place dans le chemin déclaratif.
+  const openedAtRef = useRef(null);
+  if (openedAtRef.current === null) openedAtRef.current = Date.now();
 
   const handleChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    // Toute frappe efface l'erreur : la laisser affichée ferait croire que la
+    // saisie suivante est aussi refusée que la précédente.
+    setFormError(null);
   };
+
+  // Le piège n'emprunte pas `handleChange` : celui-ci dérive la clé d'état du
+  // nom DOM, ce qui est juste pour les trois champs visibles — `name`, `email`,
+  // `message` portent le même nom dans les deux mondes — mais pas ici, où les
+  // deux noms sont différents par construction. Passé par `handleChange`, il
+  // écrivait dans l'état sous une clé que rien ne lit.
+  const handleHoneypot = (e) => setForm((prev) => ({ ...prev, honeypot: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const { name, email, message } = form;
+    const draft = { ...form, elapsedMs: Date.now() - openedAtRef.current };
+
+    // Le filtre tourne avant la validation, et son résultat n'est jamais dit.
+    // Un robot qui reçoit une confirmation n'essaie pas une seconde fois ; un
+    // humain qui reçoit un faux échec n'a qu'à renvoyer son message. Voir
+    // `lib/contact-form.js` pour pourquoi la réponse est muette.
+    if (looksAutomated(draft)) {
+      setStatus("sent");
+      return;
+    }
+
+    const check = validateDraft(draft);
+    if (!check.ok) {
+      setFormError(check.error);
+      return;
+    }
 
     setStatus("sending");
+    // L'annulation est portée par le `finally` : sans cela, un formulaire qui
+    // reste en « Envoi... » ne pourra jamais être renvoyé, le bouton étant
+    // désactivé jusqu'à la fin.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
+
     try {
       const res = await fetch(FORMSPREE_ENDPOINT, {
         method: "POST",
@@ -42,7 +95,8 @@ export function ContactOverlay({ onClose, onSelectProject }) {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({ name, email, message }),
+        body: JSON.stringify(buildPayload(draft)),
+        signal: controller.signal,
       });
       if (res.ok) {
         setStatus("sent");
@@ -50,7 +104,12 @@ export function ContactOverlay({ onClose, onSelectProject }) {
       }
       console.error("Formspree a répondu", res.status, await res.text());
     } catch (err) {
+      // L'expiration et la fermeture par le navigateur produisent la même
+      // `AbortError`, et le diagnostic utile est le même : rien n'a été
+      // transmis, le visiteur doit réessayer ou écrire.
       console.error("Échec de l'envoi à Formspree", err);
+    } finally {
+      clearTimeout(timer);
     }
 
     setStatus("error");
@@ -200,6 +259,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     type="text"
                     name="name"
                     required
+                    maxLength={LIMITS.name}
                     autoComplete="name"
                     value={form.name}
                     onChange={handleChange}
@@ -219,6 +279,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     type="email"
                     name="email"
                     required
+                    maxLength={LIMITS.email}
                     autoComplete="email"
                     value={form.email}
                     onChange={handleChange}
@@ -238,12 +299,52 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     name="message"
                     required
                     rows={5}
+                    maxLength={LIMITS.message}
                     value={form.message}
                     onChange={handleChange}
                     placeholder="Votre message..."
                     className="w-full bg-[#0f172a] border border-[#1e293b] rounded text-white text-sm px-4 py-3 outline-none focus:border-[#00a5b0] transition-colors placeholder:text-[#728296] resize-none"
                   />
                 </div>
+
+                {/* Pot de miel. Le champ est hors du flux et masqué au lecteur
+                    d'écran : un humain ne le voit ni ne le remplit, un script qui
+                    parcourt tous les champs le complète. `type="text"` et non
+                    `hidden` — un `hidden` n'est pas rendu, donc le navigateur ne
+                    le soumet pas, et le piège ne verrait rien. `tabIndex={-1}`
+                    l'exclut aussi de la navigation au clavier, au cas où le
+                    masquage CSS viendrait à échouer. */}
+                <div className="absolute -left-[9999px]" aria-hidden="true">
+                  <label htmlFor="contact-website">Ne pas remplir ce champ</label>
+                  <input
+                    id="contact-website"
+                    type="text"
+                    name={HONEYPOT_FIELD}
+                    tabIndex={-1}
+                    autoComplete="off"
+                    // L'état porte la clé `honeypot`, le DOM porte
+                    // `HONEYPOT_FIELD`. Les deux ne sont pas le même nom : le
+                    // premier est ce que `looksAutomated` lit, le second est ce
+                    // que le piège doit s'appeler pour les Robots qui
+                    // parcourent les champs. Les confondre donnait un piège
+                    // présent, soumis, et jamais lu — donc inerte.
+                    value={form.honeypot}
+                    onChange={handleHoneypot}
+                  />
+                </div>
+
+                {/* Erreur de saisie. `role="alert"` plutôt qu'un simple
+                    `aria-live` : l'erreur doit être annoncée *maintenant*, pas
+                    seulement la prochaine fois que la zone est mise à jour. */}
+                {formError && (
+                  <p
+                    role="alert"
+                    className="flex items-center gap-2 text-[#f87171] text-sm"
+                  >
+                    <AlertCircle size={14} aria-hidden="true" /> {formError}
+                  </p>
+                )}
+
                 <button
                   type="submit"
                   disabled={status === "sending"}

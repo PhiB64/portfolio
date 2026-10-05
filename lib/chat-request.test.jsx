@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 describe("course sur le contrôleur", () => {
-  it("laisse un envoi plus récent annulable malgré le `finally` d'un envoi plus ancien", async () => {
+  it("laisse un envoi plus récent annulable malgré le `finally` d'un ancien", () => {
     // Le scénario exact du bug : le premier `send` est résolu après que le
     // second a pris la main sur le contrôleur.
     const slot = createRequestSlot();
