@@ -23,8 +23,11 @@ import {
   coreP,
   splitExtent,
   tailP,
+  tailSmoothingMs,
   tailStages,
   tailUnwindP,
+  tailUnwindStages,
+  TAIL_TEXT_REVEAL_MS,
   trackScreens,
 } from "../lib/cube-tail";
 import {
@@ -97,38 +100,11 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.0005;
-// Le lissage de la queue, et pourquoi il est plus long que celui du parcours.
-//
-// Why la queue était le seul segment non lissé. Tout le parcours écrit se lit
-// dans `currentP`, qui rejoint sa cible par un lissage exponentiel : la molette
-// donne des sauts de cent pixels, la cible part loin, et le cube ne voit qu'une
-// vitesse lissée. La queue, elle, lisait `el.scrollTop` en direct — le seul endroit
-// du fichier qui fasse ça. Le même geste y produisait donc des sauts francs, et
-// ils se voyaient d'autant plus que la queue est lente : à 1 % près, la ligne se
-// réduisait d'un coup, et le visage perdait trois ou quatre traits d'un geste.
-//
-// Why plus long, et pas identique. Le parcours écrit court sur neuf écrans : ses
-// 80 ms sont un retard qu'on ne voit pas, parce qu'un cube est un gros volume qui
-// absorbe un décalage. La queue court sur quatre écrans et son contenu est fin —
-// 240 traits sur 2,4 écrans — donc le même retard y vaut dix fois plus de traits,
-// et se voit.
-//
-// Why 110, et pas plus. Un cran de molette fait une centaine de pixels, soit 3 %
-// de la queue, donc sept traits d'un geste : c'est ce saut qu'il faut avaler, et
-// 110 ms l'avale en une quinzaine de frames au lieu d'une. Mais au-delà, la queue
-// glisse derrière le pouce au lieu de le suivre : la réduction de la ligne dure un
-// écran de course, environ 330 ms à vitesse de lecture normale, et un lissage trop
-// long se verrait comme la ligne qui finit après que le geste s'est arrêté. Le
-// bon régime est celui où le retard se sent comme une inertie et pas comme un
-// retard.
-//
-// Why exponentiel, et pas une inertie à vitesse constante. L'interpolation
-// linéaire rattrape sa cible à vitesse constante puis s'arrête sec — un nouveau
-// saut de molette se lirait comme une reprise. L'exponentielle, elle, n'a qu'une
-// seule vitesse : le décalage se résorbe au même rythme après un cran de molette
-// comme après un glissement de deux secondes. C'est la raison inverse de celle qui
-// fait refuser le `smoothstep` au dénouement programmé.
-const TAIL_SCROLL_SMOOTHING_MS = 110;
+// Le lissage de la queue a deux valeurs — 110 ms à l'aller, 165 ms au rembobinage —
+// et sa raison d'être est écrite là où il vit, avec les autres temps de la queue :
+// voir `TAIL_SCROLL_SMOOTHING_MS` et `TAIL_REVERSE_SCROLL_SMOOTHING_MS` dans
+// `lib/cube-tail.js`. Le parcours écrit, lui, garde les siennes ici, au-dessus :
+// 80 / 120 sur desktop, 60 / 100 sur mobile.
 // Durée du fondu qui ramène l'offset de rotation du drag à zéro quand le scroll
 // reprend : assez court pour « dé-poser » le cube vite, assez long pour ne pas
 // sauter d'un coup.
@@ -1613,7 +1589,44 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     // frame. Conservée parce que le garage de la boucle, plus bas, doit savoir si
     // la queue a fini de la rattraper pour pouvoir garer.
     let tailTargetP = 0;
+    // La durée du balayage de retour, et ce qu'elle commande.
+    //
+    // Why 1 800, et pas 4 800. Le retour se lit en deux temps, et il faut les
+    // distinguer. Le dénouement (`TAIL_UNWIND_MS`, dans `cube-tail.js`) rebrousse
+    // la queue, et c'est LUI qui fait revenir le nom : pendant qu'il court,
+    // `applyTail` remonte `out` vers 0 et `names.style.opacity` suit `1 - out`
+    // (ligne 1681). Le balayage ne commence qu'ensuite — et là le nom repart,
+    // pendant que la ligne se refait en souris.
+    //
+    // Ralentir le balayage ne ralentit donc pas l'apparition du nom : cela étire
+    // la disparition, après. C'est pour ça qu'un balayage long se lisait comme un
+    // cube qui traîne en bas pendant que l'écran était déjà revenu à l'état de
+    // départ — et que l'ensemble est revenu à sa valeur d'origine, le geste
+    // étant réparti sur le dénouement.
     const RESET_MS = 1800;
+    // Battement entre les DEUX parties du geste : la fin du dénouement et le début
+    // du balayage. Ce sont deux mouvements distincts — le cube se pose, puis la
+    // ligne se refait en souris — et jusqu’ici ils s’enchaînaient à la frame même.
+    // Le cube arrives, le scroll est rendu, et le balayage part : aucune respiration
+    // entre les deux. Sur un aller, le scrub fait ce rôle tout seul ; ici le décompte
+    // est programmé, et un décompte programmé n'a pas de scrub inhérent — il faut
+    // lui donner le temps d'être lu.
+    //
+    // À 500 ms, ce n'est plus un souffle mais une pose délibérée. C'est un
+    // choix, et il faut le nommer : le cube se pose, reste posé une demi-seconde, puis
+    // le balayage part. On lit ce battement comme une intention — le geste se sépare
+    // lui-même en deux temps — et non comme un délai technique.
+    //
+    // Why je ne le défends pas par un seuil de durée. Mon seuil de ~150 ms estimait
+    // une rapidité acceptable ; 500 ms passe ce cadre par le haut, et c'est
+    // exactement ce qu'on cherche. Un battement trop court se lit comme un déclic ;
+    // un battement franc se lit comme un silence — et c'est le silence qu'on veut.
+    //
+    // Why 500 suffit pour que ce soit un silence et pas une panne. Un demi-tour de
+    // remontée est exactement la durée d'un clic délibéré, donc l'inertie se
+    // détache de l'intention. Sous 500 ms le cube semble attendre quelque chose ;
+    // au-dessus, on recommence à attendre le geste.
+    const RESET_LEAD_MS = 500;
     // Duration de disparition des noms au début du retour : ils doivent quitter
     // l'écran (fondu + glissement vers le bas) avant que la ligne de fin
     // d'animation ne se transforme en « souris ».
@@ -1653,7 +1666,12 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
 // Cette fonction ne lit AUCUNE position : elle reçoit la position. C'est ce qui
 // permet au scroll et au dénouement programmé (voir `goToStartRef`) de jouer la
 // même queue par deux chemins, sans dupliquer les écritures.
-const applyTail = (tp, lineEased) => {
+//
+// `stages` permet au dénouement de passer ses propres segments — le nom y reçoit
+// une fenêtre de durée fixe, plus longue que sa portion de piste (voir
+// `tailUnwindStages`). Par défaut on lit `tp` comme à l'aller : le scrub est la
+// règle, et le dénouement est l'exception qui sait pourquoi.
+const applyTail = (tp, lineEased, stages = tailStages(tp)) => {
   if (tp <= 0) {
     // Hors queue : rien à écrire. On se contente de remettre le visage à zéro,
     // et seulement s'il l'était — sinon on réécrirait un effacement déjà fait à
@@ -1665,7 +1683,7 @@ const applyTail = (tp, lineEased) => {
     if (body.style.stroke !== "") body.style.stroke = "";
     return;
   }
-  const { out, close, face, whited } = tailStages(tp);
+  const { out, close, face, whited } = stages;
   // Chemin inverse exact de `namesRise` : les textes refont le trajet qu'ils
   // viennent de faire, dans l'autre sens. Mêmes 70 px, même courbe — sinon le
   // retour ferait un saut.
@@ -1958,7 +1976,7 @@ const sync = () => {
         // décompte, et la reprise se fait sans couture.
         tailSmoothP = unwoundP;
         tailTargetP = unwoundP;
-        applyTail(unwoundP, 1);
+        applyTail(unwoundP, 1, tailUnwindStages(unwoundP, tailUnwindFrom, TAIL_UNWIND_MS, TAIL_TEXT_REVEAL_MS));
         if (tailUnwindElapsed >= TAIL_UNWIND_MS) {
           tailUnwind = false;
           tailUnwindElapsed = 0;
@@ -1975,14 +1993,27 @@ const sync = () => {
       // CUBE_END vers 0, pendant lequel toute la logique d'intro/clic est gelée.
       if (resetPlay) {
         resetElapsed += dt;
-        const k = Math.min(1, resetElapsed / RESET_MS);
+        // Battement avant la deuxième partie. `resetElapsed` continue de courir, mais
+        // tout ce qui suit se lit sur `sweepElapsed`, qui reste à 0 pendant
+        // `RESET_LEAD_MS`. Le cube se pose donc, immobile, le temps que la bascule
+        // s'enregistre — et la seconde partie démarre exactement à son rythme
+        // d'origine, sans qu'aucune de ses durées n'ait bougé.
+        //
+        // Pourquoi décaler plutôt qu'allonger `RESET_MS` : le geste avait une durée
+        // qu'on venait d'arrêter. Si le battement entrait dans le budget, il
+        // faudrait reprendre cette durée quelque part — sur l'invite ou sur le morph,
+        // qui sont les deux seules choses que la deuxième partie contient. Mieux
+        // vaut un temps mort franc entre les deux parties qu'une deuxième partie
+        // qu'on a réaménagée.
+        const sweepElapsed = Math.max(0, resetElapsed - RESET_LEAD_MS);
+        const k = Math.min(1, sweepElapsed / RESET_MS);
         currentP = resetFrom * (1 - k);
         targetP = currentP;
         el.scrollTop = currentP * coreExtent;
         // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
         // dès le début du retour (fondu + glissement vers le bas), avant que la
-        // ligne de fin d'animation ne se rematérialise en « souris ».
-        const namesK = Math.min(1, resetElapsed / RESET_NAMES_MS);
+        // ligne de fin d'animation ne se transforme en « souris ».
+        const namesK = Math.min(1, sweepElapsed / RESET_NAMES_MS);
         const namesE = namesK * namesK * (3 - 2 * namesK);
         names.style.opacity = String(1 - namesE);
         sub.style.opacity = String(1 - namesE);
@@ -1996,7 +2027,7 @@ const sync = () => {
         // dernière portion du retour.
         const growK = Math.min(
           1,
-          Math.max(0, (resetElapsed - RESET_NAMES_MS) / RESET_LINE_GROW_MS),
+          Math.max(0, (sweepElapsed - RESET_NAMES_MS) / RESET_LINE_GROW_MS),
         );
         const growE = growK * growK * (3 - 2 * growK);
         body.style.transform = `scale(1, ${Math.max(0.0001, growE)})`;
@@ -2004,7 +2035,7 @@ const sync = () => {
           0,
           Math.min(
             1,
-            (resetElapsed - (RESET_NAMES_MS + RESET_LINE_GROW_MS)) / RESET_MORPH_MS,
+            (sweepElapsed - (RESET_NAMES_MS + RESET_LINE_GROW_MS)) / RESET_MORPH_MS,
           ),
         );
         const morphE = smoothstep(morphK);
@@ -2015,11 +2046,11 @@ const sync = () => {
         wheel.style.opacity = String(morphE);
         const revealK = Math.max(
           0,
-          Math.min(1, (resetElapsed - (RESET_MS - RESET_REVEAL_MS)) / RESET_REVEAL_MS),
+          Math.min(1, (sweepElapsed - (RESET_MS - RESET_REVEAL_MS)) / RESET_REVEAL_MS),
         );
         const revealE = 1 - (1 - revealK) * (1 - revealK) * (1 - revealK);
         hint.style.opacity = String(revealE);
-        if (resetElapsed >= RESET_MS) {
+        if (sweepElapsed >= RESET_MS) {
           resetPlay = false;
           resetFrom = 0;
           resetElapsed = 0;
@@ -2205,9 +2236,15 @@ const sync = () => {
         // saut de molette comme après un glissement de deux secondes. Une inertie
         // linéaire, elle, rattrape à vitesse constante puis s'arrête sec — et le
         // saut de molette suivant se lirait comme une reprise.
+        //
+        // La durée, elle, suit le sens du geste : 110 ms à l'aller, 165 ms au
+        // rembobinage. Sans cette seconde valeur, le trait fin remontait plus vite que
+        // le cube qui l'entoure, qui lui remontait déjà à 120 — l'ordre inversé, et ça
+        // s'entend autant sur la réduction de la ligne que sur les 240 traits. Voir
+        // `TAIL_REVERSE_SCROLL_SMOOTHING_MS`.
         tailSmoothP +=
           (tailTargetP - tailSmoothP) *
-          (1 - Math.exp(-dt / TAIL_SCROLL_SMOOTHING_MS));
+          (1 - Math.exp(-dt / tailSmoothingMs(tailTargetP, tailSmoothP)));
         // Arrivée : on pose exactement sur la cible. L'exponentielle s'en approche
         // sans jamais l'atteindre, et une queue qui reste à 0,0004 de sa cible
         // afficherait un trait de trois pixels plus court que la ligne — visible,
