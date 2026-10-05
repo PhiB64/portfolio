@@ -4,6 +4,7 @@ import { Mail, Phone, MapPin, Briefcase, Send, User, AtSign, MessageSquare, Chec
 import { ProjectTabs, BackButton } from "./cube/project-tabs";
 import { HONEYPOT_FIELD, LIMITS, buildPayload, looksAutomated, validateDraft } from "../lib/contact-form";
 import { CONTACT, CONTACT_LOCATION } from "../lib/portfolio-content";
+import { uiFor } from "../lib/content/ui.js";
 
 // Icônes de liaison (GitHub, LinkedIn) : décoratives, le lien adjacent porte
 // déjà le nom (« github.com/PhiB64 »). `focusable="false"` pour IE/Edge
@@ -33,7 +34,8 @@ const FORMSPREE_ENDPOINT =
  */
 const SEND_TIMEOUT_MS = 15_000;
 
-export function ContactOverlay({ onClose, onSelectProject }) {
+export function ContactOverlay({ lang, onClose, onSelectProject }) {
+  const t = uiFor(lang).contact;
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [status, setStatus] = useState("idle");
   // Erreur de saisie, distincte de `status === "error"` : un envoi refusé par
@@ -75,7 +77,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
       return;
     }
 
-    const check = validateDraft(draft);
+    const check = validateDraft(draft, { lang });
     if (!check.ok) {
       setFormError(check.error);
       return;
@@ -119,6 +121,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
     <div className="fixed inset-0 z-50 overflow-y-auto scroll-none" style={{ backgroundColor: "#0a0f1c" }}>
       {typeof onSelectProject === "function" && (
         <ProjectTabs
+          lang={lang}
           contactActive
           onSelect={onSelectProject}
           onContact={onClose}
@@ -133,7 +136,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
         <div className="mb-16">
           <p className="text-[#00a5b0] tracking-[0.3em] uppercase text-xs mb-4">CONTACT</p>
           <h1 id="contact-overlay-title" className="text-5xl font-light text-white mb-3">Philippe Barbosa</h1>
-          <p className="text-[#94a3b8] tracking-widest text-sm uppercase">Concepteur Développeur · Full Stack</p>
+          <p className="text-[#94a3b8] tracking-widest text-sm uppercase">{t.jobTitle}</p>
           <div className="w-16 h-0.5 bg-[#00a5b0] mt-8" />
         </div>
 
@@ -141,7 +144,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
 
           {/* Coordonnées */}
           <div>
-            <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">Coordonnées</h2>
+            <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">{t.coordinates}</h2>
             <ul className="space-y-7">
               <li className="flex items-start gap-4">
                 <Mail size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
@@ -155,7 +158,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
               <li className="flex items-start gap-4">
                 <Phone size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">Téléphone</p>
+                  <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">{t.phone}</p>
                   <a href={CONTACT.phoneHref} className="text-white hover:text-[#00a5b0] transition-colors duration-200 text-sm">
                     {CONTACT.phoneDisplay}
                   </a>
@@ -194,8 +197,8 @@ export function ContactOverlay({ onClose, onSelectProject }) {
               <li className="flex items-start gap-4">
                 <Briefcase size={18} className="text-[#00a5b0] mt-0.5 shrink-0" />
                 <div>
-                  <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">Disponibilité</p>
-                  <span className="text-white text-sm">Ouvert aux opportunités</span>
+                  <p className="text-[#7c8ca1] text-xs tracking-widest uppercase mb-1">{t.availability}</p>
+                  <span className="text-white text-sm">{t.available}</span>
                 </div>
               </li>
             </ul>
@@ -203,7 +206,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
 
           {/* Formulaire */}
           <div>
-            <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">Envoyer un message</h2>
+            <h2 className="text-2xl font-bold text-[#00a5b0] mb-8">{t.sendMessage}</h2>
             {/* `aria-live` sur un conteneur stable : les annonces de changement
                 d'état (envoi, succès, échec) ne sont entendues que si la région
                 existe déjà au moment où son contenu change. Posé sur le `div`
@@ -213,20 +216,20 @@ export function ContactOverlay({ onClose, onSelectProject }) {
               <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
                 <div className="flex items-center gap-2 text-[#00a5b0] mb-3">
                   <CheckCircle size={16} />
-                  <p className="tracking-widest uppercase text-xs">Message envoyé</p>
+                  <p className="tracking-widest uppercase text-xs">{t.sent}</p>
                 </div>
                 <p className="text-[#94a3b8] leading-relaxed text-sm">
-                  Merci, votre message a bien été transmis. Je vous répondrai rapidement.
+                  {t.sentBody}
                 </p>
               </div>
             ) : status === "error" ? (
               <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
                 <div className="flex items-center gap-2 text-[#f87171] mb-3">
                   <AlertCircle size={16} />
-                  <p className="tracking-widest uppercase text-xs">Envoi impossible</p>
+                  <p className="tracking-widest uppercase text-xs">{t.failed}</p>
                 </div>
                 <p className="text-[#94a3b8] leading-relaxed text-sm mb-5">
-                  L&apos;envoi automatique n&apos;a pas abouti. Vous pouvez me écrire directement à{" "}
+                  {t.failedBody}{" "}
                   <a href={`mailto:${CONTACT.email}`} className="text-[#00a5b0] hover:underline break-all">
                     {CONTACT.email}
                   </a>
@@ -242,7 +245,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                   }}
                   className="bg-[#00a5b0] text-[#0a0f1c] tracking-[0.2em] uppercase text-xs py-3 px-6 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0"
                 >
-                  Ouvrir ma messagerie
+                  {t.openMail}
                 </button>
               </div>
             ) : (
@@ -252,7 +255,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     htmlFor="contact-name"
                     className="flex items-center gap-2 text-[#7c8ca1] text-xs tracking-widest uppercase mb-2"
                   >
-                    <User size={13} aria-hidden="true" /> Nom
+                    <User size={13} aria-hidden="true" /> {t.name}
                   </label>
                   <input
                     id="contact-name"
@@ -263,7 +266,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     autoComplete="name"
                     value={form.name}
                     onChange={handleChange}
-                    placeholder="Votre nom"
+                    placeholder={t.namePlaceholder}
                     className="w-full bg-[#0f172a] border border-[#1e293b] rounded text-white text-sm px-4 py-3 outline-none focus:border-[#00a5b0] transition-colors placeholder:text-[#728296]"
                   />
                 </div>
@@ -272,7 +275,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     htmlFor="contact-email"
                     className="flex items-center gap-2 text-[#7c8ca1] text-xs tracking-widest uppercase mb-2"
                   >
-                    <AtSign size={13} aria-hidden="true" /> Email
+                    <AtSign size={13} aria-hidden="true" /> {t.email}
                   </label>
                   <input
                     id="contact-email"
@@ -292,7 +295,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     htmlFor="contact-message"
                     className="flex items-center gap-2 text-[#7c8ca1] text-xs tracking-widest uppercase mb-2"
                   >
-                    <MessageSquare size={13} aria-hidden="true" /> Message
+                    <MessageSquare size={13} aria-hidden="true" /> {t.message}
                   </label>
                   <textarea
                     id="contact-message"
@@ -302,7 +305,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     maxLength={LIMITS.message}
                     value={form.message}
                     onChange={handleChange}
-                    placeholder="Votre message..."
+                    placeholder={t.messagePlaceholder}
                     className="w-full bg-[#0f172a] border border-[#1e293b] rounded text-white text-sm px-4 py-3 outline-none focus:border-[#00a5b0] transition-colors placeholder:text-[#728296] resize-none"
                   />
                 </div>
@@ -315,7 +318,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                     l'exclut aussi de la navigation au clavier, au cas où le
                     masquage CSS viendrait à échouer. */}
                 <div className="absolute -left-[9999px]" aria-hidden="true">
-                  <label htmlFor="contact-website">Ne pas remplir ce champ</label>
+                  <label htmlFor="contact-website">{t.honeypot}</label>
                   <input
                     id="contact-website"
                     type="text"
@@ -351,7 +354,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
                   aria-busy={status === "sending"}
                   className="w-full bg-[#00a5b0] text-[#0a0f1c] tracking-[0.2em] uppercase text-xs py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <Send size={14} aria-hidden="true" /> {status === "sending" ? "Envoi..." : "Envoyer"}
+                  <Send size={14} aria-hidden="true" /> {status === "sending" ? t.sending : t.send}
                 </button>
               </form>
             )}
@@ -361,7 +364,7 @@ export function ContactOverlay({ onClose, onSelectProject }) {
 
         {/* Retour en bas de page sur mobile, où la barre d'onglets est masquée */}
         <div className="text-center mt-20 sm:hidden">
-          <BackButton onClick={onClose} />
+          <BackButton lang={lang} onClick={onClose} />
         </div>
       </div>
     </div>

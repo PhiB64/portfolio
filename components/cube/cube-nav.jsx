@@ -1,6 +1,13 @@
 import { Undo2 } from "lucide-react";
 
-import { PROJECT_LINKS } from "./project-tabs";
+import { projectLinks } from "./project-tabs";
+import { uiFor } from "../../lib/content/ui.js";
+
+// Les onglets viennent de `project-tabs`, qui lit le dernier libellé dans le
+// dictionnaire de langue : « PROJETS » en français, « PROJECTS » en anglais.
+// `CubeNav` et `ProjectTabs` affichent donc la même liste, et ne peuvent pas
+// diverger sur le nombre de rubriques.
+export { projectLinks };
 
 // Les trois boutons qui pilotent le visiteur une fois l'intro passée : les
 // onglets de rubriques, SKIP/RETOUR, et CONTACT (deux exemplaires, desktop et
@@ -15,6 +22,7 @@ import { PROJECT_LINKS } from "./project-tabs";
 // d'accessibilité, pas du rendu : `visibility` conviendrait mais tuerait le fondu
 // de 0,6 s.
 export function CubeNav({
+  lang,
   zoomedFaces,
   skipped,
   skipRevealedFaces,
@@ -26,13 +34,14 @@ export function CubeNav({
   showReturn,
   contactBtnStyle,
 }) {
+  const t = uiFor(lang).nav;
   return (
     <>
       <nav
-        aria-label="Rubriques du portfolio"
+        aria-label={t.sections}
         className="absolute top-20 sm:top-6 left-1/2 -translate-x-1/2 z-30 grid grid-cols-3 gap-2 px-2 max-w-[88vw] w-[88vw] sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-3 sm:px-4"
       >
-        {PROJECT_LINKS.map((link, i) => {
+        {projectLinks(lang).map((link, i) => {
           const shown =
             zoomedFaces[i] || (skipped && (skipRevealedFaces[i] || contactDone));
           return (
@@ -80,9 +89,7 @@ export function CubeNav({
       </nav>
       <button
         onClick={showReturn ? () => onRestart?.() : onSkip}
-        aria-label={
-          showReturn ? "Revenir au début de l'animation" : "Passer l'animation"
-        }
+        aria-label={showReturn ? t.restart : t.skip}
         // Le bouton n'a pas de fondu — l'opacité passe de 1 à 0 d'un coup — mais
         // la correction retenue est la même que pour CONTACT, et pour la même
         // raison : `visibility` conviendrait ici, mais il tuerait le fondu de

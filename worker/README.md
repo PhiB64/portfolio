@@ -123,6 +123,11 @@ system prompt. Les faits sur Philippe ne sont donc écrits qu'à un seul endroit
 modifier un projet sur le site change ce que l'assistant dit au déploiement
 suivant.
 
+Il y en a un par langue, dans `payload.digests[lang]`. La clé `digest`, qui ne
+contient que le français, est conservée à côté : elle est ce que lisent les
+Workers déjà déployés, donc la conserver rend le déploiement de l'un et de
+l'autre dans n'importe quel ordre sans casser l'autre (voir « Langues »).
+
 #### La section « Identité », en tête de digest
 
 C'est une section de trois lignes, et c'est la réponse à « c'est qui Philippe ? ».
@@ -354,7 +359,74 @@ c'est ce qui garantit qu'une réponse qui cite le mot passe intacte. Tests :
 `lib/leak-filter.test.js`, dont un invariant qui rend la même sortie quel que soit
 le découpage en deltas.
 
+## Langues
+
+L'assistant répond dans la langue de la page, et cette langue vient de la
+requête — jamais du texte de la question. Un visiteur anglophone qui écrit en
+français sur `/en` attend une réponse en anglais ; déduire la langue de la
+question ferait l'inverse, et une conversation changerait de langue d'un tour à
+l'autre.
+
+Trois décisions portent tout le reste :
+
+**La langue est connue avant les rejets précoces.** Elle est donc dans
+l'en-tête `X-Chat-Lang` et pas seulement dans le corps : un refus d'origine ou
+de méthode arrive avant que le corps soit lu, et c'est précisément à ces moments
+que le visiteur ne parle pas la langue du serveur. L'en-tête est déclaré dans le
+preflight CORS — sans cette ligne, le navigateur le retirerait de la requête et
+le bilinguisme échouerait en silence, sans la moindre erreur visible. Le corps
+porte `lang` aussi, pour les requêtes sans cet en-tête.
+
+**Chaque langue a ses consignes et son digest.** `SYSTEM_PROMPTS` porte une
+version par langue, règle pour règle, et non une version réduite : les règles
+qui coûtent cher en production sont celles qu'on laisse tomber quand on traduit
+vite. Un prompt anglais nourri du digest français produirait un assistant qui cite
+des intitulés français au milieu d'une réponse anglaise, sans aucun moyen de le
+savoir. `worker/src/langue.test.js` compte les garde-fous des deux versions, ce
+qui rend une règle perdue visible immédiatement.
+
+**Le repli est silencieux et vaut pour tous.** Une langue inconnue, une
+requête sans en-tête, un `curl` de test : tout reçoit du français, qui est la
+langue d'origine. Le repli protège surtout le prompt — répondre à un visiteur
+avec un digest vide serait pire que de répondre dans la mauvaise langue.
+
+### L'ordre de déploiement
+
+Le Worker se déploie à la main (`npm run deploy`), le site à chaque push. Les
+deux pièces ne se déploient pas ensemble, et la période entre les deux est
+réelle.
+
+La clé `digest` existe précisément pour cela : un Worker déjà déployé ne lit
+que cette clé, et le site continue de la publier. Un site bilingue déployé en
+premier sert donc des digests français et anglais, le Worker lit le français, et
+la page anglaise reçoit des réponses françaises **jusqu'au déploiement du
+Worker**. Aucun 404, aucun digest vide, aucune erreur : le service fonctionne,
+dans la langue de l'origine. C'est le seul état dégradé possible, et il est
+silencieux.
+
+L'autre ordre est sans danger aussi : un Worker bilingue déployé avant le site
+replie sur `digest` pour le français, et répond par le flux de secours sur la
+page anglaise — qui est lui aussi traduit. Les deux ordres sont sûrs, ce qui
+supprime le besoin de vérifier lequel a eu lieu.
+
+### Le résumé GitHub
+
+Les noms de langage de l'API sont presque tous ceux de la langue du digest —
+`JavaScript`, `TypeScript`, `Python`, `HTML`, `CSS` s'écrivent pareil partout, et
+c'est le cas de fait de la majorité des dépôts. Seuls « Jupyter Notebook » et
+« Shell » demandent une forme lisible pour le modèle.
+
 ## Garde-fous
+
+Les règles qui tiennent l'assistant à sa place sont dans `SYSTEM_PROMPTS`, pas
+dans le digest : le digest est une donnée, et une consigne qui y figurerait
+serait suivie au lieu d'être obéie.
+
+Une consigne est écrite dans une seule langue et jamais dans les deux à la fois
+dans le même prompt : le modèle en lit une par requête, selon la page. C'est ce
+qui permet de garder des versions qui ne sont pas des traductions mot à mot —
+l'anglais dit « the CONTACT tab on the site », le français « l'onglet CONTACT du
+site » — sans avoir à réconcilier deux formulations dans un seul texte.
 
 - **Rate limiting** : 10 requêtes/minute par IP, via le binding `CHAT_LIMIT`
   (voir la section suivante — le premier montage ne tenait pas).

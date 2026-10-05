@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useEscapeKey } from "../lib/use-dialog-focus";
 import { createLeakFilter } from "../lib/leak-filter";
 import { createRequestSlot } from "../lib/chat-request";
+import { uiFor } from "../lib/content/ui.js";
 import { Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 
 /**
@@ -142,20 +143,16 @@ function stripMarkdown(text) {
  * visiteur de politique de contenu, ce qui n'est ni lisible ni aimable.
  *
  * @param {{code?: number, message?: string, metadata?: {error_type?: string}}} error
+ * @param {{outOfScope: string, serviceDown: string}} t
  * @returns {Error & {retryable: boolean}}
  */
-function upstreamError(error) {
+function upstreamError(error, t) {
   const kind = error?.metadata?.error_type;
   const refused = kind === "content_policy_violation" || kind === "refusal";
 
-  return Object.assign(
-    new Error(
-      refused
-        ? "Je ne peux pas répondre à cette question. Posez-moi autre chose sur le portfolio."
-        : "Le service de discussion ne répond pas.",
-    ),
-    { retryable: !refused },
-  );
+  return Object.assign(new Error(refused ? t.outOfScope : t.serviceDown), {
+    retryable: !refused,
+  });
 }
 
 /**
@@ -168,10 +165,11 @@ function upstreamError(error) {
  * geste utile ; si le retour reste vide, les tentatives suivantes échouent
  * pareillement et ce message est celui que le visiteur finit par lire.
  *
+ * @param {{retry: string}} t
  * @returns {Error & {retryable: boolean}}
  */
-function emptyAnswerError() {
-  return Object.assign(new Error("Le service de discussion n'a pas su répondre. Réessayez."), {
+function emptyAnswerError(t) {
+  return Object.assign(new Error(t.retry), {
     retryable: true,
   });
 }
@@ -188,9 +186,10 @@ function emptyAnswerError() {
  *
  * @param {ReadableStreamDefaultReader<Uint8Array>} body
  * @param {(delta: string) => void} onDelta
+ * @param {{outOfScope: string, serviceDown: string, retry: string}} t
  * @returns {Promise<boolean>}
  */
-async function readStream(body, onDelta) {
+async function readStream(body, onDelta, t) {
   const leaks = createLeakFilter();
   let hasContent = false;
   // Point unique d'émission : c'est ici que l'on compte ce qui atteint vraiment
@@ -244,12 +243,12 @@ async function readStream(body, onDelta) {
         // étant figé depuis l'envoi des en-têtes. Sans ce test, une modération
         // ou un refus de modèle s'affiche comme une réponse vide, sans texte
         // et sans erreur — le visiteur voit une bulle muette.
-        if (frame?.error) throw upstreamError(frame.error);
+        if (frame?.error) throw upstreamError(frame.error, t);
 
         // Même échec, autre forme : certaines trames le portent dans
         // `finish_reason` sans champ `error`. Sans ce test, la bulle resterait
         // muette — le cas que le commentaire ci-dessus décrit.
-        if (frame?.choices?.[0]?.finish_reason === "error") throw upstreamError({});
+        if (frame?.choices?.[0]?.finish_reason === "error") throw upstreamError({}, t);
 
         const delta = frame?.choices?.[0]?.delta?.content;
         if (delta) emit(leaks.push(delta));
@@ -262,7 +261,8 @@ async function readStream(body, onDelta) {
   return hasContent;
 }
 
-export function ChatWidget() {
+export function ChatWidget({ lang }) {
+  const t = uiFor(lang).chat;
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
@@ -361,8 +361,27 @@ export function ChatWidget() {
 
           const res = await fetch(ENDPOINT, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            // La langue part dans un en-tête *et* dans le corps.
+            //
+            // L'en-tête d'abord : le Worker doit traduire ses rejets précoces —
+            // méthode, origine, taille — et ces rejets arrivent avant que le corps
+            // soit lu. Un `lang` dans le JSON seul arriverait trop tard, et un
+            // visitor anglophone se ferait répondre en français à une erreur qu'il cherche
+            // à comprendre. L'en-tête est donc déclaré dans le preflight CORS du
+            // Worker ; s'il en manquait un, le navigateur le retirerait de la
+            // requête et le bilinguisme échouerait en silence.
+            //
+            // Le corps en supplément : il sert aux requêtes sans cet en-tête — un
+            // ancien client, un `curl` — et évite d'avoir à modifier deux choses
+            // pour ajouter une langue.
+            //
+            // Les deux viennent de la page, jamais de la question : la langue se
+            // choisit en haut de l'écran, pas en écrivant. Un visiteur anglophone
+            // qui écrit en français sur la page anglaise attend une réponse en
+            // anglais.
+            headers: { "Content-Type": "application/json", "X-Chat-Lang": lang },
             body: JSON.stringify({
+              lang,
               messages: history.slice(-HISTORY_LIMIT).map(({ role, content: text }) => ({
                 role,
                 content: text,
@@ -374,7 +393,7 @@ export function ChatWidget() {
           if (!res.ok || !res.body) {
             // Le Worker renvoie toujours `{ error }` sur une erreur, déjà rédigé
             // pour le visiteur : on le montre tel quel.
-            let message = "Le service de discussion ne répond pas.";
+            let message = t.serviceDown;
             let retryable = true;
             try {
               const data = await res.json();
@@ -402,7 +421,7 @@ export function ChatWidget() {
               next[next.length - 1] = { ...last, content: last.content + delta };
               return next;
             });
-          });
+          }, t);
 
           // Flux terminé sans un seul caractère affichable : le modèle n'a émis
           // que sa ligne de fuite, et le filtre l'a retirée. Sans ce test, la
@@ -411,7 +430,7 @@ export function ChatWidget() {
           // donc ce silence en relance : si le nouveau tirage répond, le trou est
           // invisible, et sinon l'erreur affichée plus bas est au moins une
           // consigne claire plutôt qu'un vide.
-          if (!hasContent) throw emptyAnswerError();
+          if (!hasContent) throw emptyAnswerError(t);
 
           break; // Réponse reçue en entier : plus rien à relancer.
         } catch (err) {
@@ -441,7 +460,7 @@ export function ChatWidget() {
         // produirait le même silence qu'une fermeture, alors que le premier mérite
         // un message et que le second n'en mérite aucun. La relance a déjà eu lieu
         // plus haut : le délai couvre le `send` entier, il n'a donc pas été retenté.
-        setError("Le service de discussion met trop de temps à répondre.");
+        setError(t.timeout);
         // La bulle vide est retirée : rien n'a été affiché, la laisser produirait
         // une bulle muette sous une bannière d'erreur.
         setMessages((prev) =>
@@ -450,7 +469,7 @@ export function ChatWidget() {
             : prev,
         );
       } else if (err?.name !== "AbortError") {
-        setError(err?.message ?? "Une erreur est survenue.");
+        setError(err?.message ?? t.genericError);
         // Pas de bulle d'erreur dupliquée dans le fil : elle vit dans la bannière.
         setMessages((prev) =>
           prev[prev.length - 1]?.role === "assistant" && !prev[prev.length - 1].content
@@ -491,7 +510,7 @@ export function ChatWidget() {
       {open && (
         <section
           id="chat-panel"
-          aria-label="Assistant de Philippe"
+          aria-label={t.assistant}
           className="fixed inset-x-4 top-20 z-40 flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
         >
           <header className="flex items-center justify-between gap-3 border-b border-[#1e293b] px-4 py-3">
@@ -502,7 +521,7 @@ export function ChatWidget() {
             <button
               type="button"
               onClick={reset}
-              aria-label="Effacer la conversation"
+              aria-label={t.clear}
               disabled={messages.length === 0}
               className="text-[#7c8ca1] transition-colors duration-200 hover:text-[#00a5b0] disabled:cursor-not-allowed disabled:opacity-30"
             >
@@ -548,7 +567,7 @@ export function ChatWidget() {
                               repart. Sans ce libellé, le backoff est un silence
                               qui ressemble à un blocage. */}
                           <span className="text-xs">
-                            {retry > 0 ? `nouvelle tentative (${retry}/${MAX_RETRIES})…` : "rédaction…"}
+                            {retry > 0 ? t.writingRetry(retry, MAX_RETRIES) : t.writing}
                           </span>
                         </span>
                       ) : (
@@ -580,7 +599,7 @@ export function ChatWidget() {
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder="Votre question…"
+                placeholder={t.placeholder}
                 maxLength={4000}
                 autoComplete="off"
                 className="min-w-0 flex-1 rounded-lg border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#7c8ca1] focus:border-[#00a5b0] focus:outline-none"
@@ -588,7 +607,7 @@ export function ChatWidget() {
               <button
                 type="submit"
                 disabled={!canSend}
-                aria-label="Envoyer le message"
+                aria-label={t.send}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#00a5b0] text-[#0a0f1c] transition-colors duration-200 hover:bg-[#00b0bd] disabled:cursor-not-allowed disabled:opacity-30"
               >
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}

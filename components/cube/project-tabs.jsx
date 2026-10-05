@@ -2,18 +2,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp } from "lucide-react";
 import { reduceMotion } from "../../lib/reduced-motion";
+import { uiFor } from "../../lib/content/ui.js";
 
 // Les onglets sont pilotés par état, pas par route : l'URL `?project=N` est
 // réécrite par `openProject`, et `url` n'était jamais lu. Le conserver
 // suggérait un routage qui n'existe pas.
-export const PROJECT_LINKS = [
-  { name: "WEB" },
-  { name: "REACT" },
-  { name: "BACKEND" },
-  { name: "DATABASE" },
-  { name: "MOBILE" },
-  { name: "PROJETS" },
-];
+//
+// Les cinq premiers libellés sont des noms de technologies, identiques dans les
+// deux langues. Le dernier ne l'est pas : « PROJETS » est français et « PROJECTS »
+// anglais, il vient donc du dictionnaire.
+const PROJECT_LINK_NAMES = ["WEB", "REACT", "BACKEND", "DATABASE", "MOBILE"];
+
+/**
+ * Libellés des onglets pour une langue donnée.
+ *
+ * Fonction plutôt que constante : le dernier libellé dépend de la langue de la
+ * page, alors que `CubeNav` parcourt la liste à chaque rendu. Les cinq autres
+ * sont des noms de technologies, écrits pareil partout.
+ */
+export function projectLinks(lang) {
+  return [...PROJECT_LINK_NAMES, uiFor(lang).tabs.projects].map((name) => ({ name }));
+}
 
 const TAB_BASE =
   "text-center whitespace-nowrap tracking-[0.2em] uppercase rounded-full px-4 py-2 text-xs transition-colors duration-300 cursor-pointer border";
@@ -44,25 +53,27 @@ const TOP_BUTTON_ABOVE = 400;
 // « ← RETOUR » partagé par ses deux emplacements (haut sur desktop, bas de
 // page sur mobile). Exporté pour que chaque overlay le rende à la fin de son
 // contenu, seul endroit d'où il peutouncer dans le flux en mobile.
-export function BackButton({ onClick, className = "" }) {
+export function BackButton({ lang, onClick, className = "" }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`text-[#00a5b0] tracking-[0.2em] uppercase text-sm hover:opacity-70 transition-opacity bg-transparent border-0 cursor-pointer ${className}`}
     >
-      &larr; RETOUR
+      &larr; {uiFor(lang).contact.back.toUpperCase()}
     </button>
   );
 }
 
 export function ProjectTabs({
+  lang,
   activeIndex = null,
   contactActive = false,
   onSelect,
   onContact,
   onBack,
 }) {
+  const t = uiFor(lang).nav;
   const barRef = useRef(null);
   const [hidden, setHidden] = useState(false);
   const [showTopButton, setShowTopButton] = useState(false);
@@ -120,10 +131,10 @@ export function ProjectTabs({
             du cube en fond, même masquée par `inert`), et un lecteur doit les
             distinguer. Le nom reprend le contexte — rubrique ou contact. */}
         <nav
-          aria-label={contactActive ? "Rubriques — page contact" : "Rubriques du portfolio"}
+          aria-label={contactActive ? t.sectionsContact : t.sections}
           className="relative flex w-full flex-wrap items-center justify-center gap-3 px-4 pt-6 pb-4"
         >
-          {PROJECT_LINKS.map((link, i) => {
+          {projectLinks(lang).map((link, i) => {
             const active = activeIndex === i;
             return (
               <button
@@ -153,6 +164,7 @@ export function ProjectTabs({
           et l'overlay le rend en fin de contenu, hors de ce composant. */}
       {onBack && (
         <BackButton
+          lang={lang}
           onClick={onBack}
           className="hidden sm:inline-block fixed top-6 left-4 z-30"
         />
@@ -162,7 +174,7 @@ export function ProjectTabs({
         <button
           type="button"
           onClick={scrollToTop}
-          aria-label="Retour en haut de page"
+          aria-label={t.backToTop}
           className="fixed bottom-8 right-8 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md hover:bg-[#00a5b0]/10 hover:text-white transition-colors duration-300 cursor-pointer"
         >
           <ChevronUp size={20} />

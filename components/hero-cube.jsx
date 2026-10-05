@@ -5,6 +5,7 @@ import anime from "animejs";
 
 
 import { renderProjectContent } from "./cube/project-content";
+import { uiFor } from "../lib/content/ui.js";
 import { ProjectTabs, BackButton } from "./cube/project-tabs";
 import { ContactOverlay } from "./contact-overlay";
 import { OrientationLock } from "./cube/orientation-lock";
@@ -152,7 +153,15 @@ const MOBILE_BG_WAVE_MS = 420;
 // elle mérite ses tests.
 const reduceMotion = readReducedMotion;
 
-export function HeroCube({ title, subtitle, images = [] }) {
+/**
+ * Le cube et ses overlays.
+ *
+ * `lang` n'a pas de valeur par défaut, pour la même raison que dans
+ * `renderProjectContent` : un repli silencieux afficherait un mélange de
+ * français et d'anglais dans les overlays sans aucun signal. Les deux pages
+ * d'accueil — `app/(fr)` et `app/(en)` — le passent explicitement.
+ */
+export function HeroCube({ lang, title, subtitle, images = [] }) {
   const sectionRef = useRef(null);
   const cubeRef = useRef(null);
   const wireRef = useRef(null);
@@ -2951,7 +2960,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
         <button
           onClick={() => window.location.reload()}
           className="absolute top-3 left-3 z-30 sm:top-5 sm:left-8 bg-transparent border-0 p-0 cursor-pointer"
-          aria-label="Recharger la page"
+          aria-label={uiFor(lang).cube.reload}
         >
           <img
             src={`${BASE}/icon.webp`}
@@ -2974,6 +2983,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
             />
           </div>
               <CubeNav
+                lang={lang}
                 zoomedFaces={zoomedFaces}
                 skipped={skipped}
                 skipRevealedFaces={skipRevealedFaces}
@@ -3141,6 +3151,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           className="fixed inset-0 z-[60]"
         >
           <ContactOverlay
+            lang={lang}
             onClose={closeContactOverlay}
             onSelectProject={(i) => {
               setShowContact(false);
@@ -3163,6 +3174,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
           style={{ backgroundColor: "#0a0f1c" }}
         >
           <ProjectTabs
+            lang={lang}
             activeIndex={selectedProject}
             onSelect={openProjectFromOverlay}
             onContact={onContactClick}
@@ -3170,13 +3182,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
           />
           <div className="mx-auto max-w-4xl px-6 py-24">
             {renderProjectContent(selectedProject, {
+              lang,
               onContact: onContactClick,
             })}
 
             {/* Retour en bas de page sur mobile, où la barre d'onglets est
                 masquée et où rien d'autre n'assure le retour */}
             <div className="text-center mt-20 sm:hidden">
-              <BackButton onClick={closeProjectOverlay} />
+              <BackButton lang={lang} onClick={closeProjectOverlay} />
             </div>
           </div>
         </div>

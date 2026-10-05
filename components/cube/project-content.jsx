@@ -1,5 +1,5 @@
 import { Globe, Layers, Code2, Smartphone, Zap, Server, Package, Wand2, Play, Cpu, Box, Shield, Mail, Database, Cloud, MapPin, ChevronRight, ExternalLink, Terminal, Rocket, Download } from "lucide-react";
-import { PROJECT_CONTENT } from "../../lib/portfolio-content";
+import { getContent, getUI } from "../../lib/content/index.js";
 
 const PAGE_ICONS = [Globe, Layers, Server, Database, Smartphone, Rocket];
 
@@ -7,13 +7,20 @@ const PAGE_ICONS = [Globe, Layers, Server, Database, Smartphone, Rocket];
 // `if` : l'ordre des tests devient explicite, « react native » doit être
 // évalué avant « react », et l'ajout d'une compétence se fait en une ligne.
 // Le repli `null` laisse le CPU générique.
+//
+// Les jetons sont reconnus dans les DEUX langues. Ils n'étaient que français :
+// « sécurité » et « carte » ne se rencontrent jamais dans un libellé anglais, et
+// toutes les compétences concernées seraient tombées sur le CPU générique — un
+// défaut silencieux, puisque le rendu restait correct, juste sans icône. C'est
+// aussi pourquoi « jwt », « base », « pwa » et les noms de technologies sont
+// partagés : ils sont écrits pareil dans les deux langues.
 const ICON_SIZE = 15;
 const ICON_CLASS = "text-[#00a5b0] shrink-0";
 const SKILL_ICON_RULES = [
   [["html"], Globe],
   [["css", "scss"], Layers],
   [["javascript", "ecmascript"], Code2],
-  [["responsive", "mobile-first", "react native", "flutter", "store", "synchronisation"], Smartphone],
+  [["responsive", "mobile-first", "react native", "flutter", "store", "synchronisation", "sync"], Smartphone],
   [["react"], Zap],
   [["next"], Server],
   [["vite"], Package],
@@ -22,11 +29,11 @@ const SKILL_ICON_RULES = [
   [["node", "express"], Terminal],
   [["strapi"], Layers],
   [["docker", "nginx"], Box],
-  [["sécurité", "jwt"], Shield],
+  [["sécurité", "security", "jwt"], Shield],
   [["email", "nodemailer", "resend"], Mail],
   [["postgres", "mongo", "maria", "sql", "base"], Database],
   [["cloudinary", "cloud"], Cloud],
-  [["leaflet", "carte"], MapPin],
+  [["leaflet", "carte", "map"], MapPin],
   [["pwa"], Smartphone],
 ];
 
@@ -51,8 +58,6 @@ function skillIcon(title) {
 }
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-
-export { PROJECT_CONTENT };
 
 /**
  * Niveaux de titre de la section, décalés d'un cran.
@@ -111,11 +116,20 @@ export function sectionSlug(section) {
  * page statique ne le fournit pas, donc l'appel à l'action, qui n'y aurait aucun
  * gestionnaire, n'y est pas rendu.
  *
+ * `lang` est le seul paramètre nouveau, et il n'a pas de valeur par défaut.
+ * Un repli silencieux serait pire que l'absence de langue : l'overlay anglais
+ * afficherait du contenu français avec des boutons anglais, sans le moindre
+ * avertissement. Les deux appelants — l'overlay du cube et la page
+ * `/projects` — le passent donc explicitement, et une page qui oublierait de le
+ * faire échoue bruyamment plutôt que d'afficher un mélange.
+ *
  * @param {number} i - index de la section dans `PROJECT_CONTENT`
- * @param {{onContact?: () => void, headingOffset?: number, titleId?: string}} [options]
+ * @param {{lang: string, onContact?: () => void, headingOffset?: number, titleId?: string}} options
  * @returns {import("react").ReactNode[]}
  */
-export function renderProjectContent(i, { onContact, headingOffset = 0, titleId = "project-overlay-title" } = {}) {
+export function renderProjectContent(i, { lang, onContact, headingOffset = 0, titleId = "project-overlay-title" }) {
+  const { PROJECT_CONTENT } = getContent(lang);
+  const t = getUI(lang).content;
   const p = PROJECT_CONTENT[i];
   if (!p) return [];
   const H = headingTags(headingOffset);
@@ -138,7 +152,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.profile) {
     items.push(
       <section key="profile" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">À propos de moi</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">{t.about}</H.section>
         <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
           {p.profile.bio.map((par, j) => <p key={j} className="text-[#94a3b8] leading-relaxed mb-4">{par}</p>)}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
@@ -156,7 +170,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
                 download
                 className="inline-flex items-center gap-2 text-xs tracking-widest uppercase border border-[#00a5b0]/50 text-[#00a5b0] rounded-full px-5 py-2.5 hover:bg-[#00a5b0]/10 transition-colors duration-200"
               >
-                <Download size={13} /> Télécharger mon CV
+                <Download size={13} /> {t.downloadCv}
               </a>
             </div>
           )}
@@ -167,7 +181,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.presentation) {
     items.push(
       <section key="presentation" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">Présentation</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">{t.presentation}</H.section>
         {p.presentation.map((par, j) => <p key={j} className="text-[#94a3b8] leading-relaxed mb-4">{par}</p>)}
       </section>
     );
@@ -175,7 +189,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.skills && p.skills.length > 0) {
     items.push(
       <section key="skills" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-8">{i === 0 ? "Mes compétences" : i === 1 ? "Mes outils" : "Mes compétences"}</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-8">{i === 1 ? t.myTools : t.mySkills}</H.section>
         <div className="grid gap-6">
           {p.skills.map((s, j) => (
             <div key={j} className="border-l-2 border-[#00a5b0] pl-5">
@@ -190,7 +204,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
     );
   }
   if (p.features && p.features.length > 0) {
-    const featureLabel = i === 2 ? "Fonctionnalités" : i === 0 ? "Ce que je réalise" : "Fonctionnalités";
+    const featureLabel = i === 0 ? t.whatIBuild : t.features;
     items.push(
       <section key="features" className="mb-20">
         <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">{featureLabel}</H.section>
@@ -207,7 +221,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.approach) {
     items.push(
       <section key="approach" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">Objectif</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">{t.objective}</H.section>
         <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
           <div className="grid grid-cols-2 gap-3">
             {p.approach.map((a, j) => (
@@ -223,7 +237,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.philosophy) {
     items.push(
       <section key="philosophy" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">Ma philosophie</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">{t.philosophy}</H.section>
         <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
           <p className="text-[#94a3b8] leading-relaxed italic">&ldquo;{p.philosophy}&rdquo;</p>
         </div>
@@ -233,7 +247,7 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.projects) {
     items.push(
       <section key="projects" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-8">Projets</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-8">{t.projects}</H.section>
         <div className="grid gap-6">
           {p.projects.map((pr, j) => (
             <div key={j} className="border border-[#1e293b] rounded-lg p-6 bg-[#0f172a]">
@@ -265,9 +279,9 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
   if (p.process) {
     items.push(
       <section key="process" className="mb-20">
-        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">Ma méthode de travail</H.section>
+        <H.section className="text-2xl font-bold text-[#00a5b0] mb-6">{t.method}</H.section>
         <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-8">
-          <p className="text-[#94a3b8] mb-6">Chaque projet suit un processus rigoureux :</p>
+          <p className="text-[#94a3b8] mb-6">{t.methodIntro}</p>
           <div className="grid gap-4">
             {p.process.map((step, j) => (
               <div key={j} className="flex items-center gap-4 text-[#94a3b8]">
@@ -284,13 +298,13 @@ export function renderProjectContent(i, { onContact, headingOffset = 0, titleId 
     items.push(
       <section key="cta" className="mb-20 text-center">
         <div className="bg-[#0f172a] border border-[#1e293b] rounded-lg p-10">
-          <H.section className="text-2xl font-bold text-white mb-3">Un projet en tête ?</H.section>
-          <p className="text-[#94a3b8] mb-8">Discutons de votre besoin — réponse rapide garantie.</p>
+          <H.section className="text-2xl font-bold text-white mb-3">{t.ctaTitle}</H.section>
+          <p className="text-[#94a3b8] mb-8">{t.ctaBody}</p>
           <button
             onClick={onContact}
             className="bg-[#00a5b0] text-[#0a0f1c] tracking-[0.2em] uppercase text-xs px-8 py-4 rounded hover:bg-[#00a5b0]/80 transition-colors duration-200 cursor-pointer border-0 inline-flex items-center gap-2"
           >
-            <Mail size={14} /> Me contacter
+            <Mail size={14} /> {t.ctaButton}
           </button>
         </div>
       </section>

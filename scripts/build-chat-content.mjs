@@ -1,5 +1,5 @@
 /**
- * Publie le digest construit par `lib/chat-digest.js`.
+ * Publie les digests construits par `lib/chat-digest.js`, un par langue.
  *
  * Ce script ne fait plus que l'écriture. Il appelait `buildDigest()` puis
  * journalisait **au chargement du module**, donc l'importer depuis un test
@@ -8,8 +8,17 @@
  * volontaires — est partie dans `lib/chat-digest.js`, où elle s'importe et se
  * teste. Voir ce module pour pourquoi le digest existe.
  *
- * Sortie : `dist/content.json` (un objet `{ "digest": "…" }`), écrit après
- * `next build` — voir le script `postbuild`.
+ * Sortie : `dist/content.json`, écrit après `next build` — voir le script
+ * `postbuild`.
+ *
+ * Deux clés, et pourquoi. `digests` porte une entrée par langue et porte la
+ * logique. `digest` reste le digest français, inchangé, pour deux raisons qui
+ * sont la même : le Worker déjà déployé ne lit que cette clé, et continuer à la
+ * publier lui permet de fonctionner contre un site déployé avant lui. Un site et
+ * un Worker sont déployés séparément — le Worker à la main, le site à chaque
+ * push — et la période entre les deux est réelle. `digest` et `digests.en` sont
+ * donc volontairement redondants : le redondant est le français, qui est le seul
+ * cas où un ancien reader et un nouveau writer doivent s'entendre.
  */
 
 import { writeFile, mkdir, readFile } from "node:fs/promises";
@@ -17,11 +26,40 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { buildDigest } from "../lib/chat-digest.js";
+import { getContent, DEFAULT_LOCALE, SUPPORTED_LOCALES } from "../lib/content/index.js";
 
 const DIST = path.resolve(import.meta.dirname, "..", "dist");
 const OUT = path.join(DIST, "content.json");
 
-const digest = buildDigest();
+/**
+ * Les sources d'une langue, prises du même point d'entrée que l'interface.
+ *
+ * Passé par `getContent` plutôt que par un import de `fr.js` / `en.js` : c'est
+ * le même objet que celui que rendent les pages, donc le digest ne peut pas
+ * diverger de ce que le visiteur lit. Une langue déclarée dans
+ * `SUPPORTED_LOCALES` mais absente du contenu produirait un digest vide, et le
+ * test de parité le voit avant le build.
+ */
+function sourcesFor(lang) {
+  const { CAREER_CONTENT, USAGE_CONTENT, STACK_CONTENT, PROJECT_CONTENT } =
+    getContent(lang);
+  return {
+    career: CAREER_CONTENT,
+    usage: USAGE_CONTENT,
+    stack: STACK_CONTENT,
+    projects: PROJECT_CONTENT,
+  };
+}
+
+const digests = {};
+for (const lang of SUPPORTED_LOCALES) {
+  digests[lang] = buildDigest({ lang, sources: sourcesFor(lang) });
+}
+
+const payload = {
+  digest: digests[DEFAULT_LOCALE],
+  digests,
+};
 
 // `dist/` n'existe qu'après `next build`. En dev, ou si le build a échoué, on
 // écrit à côté plutôt que de faire échouer le script : un digest absent doit
@@ -29,13 +67,16 @@ const digest = buildDigest();
 const target = existsSync(DIST) ? OUT : path.resolve(import.meta.dirname, "..", "content.json");
 
 await mkdir(path.dirname(target), { recursive: true });
-await writeFile(target, JSON.stringify({ digest }) + "\n", "utf8");
+await writeFile(target, JSON.stringify(payload) + "\n", "utf8");
 
-// Le fichier est relu pour rapporter sa taille *sur disque*. `digest.length`
-// compte des caractères, et un accent en UTF-8 occupe plusieurs octets : les
+// Le fichier est relu pour rapporter sa taille *sur disque*. `payload.length`
+// compterait des caractères, et un accent en UTF-8 occupe plusieurs octets : les
 // deux chiffres affichés n'ont pas la même unité, et le seul qui décrive ce que
-// le navigateur va télécharger est le second.
+// le navigateur va télécharger est le second. Le nombre de caractères de digest
+// est journalisé à part : c'est lui qui renseigne sur le coût du prompt.
 const written = await readFile(target, "utf8");
+const total = Object.values(digests).reduce((sum, d) => sum + d.length, 0);
+const perLang = SUPPORTED_LOCALES.map((l) => `${l} ${digests[l].length}`).join(", ");
 console.log(
-  `content.json : ${written.length} octets, ${digest.length} caractères de digest -> ${target}`
+  `content.json : ${written.length} octets, ${total} caractères de digest (${perLang}) -> ${target}`
 );
