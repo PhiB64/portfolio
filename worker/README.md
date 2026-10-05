@@ -339,10 +339,20 @@ listes :
 - Le nettoyage des italiques est contraint par des caractères délimiteurs, sinon
   `snake_case` ou `2 * 3` seraient mutilés.
 
-Certains modèles éventent aussi une ligne de métadonnée interne dans
-`delta.content` — observé : `User Safety: safe`. `createLeakFilter` dans
-`chat-widget.jsx` retient le début de chaque ligne jusqu'à pouvoir conclure, et
-filtre la ligne entière plutôt que la sous-chaîne (voir son commentaire).
+Certains modèles éventent aussi une ou plusieurs lignes de métadonnée interne
+dans `delta.content`. Trois formats sont allés en production, sur trois modèles
+différents du pool : `User Safety: safe`, `Response Safety: safe`,
+`Safety Categories: PII/Privacy, Needs Caution`. Les deux suivants sont passés
+malgré un filtre qui ne connaissait que le premier : `openrouter/free` est un
+routeur, son catalogue change sans que le code change.
+
+`createLeakFilter` (`lib/leak-filter.js`) ne reconnait donc aucun format
+particulier : il retient le début de chaque ligne jusqu'au premier deux-points,
+puis juge sur le **label** seul — le mot isolé `safety` ou `moderation` — et
+n'importe quelle valeur passe. Le deux-points est obligatoire dans les deux sens,
+c'est ce qui garantit qu'une réponse qui cite le mot passe intacte. Tests :
+`lib/leak-filter.test.js`, dont un invariant qui rend la même sortie quel que soit
+le découpage en deltas.
 
 ## Garde-fous
 

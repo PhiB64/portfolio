@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEscapeKey } from "../lib/use-dialog-focus";
+import { createLeakFilter } from "../lib/leak-filter";
 import { Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 
 /**
@@ -172,119 +173,6 @@ function emptyAnswerError() {
   return Object.assign(new Error("Le service de discussion n'a pas su répondre. Réessayez."), {
     retryable: true,
   });
-}
-
-/**
- * En-têtes de fuite émis par les modèles raisonneurs avant leur réponse.
- *
- * Certains modèles du routeur `:free` éventuent une ligne de métadonnée interne
- * dans `delta.content` — observé : `User Safety: safe`. Le front l'afficherait
- * tel quel en tête de réponse. C'est un défaut d'affichage, pas de sécurité : le
- * contenu est filtré, jamais transmis au visiteur.
- *
- * On filtre la ligne entière plutôt que la sous-chaîne, pour ne pas rogner une
- * réponse qui citerait ces mots par hasard.
- */
-const LEAK_LINES = [/^user safety\s*:\s*(?:safe|unsafe|blocked)\b/i];
-
-/**
- * Premiers mots de ces lignes : tant que la ligne en cours n'a écrit que
- * l'amorce de l'un d'eux, on ne peut pas encore conclure et il faut attendre.
- */
-const LEAK_HEADS = ["user safety", "user_safety", "api safety"];
-
-/**
- * Au-delà de cette longueur, la ligne est rendue même si elle ressemble encore
- * à une fuite.
- *
- * Sans cette borne, une vraie réponse qui commence par « User safety… »
- * resterait retenue jusqu'à la fin du flux : le visiteur verrait une bulle vide
- * puis la réponse d'un coup. Les lignes visées font une vingtaine de caractères,
- * ce plafond les exclut sans risque.
- */
-const LEAK_MAX_HOLD = 40;
-
-/**
- * Vrai tant que `text` peut encore se compléter en une fuite.
- *
- * Deux cas : le texte tapé est un début de mot-clé, ou le mot-clé est complet
- * et la fin de ligne est encore en attente. Dès qu'un des deux s'écarte, la ligne
- * est ordinaire et peut être rendue immédiatement.
- *
- * @param {string} text
- * @returns {boolean}
- */
-function couldBeLeak(text) {
-  const typed = text.trimStart().toLowerCase();
-  return LEAK_HEADS.some((head) => head.startsWith(typed) || typed.startsWith(head));
-}
-
-/**
- * Filtre les lignes de fuite du texte reçu.
- *
- * Le flux est rendu au fil de l'eau, mais un delta peut couper une ligne en
- * deux : « User » puis « Safety: safe ». On retient donc le début de chaque ligne
- * jusqu'à pouvoir conclure. L'attente est bornée par la longueur d'un mot-clé
- * (une dizaine de caractères) et n'affecte pas le rendu perçu.
- *
- * Le résidu est vidé par `flush()` en fin de flux : sans cela, une réponse sans
- * retour à la ligne à la fin disparaîtrait.
- */
-function createLeakFilter() {
-  // Début de la ligne courante, non encore rendue. `decided` passe à vrai dès
-  // que la ligne ne peut plus être une fuite : le reste de la ligne passe alors
-  // en direct. Il repart à faux après chaque saut de ligne, puisque chaque ligne
-  // doit être jugée pour elle-même.
-  let hold = "";
-  let decided = false;
-
-  return {
-    /** @param {string} delta */
-    push(delta) {
-      let out = "";
-
-      for (const char of delta) {
-        if (decided) {
-          out += char;
-          // Cette ligne-ci est déjà validée, mais la suivante doit être jugée pour
-          // elle-même. Le saut de ligne est le seul endroit où on l'apprend.
-          if (char === "\n") decided = false;
-          continue;
-        }
-
-        hold += char;
-
-        if (char === "\n") {
-          // Fin de ligne : on peut juger sur son ensemble.
-          if (!LEAK_LINES.some((re) => re.test(hold.trim()))) out += hold;
-          hold = "";
-          decided = false;
-          continue;
-        }
-
-        // Fin de ligne pas encore arrivée : on ne juge que si plus rien ne peut
-        // plus devenir une fuite, ou si l'attente devient plus longue que la
-        // réponse entière ne le justifierait.
-        if (hold.length >= LEAK_MAX_HOLD || !couldBeLeak(hold)) {
-          out += hold;
-          hold = "";
-          decided = true;
-        }
-      }
-
-      return out;
-    },
-    /** Rend la ligne en attente, au cas où le flux s'arrête sans retour à la ligne. */
-    flush() {
-      // La ligne s'arrête ici sans retour à la ligne : elle est complète, le même
-      // test que pour une ligne close s'applique donc. Une fuite en fin de flux
-      // n'a pas eu son retour à la ligne, sans ce test elle passerait en entier.
-      const out = LEAK_LINES.some((re) => re.test(hold.trim())) ? "" : hold;
-      hold = "";
-      decided = true;
-      return out;
-    },
-  };
 }
 
 /**
