@@ -24,13 +24,25 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          # La version *minimale* supportée (`engines.node` : >=20.9), pas celle
-          # du poste de développement. Tester sur le plancher plutôt que sur le
-          # plafond est ce qui attrape l'usage accidentel d'une API plus récente :
-          # un `structuredClone` ou un `Array.at` passe en local sur Node 22 et
-          # casse ici. Un `20` sans décimale suit la dernière 20.x, donc le
-          # plancher déclaré reste vrai au fil des patchs.
-          node-version: 20
+          # La version `major` seule, pas celle du poste de développement : le
+          # runner GitHub n'évolue pas au rythme des versions de Node, donc une
+          # version épinglée finit par ne plus être disponible du tout.
+          #
+          # C'était un `20` — le plancher de `engines.node` — choisi pour attraper
+          # l'usage accidentel d'une API plus récente : un `structuredClone` ou un
+          # `Array.at` passe en local sur Node 22 et casse ici. Le principe est
+          # bon, il ne tenait pas en pratique : `jsdom` charge `undici`, qui
+          # appelle `webidl.util.markAsUncloneable`, absente de Node 20. Les quatre
+          # fichiers de test à environnement DOM échouaient donc au chargement,
+          # avant même d'exécuter une assertion, et le déploiement était bloqué
+          # depuis deux commits — le `continue-on-error` retiré plus bas n'y
+          # changerait rien.
+          #
+          # Un plancher déclaré ne peut pas être plus bas que ce qu'exigent les
+          # dépendances. `engines.node` reste à `>=20.9` pour les développeurs,
+          # et la CI teste sur la version que les dépendances demandent réellement.
+          # Un `22` sans décimale suit la dernière 22.x.
+          node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -54,6 +66,11 @@ jobs:
       # Le coût restant est le test instable, qui bloquerait un déploiement
       # légitime. Il n'y en a pas ici : la suite est du `node` et du `jsdom`,
       # sans réseau ni horloge murale.
+      #
+      # Cette garantie vaut aussi pour le choix de version au-dessus : la CI
+      # doit exécuter la même suite que le poste de développement, sinon « les
+      # tests bloquent le déploiement » ne veut rien dire. C'est ce qui a rendu
+      # le plancher Node 20 intenable — la suite ne passait pas du tout dessus.
       - name: Lint
         run: npm run lint
 
