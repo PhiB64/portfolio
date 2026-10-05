@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEscapeKey } from "../lib/use-dialog-focus";
 import { createLeakFilter } from "../lib/leak-filter";
+import { createRequestSlot } from "../lib/chat-request";
 import { Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
 
 /**
@@ -271,7 +272,15 @@ export function ChatWidget() {
   // bulle pour que le visiteur comprenne le silence lors du backoff.
   const [retry, setRetry] = useState(0);
 
-  const abortRef = useRef(null);
+  // Suivi de la requête en vol. Tout ce qui concernait le contrôleur, son délai
+  // et l'annulation vit dans `lib/chat-request.js`, qui est testé : ici, il
+  // n'y a plus qu'un `slot` à créer, à faire tourner, et à annuler. Les trois
+  // `useRef` que ce code portait (`abortRef`, `timerRef`, `timedOutRef`) ont la
+  // propriété commune de ne jamais être lus au rendu — ils ne vivaient que pour
+  // `send`, `close`, `reset` et le nettoyage, c'est-à-dire hors du chemin
+  // declaratif. Les sortir rendait le composant lisible d'un coup.
+  const slotRef = useRef(null);
+  if (slotRef.current === null) slotRef.current = createRequestSlot();
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const launcherRef = useRef(null);
@@ -288,11 +297,11 @@ export function ChatWidget() {
   }, [open]);
 
   // Referme le panneau sans laisser la requête en vol : le visiteur emporte
-  // sinon la génération avec lui, pour rien.
-  useEffect(() => () => abortRef.current?.abort(), []);
+  // sinon la génération avec lui, pour rien. Le délai part avec.
+  useEffect(() => () => slotRef.current?.cancelCurrent(), []);
 
   const close = useCallback(() => {
-    abortRef.current?.abort();
+    slotRef.current?.cancelCurrent();
     setOpen(false);
     // Le champ de saisie est démonté avec le panneau : sans ça le focus tombe
     // sur `body` et le clavier repart du haut de la page. On le rend au bouton
@@ -307,7 +316,7 @@ export function ChatWidget() {
   useEscapeKey(open, close);
 
   const reset = useCallback(() => {
-    abortRef.current?.abort();
+    slotRef.current?.cancelCurrent();
     setMessages([]);
     setError(null);
     setBusy(false);
@@ -327,8 +336,7 @@ export function ChatWidget() {
     setError(null);
     setBusy(true);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const request = slotRef.current.begin();
 
     try {
       // Relance automatique : toute erreur repart, sans exception. Seule
@@ -339,7 +347,7 @@ export function ChatWidget() {
           if (attempt > 0) {
             // Backoff croissant : laisse le temps au service de se rétablir
             // après un pic de charge, sans faire attendre un simple 400.
-            await sleep(500 * attempt, controller.signal);
+            await sleep(500 * attempt, request.signal);
             // La tentative précédente a pu écrire des fragments avant d'échouer :
             // on repart d'une bulle vide, sinon le texte partiel et la nouvelle
             // réponse s'afficheraient collés l'un à l'autre.
@@ -360,7 +368,7 @@ export function ChatWidget() {
                 content: text,
               })),
             }),
-            signal: controller.signal,
+            signal: request.signal,
           });
 
           if (!res.ok || !res.body) {
@@ -407,33 +415,60 @@ export function ChatWidget() {
 
           break; // Réponse reçue en entier : plus rien à relancer.
         } catch (err) {
-          if (err?.name === "AbortError") throw err; // Remonte au `catch` d'après.
           // Un refus de modération ou de modèle ne change pas d'une tentative à
           // l'autre : le relancer consommerait trois requêtes pour aboutir au
           // même refus.
           if (err?.retryable === false) throw err;
+          // Délai expiré : relancer ne servirait à rien puisque le minuteur
+          // couvre tout le `send`, il ne recommencera donc pas. On laisse
+          // remonter, et le `catch` d'après affiche un message dédié.
+          if (err?.name === "AbortError") throw err;
           // Dernière tentative : on laisse l'erreur remonter, c'est elle qu'on
           // affiche au visiteur.
           if (attempt === MAX_RETRIES) throw err;
         }
       }
     } catch (err) {
-      if (err?.name === "AbortError") {
-        // Le visiteur a fermé le panneau ou relancé une question : il n'est
-        // plus là pour lire une erreur, et le texte partiel déjà affiché suffit.
-      } else {
+      // Timeout : ce n'est pas un départ du visiteur, c'est une panne ou un
+      // silence du service. Le distinguer compte — sans ce test, un délai expiré
+      // produirait le même silence qu'une fermeture, alors que le premier mérite
+      // un message et que le second ne mérite rien. La relance a déjà eu lieu
+      // plus haut : le délai couvre le `send` entier, il n'a donc pas été
+      // retenté ici.
+      if (err?.name === "AbortError" && request.timedOut()) {
+        // Timeout : ce n'est pas un départ du visiteur, c'est une panne ou un
+        // silence du service. Le distinguer compte — sans ce test, un délai expiré
+        // produirait le même silence qu'une fermeture, alors que le premier mérite
+        // un message et que le second n'en mérite aucun. La relance a déjà eu lieu
+        // plus haut : le délai couvre le `send` entier, il n'a donc pas été retenté.
+        setError("Le service de discussion met trop de temps à répondre.");
+        // La bulle vide est retirée : rien n'a été affiché, la laisser produirait
+        // une bulle muette sous une bannière d'erreur.
+        setMessages((prev) =>
+          prev[prev.length - 1]?.role === "assistant" && !prev[prev.length - 1].content
+            ? prev.slice(0, -1)
+            : prev,
+        );
+      } else if (err?.name !== "AbortError") {
         setError(err?.message ?? "Une erreur est survenue.");
+        // Pas de bulle d'erreur dupliquée dans le fil : elle vit dans la bannière.
+        setMessages((prev) =>
+          prev[prev.length - 1]?.role === "assistant" && !prev[prev.length - 1].content
+            ? prev.slice(0, -1)
+            : prev,
+        );
       }
-      // Pas de bulle d'erreur dupliquée dans le fil : elle vit dans la bannière.
-      setMessages((prev) =>
-        prev[prev.length - 1]?.role === "assistant" && !prev[prev.length - 1].content
-          ? prev.slice(0, -1)
-          : prev,
-      );
+      // `AbortError` sans expiration : le visiteur a fermé le panneau ou relancé
+      // une question — il n'est plus là pour lire une erreur, et le texte partiel
+      // déjà affiché suffit.
     } finally {
       setBusy(false);
       setRetry(0);
-      abortRef.current = null;
+      // `finish()` ne libère la place et n'annule le délai que si cette requête
+      // est encore la courante. C'est la propriété qui corrige la course : le
+      // `finally` d'un envoi plus ancien ne peut ni voler le contrôleur d'un envoi
+      // plus récent, ni annuler son délai.
+      request.finish();
     }
   }
 
