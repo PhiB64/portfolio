@@ -24,6 +24,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
+          # La version *minimale* supportée (`engines.node` : >=20.9), pas celle
+          # du poste de développement. Tester sur le plancher plutôt que sur le
+          # plafond est ce qui attrape l'usage accidentel d'une API plus récente :
+          # un `structuredClone` ou un `Array.at` passe en local sur Node 22 et
+          # casse ici. Un `20` sans décimale suit la dernière 20.x, donc le
+          # plancher déclaré reste vrai au fil des patchs.
           node-version: 20
           cache: npm
           cache-dependency-path: package-lock.json
@@ -31,17 +37,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Le lint et les tests ne bloquent pas le déploiement (`continue-on-error`) :
-      # un portfolio doit rester en ligne même quand une passe de vérification
-      # échoue. En revanche ils s'exécutent, donc la page GitHub affiche le
-      # verdict — c'est là que le signal est utile, pas dans le blocage du
-      # déploiement.
+      # Le lint et les tests bloquent le déploiement.
+      #
+      # La raison écrite jusqu'ici — « un portfolio doit rester en ligne même
+      # quand une passe de vérification échoue » — ne justifiait pas
+      # `continue-on-error`, et tenait un raisonnement faux. GitHub Pages sert le
+      # dernier déploiement *réussi* : un workflow interrompu laisse donc la
+      # version précédente en ligne. Bloquer n'a jamais pris le site hors ligne.
+      #
+      # Ce que `continue-on-error` faisait, à l'inverse, était de déployer la
+      # version qui venait d'échouer aux tests — donc de remplacer un site sain
+      # par un site dont la suite de tests sait quelque chose de faux. Le pire
+      # des deux mondes : le risque réel est multiplié, et la protection
+      # imaginée ne s'appuyait sur aucun mécanisme.
+      #
+      # Le coût restant est le test instable, qui bloquerait un déploiement
+      # légitime. Il n'y en a pas ici : la suite est du `node` et du `jsdom`,
+      # sans réseau ni horloge murale.
       - name: Lint
-        continue-on-error: true
         run: npm run lint
 
       - name: Tests
-        continue-on-error: true
         run: npm test
 
       - name: Build
