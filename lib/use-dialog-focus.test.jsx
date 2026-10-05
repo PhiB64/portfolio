@@ -19,7 +19,13 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, render, cleanup, screen } from "@testing-library/react";
 import { useRef } from "react";
 
-import { useDialogFocus, useEscapeKey, focusableWithin } from "./use-dialog-focus.js";
+import {
+  useDialogFocus,
+  useEscapeKey,
+  useFocusExempt,
+  exemptFocusables,
+  focusableWithin,
+} from "./use-dialog-focus.js";
 
 /** Laisse passer la frame qui porte le focus initial. */
 const flushFrame = () =>
@@ -397,5 +403,114 @@ describe("useEscapeKey", () => {
     });
 
     expect(seen).toEqual([2]);
+  });
+
+  it("ferme le panneau avant le dialogue qu'il recouvre", async () => {
+    // Le panneau de l'assistant est passé au-dessus des overlays. Les deux
+    // couches peuvent donc être ouvertes ensemble, et Échap doit refermer la
+    // plus haute — celle qu'on voit. `useDialogFocus` écoute sur `document` en
+    // capture, `useEscapeKey` sur `window` en capture : la capture sur `window`
+    // arrive en premier, c'est ce qui rend cet ordre possible.
+    const closePanel = vi.fn();
+    const closeDialog = vi.fn();
+
+    function Both() {
+      const ref = useRef(null);
+      useDialogFocus(true, ref, closeDialog);
+      useEscapeKey(true, closePanel);
+      return (
+        <div role="dialog" aria-modal="true" ref={ref}>
+          <button type="button" data-testid="only">
+            dans le dialogue
+          </button>
+        </div>
+      );
+    }
+
+    render(<Both />);
+    await flushFrame();
+
+    act(() => {
+      window.dispatchEvent(press("Escape"));
+    });
+
+    expect(closePanel).toHaveBeenCalledTimes(1);
+    // Le dialogue reste ouvert : un seul Échap, une seule couche refermée.
+    expect(closeDialog).not.toHaveBeenCalled();
+  });
+});
+
+describe("useFocusExempt", () => {
+  /** Lanceur du chat : un bouton hors du dialogue, au-dessus de lui. */
+  function Escort() {
+    const escortRef = useRef(null);
+    useFocusExempt(escortRef);
+    return (
+      <button type="button" data-testid="escort" ref={escortRef}>
+        chat
+      </button>
+    );
+  }
+
+  it("rend le nœud tabulable depuis le dernier contrôle du dialogue", async () => {
+    // Sans cette exception, le piège boucle sur les trois contrôles du
+    // dialogue et le lanceur du chat — visible au-dessus de l'overlay — reste
+    // hors d'atteinte de la Tab. C'est un échec de 2.1.1 qu'aucune capture ne
+    // montre.
+    const onClose = vi.fn();
+    render(
+      <>
+        <Escort />
+        <Dialog open onClose={onClose} />
+      </>,
+    );
+    await flushFrame();
+    expect(focused()).toBe("first");
+
+    // Le parcours réel : on tabule jusqu'au dernier contrôle du dialogue, puis on
+    // continue. C'est là que le piège referait la boucle sur le premier.
+    act(() => {
+      screen.getByTestId("last").focus();
+    });
+    expect(focused()).toBe("last");
+
+    act(() => {
+      document.dispatchEvent(press("Tab"));
+    });
+
+    // Le dernier contrôle du dialogue ne reboucle plus sur le premier : il passe
+    // au lanceur, qui est la couche supérieure.
+    expect(focused()).toBe("escort");
+  });
+
+  it("n'inscrit rien après le démontage", async () => {
+    // Le registre est un `Set` de module : un nœud resté inscrit ferait
+    // `focusableWithin` parcourir un nœud détaché, et ferait surtout croire
+    // qu'un widget démonté est encore tabulable.
+    const { unmount } = render(
+      <>
+        <Escort />
+        <Dialog open onClose={vi.fn()} />
+      </>,
+    );
+    await flushFrame();
+    expect(exemptFocusables()).toHaveLength(1);
+
+    unmount();
+    expect(exemptFocusables()).toHaveLength(0);
+  });
+
+  it("laisse le dialogue seul quand rien ne s'exempte", async () => {
+    // Cas ordinaire : sans widget au-dessus, le cycle ne doit pas changer. Le
+    // dialogue reste refermable du dernier au premier contrôle.
+    const onClose = vi.fn();
+    render(<Dialog open onClose={onClose} />);
+    await flushFrame();
+
+    act(() => {
+      document.dispatchEvent(press("Tab"));
+    });
+
+    expect(focused()).toBe("first");
   });
 });

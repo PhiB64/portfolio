@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useEscapeKey } from "../lib/use-dialog-focus";
+import { useEscapeKey, useFocusExempt } from "../lib/use-dialog-focus";
 import { createLeakFilter } from "../lib/leak-filter";
 import { createRequestSlot } from "../lib/chat-request";
 import { uiFor } from "../lib/content/ui.js";
@@ -282,6 +282,14 @@ export function ChatWidget({ lang }) {
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const launcherRef = useRef(null);
+  const panelRef = useRef(null);
+
+  // Le panneau et son lanceur flottent au-dessus des overlays, donc ils doivent
+  // rester atteignables à la Tab pendant qu'un overlay modal est ouvert — sans
+  // quoi le bouton serait visible à l'œil et hors d'atteinte au clavier. Voir
+  // `useFocusExempt` : le registre est la seule chose que ce composant et
+  // `HeroCube` partagent, et elle ne crée aucune dépendance entre les deux.
+  useFocusExempt([panelRef, launcherRef]);
 
   // Descend avec la conversation : le texte arrive fragment par fragment, donc
   // on se cale sur chaque delta pour rester collé à la dernière ligne écrite.
@@ -499,17 +507,23 @@ export function ChatWidget({ lang }) {
 
   return (
     <>
-      {/* Panneau. `z-40` le place au-dessus du contenu du cube (`z-30` max) mais
-          sous les plein écran de l'overlay de contact et du CV (`z-50`/`z-100`) :
-          ouvrir l'un d'eux masque donc le chat au lieu de le laisser flotter.
-          L'ordre tient parce que les overlays sont désormais frères de la section
-          du cube, et non enfants : `z-10` + `relative` faisait de la section un
-          contexte d'empilement, où leurs `z-50` ne se comparaient qu'à lui. */}
+      {/* Panneau. `z-[70]` le place au-dessus des deux overlays plein écran —
+          contact (`z-[60]`) et rubrique projet (`z-50`) — pour qu'une question
+          au chatbot reste posable depuis une fiche, sans avoir à refermer
+          l'overlay d'abord. L'ordre tient parce que ces overlays sont frères de
+          la section du cube, et non enfants : `z-10` + `relative` faisait de la
+          section un contexte d'empilement, où leurs `z-50` ne se comparaient
+          qu'à lui.
+
+          Il reste sous le verrou d'orientation (`z-[100]`), qui n'est pas un
+          overlay mais un mur : un mobile en paysage n'a rien à montrer ici, et
+          un bouton de discussion par-dessus n'y servirait à personne. */}
       {open && (
         <section
           id="chat-panel"
+          ref={panelRef}
           aria-label={t.assistant}
-          className="fixed inset-x-4 top-20 z-40 flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
+          className="fixed inset-x-4 top-20 z-[70] flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
         >
           <header className="flex items-center justify-between gap-3 border-b border-[#1e293b] px-4 py-3">
             <div className="flex items-center gap-2">
@@ -622,8 +636,10 @@ export function ChatWidget({ lang }) {
         </section>
       )}
 
-      {/* Lanceur, en haut à droite. Le bouton « retour en haut » du cube reste
-          en bas à droite : plus de conflit de coin, donc plus d'empilement. */}
+      {/* Lanceur, en haut à droite. Même `z-[70]` que le panneau, pour qu'il reste
+          atteignable au-dessus d'un overlay ouvert : c'est par lui qu'on referme
+          le panneau. Le bouton « retour en haut » du cube reste en bas à droite :
+          plus de conflit de coin, donc plus d'empilement. */}
       <button
         ref={launcherRef}
         type="button"
@@ -631,7 +647,7 @@ export function ChatWidget({ lang }) {
         aria-expanded={open}
         aria-controls="chat-panel"
         aria-label={open ? t.close : t.open}
-        className="fixed top-4 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
+        className="fixed top-4 right-4 z-[70] flex h-11 w-11 items-center justify-center rounded-full border border-[#00a5b0]/60 bg-[#0a0f1c]/80 text-[#00a5b0] backdrop-blur-md transition-colors duration-300 hover:bg-[#00a5b0]/10 hover:text-white sm:top-6 sm:right-8"
       >
         {open ? <X size={20} /> : <MessageCircle size={20} />}
       </button>

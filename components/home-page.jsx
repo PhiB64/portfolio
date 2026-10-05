@@ -15,7 +15,6 @@
  */
 
 import { HeroCube } from "./hero-cube";
-import { ChatWidget } from "./chat-widget";
 import { FACE_MEDIA } from "../lib/cube-media";
 import { metaText } from "../lib/site-metadata";
 import { localeHref } from "../lib/site-routes";
@@ -76,9 +75,6 @@ export function HomePage({ lang }) {
         subtitle={metaText(lang).jobTitle}
         images={FACE_MEDIA}
       />
-      {/* Chatbot : se rend par-dessus le cube, en `z-40`. Le composant ne rend
-          rien si NEXT_PUBLIC_CHAT_ENDPOINT est absent (Worker non déployé). */}
-      <ChatWidget lang={lang} />
     </main>
   );
 }

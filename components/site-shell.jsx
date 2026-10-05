@@ -22,6 +22,7 @@
 import { Share_Tech_Mono } from "next/font/google";
 
 import { LanguageSwitcher } from "./language-switcher";
+import { ChatWidget } from "./chat-widget";
 import { SITE_ROOT, assetUrl } from "../lib/site-url";
 import { CONTACT } from "../lib/content/contact.js";
 import { metaText } from "../lib/site-metadata";
@@ -77,6 +78,14 @@ export function SiteShell({ lang, children }) {
             Sur la page d'accueil il se superpose au cube, d'où son `z-40` et son
             fond translucide. */}
         <LanguageSwitcher lang={lang} />
+        {/* Le chatbot est ici pour la même raison, et pour une raison de plus :
+            monté dans `HomePage`, il n'existait que sur les deux accueils. La page
+            `/projects` — dans les deux langues — s'en retrouvait dépourvue, alors
+            que c'est la page où l'on reste le plus longtemps à lire. Dans le
+            layout, il est présent sur les quatre routes.
+
+            Le composant ne rend rien si `NEXT_PUBLIC_CHAT_ENDPOINT` est absent. */}
+        <ChatWidget lang={lang} />
         {children}
       </body>
     </html>
