@@ -200,7 +200,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const mediaRetractedRef = useRef(false);
   const skipRef = useRef(false);
   const skipActiveRef = useRef(false);
-  const skipRevealedFacesRef = useRef(skipRevealedFaces);
   // Once skipped, the faces fold away so the cube is visibly empty during the
   // gentle rotation (only the cyan wireframe shows).
   const skipFacesHiddenRef = useRef(false);
@@ -236,13 +235,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   // (cf. `hitTestAndOpen`).
   const faceScrambleStateRef = useRef(["none", "none", "none", "none", "none", "none"]);
   const galleryScrambleTlRef = useRef(null);
-  // Même machine à trois états que les labels de face ("none" -> "encoded" ->
-  // "decoded"), pour que le skip rejoue exactement le même cycle.
-  const galleryScrambleStateRef = useRef("none");
-  // Temps d'exposition cumulé du label du skip, remis à zéro à chaque
-  // changement de face : c'est lui qui déclenche le passage en décodage.
-  const galleryExposureElapsedRef = useRef(0);
-  const lastGalleryLabelTextRef = useRef("");
   const cubeContainerRef = useRef(null);
   const contentRef = useRef(null);
   const faceWasVisibleRef = useRef([false, false, false, false, false, false]);
@@ -331,7 +323,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const tapPointRef = useRef(null);
 
   zoomedFacesRef.current = zoomedFaces;
-  skipRevealedFacesRef.current = skipRevealedFaces;
   mediaRetractedRef.current = mediaRetracted;
 
   const faceImages = useMemo(() => {
@@ -822,8 +813,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
   const stopGalleryScramble = () => {
     stopScramble(galleryScrambleTlRef.current);
     galleryScrambleTlRef.current = null;
-    galleryScrambleStateRef.current = "none";
-    galleryExposureElapsedRef.current = 0;
     const galleryLabel = galleryLabelRef.current;
     if (galleryLabel && galleryLabel.textContent !== "")
       galleryLabel.textContent = "";
@@ -2043,7 +2032,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
             stopFaceScramble(i);
           }
           if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
-          lastGalleryLabelTextRef.current = "";
           stopGalleryScramble();
           skipFoldRef.current = true;
           skipFacesHiddenRef.current = true;
@@ -2633,7 +2621,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
       setZoomedFaces([false, false, false, false, false, false]);
       setContactDone(false);
       setSkipped(false);
-      skipRevealedFacesRef.current = [false, false, false, false, false, false];
       setSkipRevealedFaces([false, false, false, false, false, false]);
       dragOffsetRef.current = { rx: 0, ry: 0 };
       dragEaseResetRef.current = false;
@@ -2649,7 +2636,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
       }
       if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
       stopGalleryScramble();
-      lastGalleryLabelTextRef.current = "";
       if (bgSonarRef.current) {
         bgSonarRef.current.anime?.pause();
         bgSonarRef.current.mask.remove();
@@ -2880,9 +2866,7 @@ export function HeroCube({ title, subtitle, images = [] }) {
     wasUnlockedRef.current = true;
     labelPinPRef.current = null;
     skipActiveRef.current = false;
-    const nextSkipFaces = [false, false, false, false, false, false];
-    skipRevealedFacesRef.current = nextSkipFaces;
-    setSkipRevealedFaces(nextSkipFaces);
+    setSkipRevealedFaces([false, false, false, false, false, false]);
     setSkipped(true);
     for (let i = 0; i < 6; i++) {
       if (clickLabelRefs.current[i]) clickLabelRefs.current[i].style.opacity = "0";
@@ -2890,7 +2874,6 @@ export function HeroCube({ title, subtitle, images = [] }) {
     }
     if (galleryLabelRef.current) galleryLabelRef.current.style.opacity = "0";
     stopGalleryScramble();
-    lastGalleryLabelTextRef.current = "";
     if (typeof tickRef.current === "function") {
       tickRef.current();
       return;
