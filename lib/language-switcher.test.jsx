@@ -4,10 +4,10 @@
  * Tests du sélecteur de langue monté.
  *
  * Why monter le composant. La règle du sélecteur est visuelle et ne s'exprime pas
- * dans une fonction qu'on pourrait tester seule : « sur une page française, le
- * bouton affiche le français ». Rien ne la couvre tant qu'elle reste dans le JSX,
- * et l'erreur qu'elle protège est invisible : le composant rend un élément
- * valide, pointe vers une URL valide, et affiche seulement l'autre langue.
+ * dans une fonction qu'on pourrait tester seule : « cliquer Français porte le
+ * site en français ». Rien ne la couvre tant qu'elle reste dans le JSX, et
+ * l'erreur qu'elle protège est invisible : le composant rend un élément valide,
+ * pointe vers une URL valide, et affiche la langue qu'on vient de quitter.
  *
  * Why `next/navigation` est simulé. Le composant a besoin du pathname courant,
  * qui n'existe que dans le contexte de routage de Next ; hors application il vaut
@@ -82,41 +82,42 @@ const NAVIGATION = [
 ];
 
 describe("langue affichée", () => {
-  it("nomme la langue courante, sur chaque langue", () => {
+  it("nomme la langue de destination, sur chaque langue", () => {
     // La règle, énoncée une fois et appliquée à toutes : ce qui est écrit sur le
-    // bouton est la langue du site. L'inverse affiche « English » sur la page
-    // française, ce qui répond à une question que personne n'a posée.
+    // bouton est la langue vers laquelle le clic porte le site.
     for (const lang of SUPPORTED_LOCALES) {
+      const cible = otherLocale(lang);
       const lien = monter(lang);
-      expect(texteVisible(lien), `page ${lang}`).toContain(LANGUAGE_NAMES[lang]);
-      expect(texteVisible(lien), `page ${lang}`).toContain(LANGUAGE_CODES[lang]);
+      expect(texteVisible(lien), `page ${lang}`).toContain(LANGUAGE_NAMES[cible]);
+      expect(texteVisible(lien), `page ${lang}`).toContain(LANGUAGE_CODES[cible]);
     }
   });
 
-  it("ne nomme jamais l'autre langue", () => {
-    // Le corollaire, et c'est lui qui attrape l'inversion : le nom affiché ne
-    // doit pas être celui de la langue vers laquelle le lien pointe.
+  it("ne nomme jamais la langue courante", () => {
+    // Le corollaire, et c'est lui qui attrape l'inversion : le nom affiché doit
+    // être celui de la langue vers laquelle le lien pointe, jamais celui de la
+    // page visitée.
     for (const lang of SUPPORTED_LOCALES) {
       const lien = monter(lang);
-      const autre = otherLocale(lang);
       expect(
         texteVisible(lien),
-        `page ${lang} : le bouton affiche « ${LANGUAGE_NAMES[autre]} »`,
-      ).not.toContain(LANGUAGE_NAMES[autre]);
+        `page ${lang} : le bouton affiche « ${LANGUAGE_NAMES[lang]} »`,
+      ).not.toContain(LANGUAGE_NAMES[lang]);
     }
   });
 
   it("annonce la page française et la page anglaise", () => {
     // Les deux pages, nommées : c'est ce que voit le visiteur.
-    expect(texteVisible(monter("fr"))).toContain("Français");
-    expect(texteVisible(monter("en"))).toContain("English");
+    expect(texteVisible(monter("fr"))).toContain("English");
+    expect(texteVisible(monter("en"))).toContain("Français");
   });
 });
 
 describe("destination", () => {
   it.each(NAVIGATION)("mène %s vers %s", (lang, pathname, attendu) => {
-    // Le libellé a changé, la destination non : afficher la langue courante ne
-    // doit pas avoir transformé le sélecteur en lien vers la page déjà visitée.
+    // Le libellé et la destination disent la même chose, mais par deux chemins
+    // distincts : le nom affiché pourrait se tromper de langue pendant que le
+    // `href` reste juste, et l'inverse aussi.
     expect(monter(lang, pathname).getAttribute("href")).toBe(attendu);
   });
 
@@ -130,10 +131,10 @@ describe("destination", () => {
     }
   });
 
-  it("déclare la langue de la cible, pas celle affichée", () => {
-    // `lang` et `hreflang` décrivent le document lié. Le lien mène à l'autre
-    // langue, donc y nommer la langue courante ferait annoncer du français à
-    // qui arrive sur une page anglaise.
+  it("déclare la langue de la cible", () => {
+    // `lang` et `hreflang` décrivent le document lié, donc la destination. Le
+    // texte visible nomme cette destination lui aussi : les deux concordent, et
+    // surtout `lang` n'annonce pas du français à qui arrive sur une page anglaise.
     for (const lang of SUPPORTED_LOCALES) {
       const lien = monter(lang);
       const autre = otherLocale(lang);
@@ -152,7 +153,10 @@ describe("nom accessible", () => {
     for (const lang of SUPPORTED_LOCALES) {
       const nom = (monter(lang).getAttribute("aria-label") || "").toLowerCase();
       expect(nom, `page ${lang} : le nom accessible est vide`).not.toBe("");
-      for (const visible of [LANGUAGE_NAMES[lang], LANGUAGE_CODES[lang]]) {
+      for (const visible of [
+        LANGUAGE_NAMES[otherLocale(lang)],
+        LANGUAGE_CODES[otherLocale(lang)],
+      ]) {
         expect(nom.includes(visible.toLowerCase()), `« ${visible} » absent de « ${nom} »`).toBe(
           true,
         );
@@ -161,12 +165,14 @@ describe("nom accessible", () => {
   });
 
   it("décrit le clic, dans la langue du visiteur", () => {
-    // Le nom accessible dit où mène le lien. C'est ce qui compense un texte
-    // visible qui, lui, ne décrit plus la destination.
+    // Le nom accessible dit où mène le lien, dans la langue de la page : c'est la
+    // seule chose qui reste à dire, le texte visible nommant lui aussi la cible.
+    // Le nom est vérifié en entier : une phrase qui mentionnerait la destination
+    // sans être celle attendue ne prouverait rien.
     for (const lang of SUPPORTED_LOCALES) {
-      expect(monter(lang).getAttribute("aria-label")).toContain(
-        uiFor(lang).nav.switchLanguage,
-      );
+      const nom = monter(lang).getAttribute("aria-label");
+      expect(nom, `page ${lang}`).toContain(LANGUAGE_NAMES[otherLocale(lang)]);
+      expect(nom, `page ${lang}`).toContain(uiFor(lang).nav.switchLanguage);
     }
   });
 

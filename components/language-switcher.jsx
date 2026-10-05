@@ -27,12 +27,11 @@
  * aux moteurs la langue du contenu cible, le second empêche un lecteur d'écran
  * de prononcer « English » avec une phonétique française.
  *
- * Ce que le bouton affiche, et ce qu'il fait. Le texte affiché est la langue
- * *courante* — « FR » et « Français » sur la page française, « EN » et « English »
- * sur la page anglaise — alors que le lien mène à l'autre langue. Le bouton
- * indique donc où l'on se trouve, et le clic emmène ailleurs ; les deux
- * informations ne sont jamais confondues, le nom accessible les réunissant dans
- * une seule chaîne.
+ * Ce que le bouton affiche, et ce qu'il fait. Le texte affiché est la langue de
+ * *destination* — « FR » et « Français » pour aller vers le français, « EN » et
+ * « English » pour aller vers l'anglais — et c'est bien la langue vers laquelle
+ * le lien mène. Le libellé décrit donc l'action du clic, et le clic fait ce qu'il
+ * annonce.
  */
 
 import Link from "next/link";
@@ -46,16 +45,18 @@ export function LanguageSwitcher({ lang }) {
   const target = otherLocale(lang);
   if (!target) return null;
 
-  const name = LANGUAGE_NAMES[lang] ?? lang;
-  const code = LANGUAGE_CODES[lang] ?? lang;
-  const href = localePath(target, pathname || "/");
-
-  // Le texte visible est la langue *courante* ; l'action, elle, mène à l'autre.
-  // Le nom accessible concilie les deux : il contient le texte visible — exigence
+  // Le texte visible nomme la langue de *destination* : cliquer « Français »
+  // porte le site en français. Le libellé dit donc ce que fait le clic, et non
+  // où l'on se trouve.
+  //
+  // Le nom accessible reprend ce texte puis la phrase qui le confirme — exigence
   // de « Label in Name » (WCAG 2.5.3, niveau A), sans quoi un visiteur qui
-  // commande le site à la voix ne peut pas dire « cliquer Français » — puis la
-  // phrase qui dit où mène le clic. `title` reprend la même chaîne pour que le
-  // survol et le lecteur d'écran ne se contredisent pas.
+  // commande le site à la voix ne peut pas dire « cliquer Français ». `title`
+  // reprend la même chaîne pour que le survol et le lecteur d'écran ne se
+  // contredisent pas.
+  const name = LANGUAGE_NAMES[target] ?? target;
+  const code = LANGUAGE_CODES[target] ?? target;
+  const href = localePath(target, pathname || "/");
   const label = `${name} — ${uiFor(lang).nav.switchLanguage}`;
 
   // En bas à gauche, et non en haut à droite comme il était jusqu'ici.
