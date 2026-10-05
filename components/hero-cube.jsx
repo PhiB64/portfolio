@@ -13,6 +13,20 @@ import { ClickPointer } from "./cube/click-pointer";
 import { CubeFaces, faceLabels } from "./cube/cube-face";
 import { IntroMarker } from "./cube/intro-marker";
 import { CubeNav } from "./cube/cube-nav";
+import { FaceDraw } from "./cube/face-draw";
+import {
+  FACE_DROP,
+  TAIL_DX,
+  TAIL_LINE_STROKE,
+  TAIL_SCREENS,
+  TAIL_UNWIND_MS,
+  coreP,
+  splitExtent,
+  tailP,
+  tailStages,
+  tailUnwindP,
+  trackScreens,
+} from "../lib/cube-tail";
 import {
   FACE_LABELS,
   FACE_NORMALS,
@@ -83,6 +97,38 @@ const MOBILE_SCROLL_SMOOTHING_MS = 60;
 const MOBILE_REVERSE_SCROLL_SMOOTHING_MS = 100;
 const MAX_FRAME_DT = 100;
 const SNAP_THRESHOLD = 0.0005;
+// Le lissage de la queue, et pourquoi il est plus long que celui du parcours.
+//
+// Why la queue était le seul segment non lissé. Tout le parcours écrit se lit
+// dans `currentP`, qui rejoint sa cible par un lissage exponentiel : la molette
+// donne des sauts de cent pixels, la cible part loin, et le cube ne voit qu'une
+// vitesse lissée. La queue, elle, lisait `el.scrollTop` en direct — le seul endroit
+// du fichier qui fasse ça. Le même geste y produisait donc des sauts francs, et
+// ils se voyaient d'autant plus que la queue est lente : à 1 % près, la ligne se
+// réduisait d'un coup, et le visage perdait trois ou quatre traits d'un geste.
+//
+// Why plus long, et pas identique. Le parcours écrit court sur neuf écrans : ses
+// 80 ms sont un retard qu'on ne voit pas, parce qu'un cube est un gros volume qui
+// absorbe un décalage. La queue court sur quatre écrans et son contenu est fin —
+// 240 traits sur 2,4 écrans — donc le même retard y vaut dix fois plus de traits,
+// et se voit.
+//
+// Why 110, et pas plus. Un cran de molette fait une centaine de pixels, soit 3 %
+// de la queue, donc sept traits d'un geste : c'est ce saut qu'il faut avaler, et
+// 110 ms l'avale en une quinzaine de frames au lieu d'une. Mais au-delà, la queue
+// glisse derrière le pouce au lieu de le suivre : la réduction de la ligne dure un
+// écran de course, environ 330 ms à vitesse de lecture normale, et un lissage trop
+// long se verrait comme la ligne qui finit après que le geste s'est arrêté. Le
+// bon régime est celui où le retard se sent comme une inertie et pas comme un
+// retard.
+//
+// Why exponentiel, et pas une inertie à vitesse constante. L'interpolation
+// linéaire rattrape sa cible à vitesse constante puis s'arrête sec — un nouveau
+// saut de molette se lirait comme une reprise. L'exponentielle, elle, n'a qu'une
+// seule vitesse : le décalage se résorbe au même rythme après un cran de molette
+// comme après un glissement de deux secondes. C'est la raison inverse de celle qui
+// fait refuser le `smoothstep` au dénouement programmé.
+const TAIL_SCROLL_SMOOTHING_MS = 110;
 // Durée du fondu qui ramène l'offset de rotation du drag à zéro quand le scroll
 // reprend : assez court pour « dé-poser » le cube vite, assez long pour ne pas
 // sauter d'un coup.
@@ -279,6 +325,14 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   // est neutralisé le temps que la face et le fond se révèlent en entier, sans
   // être éteints par la fenêtre de sortie. Remis à false au prochain scroll.
   const revealOverrideRef = useRef(false);
+  // Progression du tracé du visage, en 0 → 1. C'est la queue qui la pose, jamais
+  // le composant de tracé : il ne connaît que « où en est le visiteur ».
+  //
+  // Un ref et non un état : elle est écrite à chaque frame par `tick` et lue à
+  // chaque frame par la RAF du visage, entre les deux sans rerender. Un état
+  // React ferait 240 écritures de `strokeDashoffset` par frame en passant par le
+  // rendu, pour un dessin que rien d'autre n'affiche.
+  const faceProgressRef = useRef(0);
   const tickRef = useRef(null);
   const clickZoneRef = useRef(null);
   const namesRef = useRef(null);
@@ -1276,9 +1330,22 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     // pourraient. Sur un cache périmé, l'autoplay écrirait `scrollTop` au
     // mauvais endroit : la piste s'arrêterait avant la fin, ou le cube
     //"sauterait" en fin de parcours. Observer la boîte rend ce cas impossible.
+    // La piste s'allonge d'une queue (voir `lib/cube-tail.js`) : au-delà du bout
+    // de la chorégraphie, `scrollTop` porte la suite. On garde donc l'étendue
+    // totale mesurée, et on en déduit la frontière.
+    //
+    // `svh` n'est pas relu du CSS : la section fait `100svh`, donc sa boîte
+    // mesurée EST l'écran réduit. Le relire passerait par un
+    // `getComputedStyle`, soit une lecture de style synchronisée à chaque
+    // observation, pour aboutir au même nombre.
     let scrollExtent = 0;
+    let coreExtent = 1;
+    let tailPx = 0;
     const measureScrollExtent = () => {
       scrollExtent = el.scrollHeight - el.offsetHeight;
+      const split = splitExtent(scrollExtent, el.offsetHeight);
+      tailPx = split.tailPx;
+      coreExtent = split.coreExtent;
     };
     measureScrollExtent();
     const track = el.firstElementChild;
@@ -1527,6 +1594,25 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     let resetPlay = false;
     let resetFrom = 0;
     let resetElapsed = 0;
+    // Dénouement programmé de la queue avant le balayage de retour (bouton
+    // RETOUR). Distinct de la queue pilotée par le scroll : là, la position se
+    // défait toute seule, ici elle doit être animée parce que le scroll est gelé
+    // pendant le reset. Voir `goToStartRef`.
+    let tailUnwind = false;
+    let tailUnwindElapsed = 0;
+    let tailUnwindFrom = 0;
+    // La queue lissée : ce que `applyTail` reçoit réellement, distinct de la
+    // position de scroll brute. Elle rejoint sa cible par lissage exponentiel,
+    // comme `currentP` pour le parcours écrit — voir `TAIL_SCROLL_SMOOTHING_MS`
+    // pour pourquoi la queue en a besoin plus que lui.
+    //
+    // Une variable d'animation, pas un état : lue et écrite à chaque frame par
+    // `tick`, jamais rendue. Un état React ferait rerendre 240 traits par frame.
+    let tailSmoothP = 0;
+    // La cible du lissage, c'est-à-dire ce que vaut `tailP(el.scrollTop)` à cette
+    // frame. Conservée parce que le garage de la boucle, plus bas, doit savoir si
+    // la queue a fini de la rattraper pour pouvoir garer.
+    let tailTargetP = 0;
     const RESET_MS = 1800;
     // Duration de disparition des noms au début du retour : ils doivent quitter
     // l'écran (fondu + glissement vers le bas) avant que la ligne de fin
@@ -1558,20 +1644,86 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
       };
     });
 
-    const sync = () => {
+    // Écrit la queue à une position donnée.
+//
+// `tp` est la progression dans la queue, `lineEased` l'aplatissement de la ligne
+// de fin (1 = ligne à plat, 0 = carré). La queue écrase ces deux éléments : elle
+// est leur suite, donc elle décide d'eux tant qu'elle court.
+//
+// Cette fonction ne lit AUCUNE position : elle reçoit la position. C'est ce qui
+// permet au scroll et au dénouement programmé (voir `goToStartRef`) de jouer la
+// même queue par deux chemins, sans dupliquer les écritures.
+const applyTail = (tp, lineEased) => {
+  if (tp <= 0) {
+    // Hors queue : rien à écrire. On se contente de remettre le visage à zéro,
+    // et seulement s'il l'était — sinon on réécrirait un effacement déjà fait à
+    // chaque frame.
+    if (faceProgressRef.current !== 0) faceProgressRef.current = 0;
+    // La couleur, elle, doit être rendue : la ligne a pu virer au blanc dans la
+    // queue, et la fin écrite attend un trait cyan. Sans ce retour, remonter
+    // laisserait un trait blanc au-dessus d'une « souris » cyan, deux fois.
+    if (body.style.stroke !== "") body.style.stroke = "";
+    return;
+  }
+  const { out, close, face, whited } = tailStages(tp);
+  // Chemin inverse exact de `namesRise` : les textes refont le trajet qu'ils
+  // viennent de faire, dans l'autre sens. Mêmes 70 px, même courbe — sinon le
+  // retour ferait un saut.
+  names.style.opacity = String(1 - out);
+  sub.style.opacity = String(1 - out);
+  names.style.transform = `translateY(${70 * out}px)`;
+  sub.style.transform = `translateY(${-70 * out}px)`;
+  // La ligne ne se réduit pas tant que le texte s'efface, et elle est DÉJÀ
+  // blanche : le changement de couleur est un SAUT, en tête de queue, pendant que
+  // le texte s'en va. C'est elle qui annonce le dessin à venir — si elle
+  // attendait la fin du texte, elle n'aurait plus rien à annoncer pendant tout le
+  // premier temps.
+  //
+  // Écrire `stroke` directement sur l'élément plutôt que dans le JSX : la couleur
+  // est pilotée par la position, comme le reste de la queue, et le JSX n'a aucun
+  // canal pour ça.
+  body.style.stroke = whited ? TAIL_LINE_STROKE : "";
+  // La réduction, ensuite. Trois choses à la fois, et chacune a sa raison d'être :
+  //
+  //   - `close` écrase la LARGEUR seule. La hauteur est déjà à plat par la fin
+  //     écrite, et `non-scaling-stroke` garde l'épaisseur quelle que soit
+  //     l'échelle : c'est lui qui garantit que la ligne ne s'affine pas en
+  //     se réduisant. L'écraser en hauteur, elle, ne produirait qu'un trait déjà
+  //     fin — et sans le pondérer, elle tournerait la ligne.
+  //   - la translation est HORIZONTALE, et c'est volontaire. Une ligne à plat qui
+  //     se met à monter pendant qu'elle se réduit se lit en diagonale, et une
+  //     diagonale n'a plus de hauteur à laquelle se poser. Elle reste donc sur
+  //     son niveau, qui est celui du centre de son carré — inchangé — et c'est le
+  //     visage qui vient présenter son premier trait à cette hauteur
+  //     (voir `FACE_DROP`).
+  //   - `TAIL_DX` va du centre du carré à la colonne de la plume, donc la ligne
+  //     réduite arrive exactement au-dessus du premier trait. Une constante, pas
+  //     une progression : c'est la seule course qu'elle ait à faire.
+  //
+  // L'ordre compte : `translate` puis `scale`, pour que l'aplatissement se fasse
+  // autour du centre déjà déplacé.
+  body.style.transform = `translate(${TAIL_DX * close}px, 0) scale(${Math.max(0.0001, 1 - close)}, ${Math.max(0.0001, 1 - lineEased)})`;
+  // La progression du tracé. C'est tout ce que le visage sait du visiteur :
+  // il ne décide ni du départ, ni de la fin, il ne fait que le suivre.
+  faceProgressRef.current = face;
+};
+
+const sync = () => {
       // While the skip sweep runs, always steer toward the end of the section.
       if (skipRef.current) {
         targetP = 1;
         return;
       }
-      const sb = scrollExtent;
       // Reading the section's own scrollTop avoids the layout read of
       // getBoundingClientRect on every scroll frame — smoother on mobile.
       // `scrollExtent` is cached for the same reason, one step further: it used
       // to be `el.scrollHeight - el.offsetHeight`, read here on every scroll
       // event. See `measureScrollExtent`.
       const pos = el.scrollTop;
-      const real = sb > 0 ? Math.min(1, Math.max(0, pos / sb)) : 0;
+      // `real` est la position sur le PARCOURS ÉCRIT, bornée à 1 : c'est
+      // exactement la valeur d'avant, à un pixel près près du bout. Toute la
+      // chorégraphie en dépend, donc elle ne voit pas la queue.
+      const real = coreP(pos, coreExtent);
       // Le scroll automatique est IMPOSÉ : la position est pilotée par l'autoplay
       // et un geste de l'utilisateur ne doit pas pouvoir reprendre la main. On ne
       // compare donc plus la position lue à notre dernière écriture pour y voir un
@@ -1579,11 +1731,13 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
       // l'autoplay vient d'écrire (`autoScrollPx`), jamais celle lue. La tête de
       // timeline reste par ailleurs pilotée par `tlAutoplayP` (voir plus bas),
       // donc la fin se joue au rythme écrit pour elle quel que soit le geste.
+      // L'autoplay s'arrête au BOUT DU PARCOURS ÉCRIT, pas au bout de la piste : sa
+      // destination est la fin de la chorégraphie. La queue se parcourt au
+      // scroll, geste de l'utilisateur — elle ne fait pas partie de la fin
+      // écrite, donc rien ne l'anime à la place du visiteur.
       if (autoplay) {
-        if (sb > 0) {
-          targetP = Math.min(1, Math.max(0, autoScrollPx / sb));
-        }
-        return;
+          targetP = coreP(autoScrollPx, coreExtent);
+          return;
       }
       // Pendant le sweep de reset, le scroll est piloté par le code : la
       // détection de recul est suspendue.
@@ -1609,12 +1763,15 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         // franc. En partant du point le plus reculé, un rebond de quelques px
         // (inertie, élastique) ne fait plus repartir le compteur de zéro.
         if (real < reverseDeepest) reverseDeepest = real;
-        reverseEffort = (reverseAnchor - reverseDeepest) * sb;
+        // L'échelle des seuils en pixels est `coreExtent`, pas l'étendue totale :
+        // `real` est mesuré sur le parcours écrit, donc multiplier par la piste
+        // entière rendrait le seuil franchi trop tôt (il faudrait moins de recul).
+        reverseEffort = (reverseAnchor - reverseDeepest) * coreExtent;
         // Annulation : l'utilisateur revient franchement vers le bas, il n'a pas
         // confirmé le retour. On ré-ancre sur sa position et le point le plus
         // reculé repart avec elle. Un simple rebond reste sous cette distance et
         // conserve donc le recul déjà mesuré.
-        if ((reverseDeepest - real) * sb >= REVERSE_CANCEL_PX) {
+        if ((reverseDeepest - real) * coreExtent >= REVERSE_CANCEL_PX) {
           reverseAnchor = real;
           reverseDeepest = real;
           reverseEffort = 0;
@@ -1662,7 +1819,10 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
             // geste de l'utilisateur : l'animation ici est inutile et c'est
             // précisément le type de mouvement que la préférence neutralise.
             el.scrollTo({
-              top: pinP * sb,
+              // `pinP` est une position du parcours écrit : la Translate en
+              // pixels se fait sur `coreExtent`, sinon le rattrapage s'arrête
+              // avant la face visée.
+              top: pinP * coreExtent,
               behavior: reduceMotion() ? "auto" : "smooth",
             });
           }
@@ -1717,13 +1877,14 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
           // rien ne bouge à l'écran pendant cette seconde.
           autoplayElapsed = 0;
           targetP = currentP;
-          const sbGrace = scrollExtent;
-          if (sbGrace > 0) {
-            autoScrollPx = currentP * sbGrace;
-            el.scrollTop = autoScrollPx;
-          }
+          autoScrollPx = currentP * coreExtent;
+          el.scrollTop = autoScrollPx;
         } else {
-          const sbAuto = el.scrollHeight - el.offsetHeight;
+          // Même bornage que dans `sync` : l'autoplay vise le bout du parcours
+          // écrit. On relit l'étendue mesurée plutôt que le cache pour que la
+          // course soit juste même si la piste a été redimensionnée depuis la
+          // dernière observation.
+          const sbAuto = el.scrollHeight - el.offsetHeight - tailPx;
           if (sbAuto <= 0) {
             autoplay = false;
             tlAutoplayP = null;
@@ -1782,6 +1943,34 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         }
       }
 
+      // Dénouement de la queue avant le balayage de retour. Le scroll est gelé
+      // pendant le reset : la position ne décrit plus la queue, donc c'est ce
+      // décompte qui la rejoue. Tant qu'il court, on ne touche à rien d'autre —
+      // le balayage ne commence qu'une fois la queue revenue à sa frontière.
+      if (tailUnwind) {
+        tailUnwindElapsed += dt;
+        const unwoundP = tailUnwindP(tailUnwindElapsed, TAIL_UNWIND_MS, tailUnwindFrom);
+        // Le lissage se met à la suite du décompte, pas l'inverse. Pendant le
+        // dénouement le scroll est gelé, donc la cible ne bouge pas et le lissage
+        // n'aurait plus rien à rattraper — il resterait à mi-chemin pendant tout
+        // le décompte, puis se caserait d'un coup quand la main revient au scroll.
+        // En l'égalant à chaque frame, il arrive à zéro en même temps que le
+        // décompte, et la reprise se fait sans couture.
+        tailSmoothP = unwoundP;
+        tailTargetP = unwoundP;
+        applyTail(unwoundP, 1);
+        if (tailUnwindElapsed >= TAIL_UNWIND_MS) {
+          tailUnwind = false;
+          tailUnwindElapsed = 0;
+          tailUnwindFrom = 0;
+          // À la frontière, on rend la main au scroll : la suite du retour est
+          // pilotée par la position, comme avant.
+          el.scrollTop = CUBE_END * coreExtent;
+        }
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
       // Sweep de retour au début (bouton RETOUR) : balayage programmé de
       // CUBE_END vers 0, pendant lequel toute la logique d'intro/clic est gelée.
       if (resetPlay) {
@@ -1789,8 +1978,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         const k = Math.min(1, resetElapsed / RESET_MS);
         currentP = resetFrom * (1 - k);
         targetP = currentP;
-        let sbReset = scrollExtent;
-        if (sbReset > 0) el.scrollTop = currentP * sbReset;
+        el.scrollTop = currentP * coreExtent;
         // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
         // dès le début du retour (fondu + glissement vers le bas), avant que la
         // ligne de fin d'animation ne se rematérialise en « souris ».
@@ -1837,7 +2025,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
           resetElapsed = 0;
           currentP = 0;
           targetP = 0;
-          if (sbReset > 0) el.scrollTop = 0;
+          el.scrollTop = 0;
           // Les noms repartent masqués (translateY bas) mais visibles pour la
           // prochaine montée : la piste n'agit pas sur leur opacité.
           names.style.opacity = "1";
@@ -1995,6 +2183,40 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         }
       }
 
+      // LA QUEUE, lissée. Elle se joue ici, avant le garage, pour une raison
+      // précise : le garage plus bas doit pouvoir poser la question « la queue a-t-
+      // elle fini de rattraper ? » avant de décider de stopper la boucle. Sur un
+      // parcours écrit arrivé et une queue encore à mi-chemin, il n'y a plus rien
+      // pour l'avancer — la position de scroll est immobile, donc plus aucune frame
+      // ne viendrait finir le lissage. La ligne resterait figée au milieu de sa
+      // réduction, le visage au milieu de ses traits, sans aucun moyen de les
+      // terminer à part un nouveau geste.
+      if (skipRef.current) {
+        // Le skip vise la fin du parcours écrit : il n'entre jamais dans la queue,
+        // qui vaut donc zéro — c'est bien ce qu'elle vaut à l'écran. On l'y met
+        // d'un coup, sans lissage : retarder un état déjà exact ne servirait à rien,
+        // et le trait réapparaîtrait pendant toute la durée du skip.
+        tailSmoothP = 0;
+        tailTargetP = 0;
+      } else {
+        tailTargetP = tailP(el.scrollTop, coreExtent, tailPx);
+        // Même formule que pour `currentP`, et pour la même raison : l'exponentielle
+        // n'a qu'une vitesse, donc le décalage se résorbe au même rythme après un
+        // saut de molette comme après un glissement de deux secondes. Une inertie
+        // linéaire, elle, rattrape à vitesse constante puis s'arrête sec — et le
+        // saut de molette suivant se lirait comme une reprise.
+        tailSmoothP +=
+          (tailTargetP - tailSmoothP) *
+          (1 - Math.exp(-dt / TAIL_SCROLL_SMOOTHING_MS));
+        // Arrivée : on pose exactement sur la cible. L'exponentielle s'en approche
+        // sans jamais l'atteindre, et une queue qui reste à 0,0004 de sa cible
+        // afficherait un trait de trois pixels plus court que la ligne — visible,
+        // sur un segment dont tout l'intérêt est d'arriver pile.
+        if (Math.abs(tailTargetP - tailSmoothP) < SNAP_THRESHOLD) {
+          tailSmoothP = tailTargetP;
+        }
+      }
+
       if (skipRef.current) {
         // Capture the start position once, on the first skip frame.
         if (!skipActiveRef.current) {
@@ -2090,8 +2312,8 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
           skipFoldRef.current = false;
           currentP = runFinale(SPIN_START, autoplayElapsed - skipUnfoldMs, budgets);
         }
-        const sbNow = el.scrollHeight - el.offsetHeight;
-        if (sbNow > 0) el.scrollTop = currentP * sbNow;
+        // Le skip vise la fin de la chorégraphie, donc la fin du parcours écrit.
+        el.scrollTop = currentP * coreExtent;
         const skipDuration = skipDurationMs(skipLate, skipUnfoldMs, budgets);
         if (autoplayElapsed >= skipDuration) {
           currentP = 1;
@@ -2114,12 +2336,24 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
           reverseEffort = 0;
         }
         rafId = requestAnimationFrame(tick);
-      } else if (Math.abs(diff) < SNAP_THRESHOLD && !autoplay) {
+      } else if (
+        Math.abs(diff) < SNAP_THRESHOLD &&
+        Math.abs(tailTargetP - tailSmoothP) < SNAP_THRESHOLD &&
+        !autoplay
+      ) {
         // The cube is at rest: park the loop.
         // `!autoplay` évite de garer pendant le scroll automatique : `targetP` y
         // relit la position avec un frame de retard, donc `diff` peut être nul
         // alors que la tête doit encore descendre.
+        //
+        // Et la queue doit être arrivée, elle aussi. Elle a son propre lissage et
+        // sa propre inertie : les deux convergent en même temps la plupart du temps,
+        // mais pas toujours — un Molette qui s'arrête au moment où le parcours
+        // écrit se posait laisse la queue encore en retard de quelques pixels. Garer
+        // là-dessus figerait la ligne et le dessin en plein geste, sans rien pour
+        // les finir.
         currentP = targetP;
+        tailSmoothP = tailTargetP;
         lastTickTime = 0;
         rafId = null;
       } else {
@@ -2177,11 +2411,8 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         // On aligne tout de suite la position de scroll réelle sur la tête, et on
         // note cette écriture : c'est elle que `sync` comparera à la position
         // lue pour distinguer notre scroll d'un geste réel.
-        const sbArm = scrollExtent;
-        if (sbArm > 0) {
-          el.scrollTop = currentP * sbArm;
-          autoScrollPx = el.scrollTop;
-        }
+        el.scrollTop = currentP * coreExtent;
+        autoScrollPx = el.scrollTop;
         if (!rafId) rafId = requestAnimationFrame(tick);
       }
       const p = currentP;
@@ -2602,6 +2833,22 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
         names.style.transform = "translateY(70px)";
         sub.style.transform = "translateY(-70px)";
       }
+
+      // LA QUEUE — ce qui se joue après les noms levés. Elle est écrite ICI,
+      // après le bloc de la timeline, et jamais avant : elle l'emporte sur la fin
+      // écrite puisqu'elle en est la suite. Appliquée avant, la timeline la
+      // réécrirait à la frame suivante et les textes clignoteraient entre les
+      // deux positions.
+      // `le`, et non `1 - le` : c'est `le` qui vaut 1 quand la ligne est à plat,
+      // et `applyTail` l'attend dans ce sens. L'inverser ici gonflait la hauteur
+      // du carré à mesure que la queue avançait — la ligne redevenait un carré
+      // qu'on écrasait en largeur, au lieu d'être un trait qui se réduit.
+      //
+      // `tailSmoothP`, et non la position brute : c'est elle qui a été lissée
+      // plus haut, et c'est elle qui rend le geste aussi doux que le reste du
+      // parcours. La position de scroll reste, elle, disponible par
+      // `tailTargetP` — celle que le lissage rejoint.
+      applyTail(tailSmoothP, le);
       // Reveal the contact tab once names appear (one-shot, persists on scroll back).
       if (!contactTabRevealedRef.current && tlP >= NAMES_START && allClickedRef.current) {
         contactTabRevealedRef.current = true;
@@ -2681,6 +2928,25 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
       });
       faceSonarRef.current = {};
       resetBackground();
+      // Dénouement de la queue AVANT le balayage de retour. Si le visiteur est
+      // déjà dans la queue, le bouton RETOUR ne peut pas la sauter : le visage
+      // doit disparaître, les textes revenir et la ligne se refaire — sinon le
+      // balayage démarrerait sur une image qui n'existe pas, avec le visage
+      // encore dessiné par-dessus la « souris ».
+      //
+      // On mesure la queue là où elle en est, pas à 1 : le geste a pu n'effacer
+      // qu'une partie du chemin.
+      //
+      // `tailSmoothP`, et non `tailP(el.scrollTop)` : le décompte part de ce que
+      // l'écran montre. Partir de la position brute ferait sauter la queue de tout
+      // le retard accumulé — plusieurs traits du visage d'un coup, au moment
+      // précis où l'on vient d'appuyer sur RETOUR.
+      const tpNow = tailSmoothP;
+      if (tpNow > 0) {
+        tailUnwind = true;
+        tailUnwindElapsed = 0;
+        tailUnwindFrom = tpNow;
+      }
       resetPlay = true;
       resetFrom = CUBE_END;
       resetElapsed = 0;
@@ -2689,8 +2955,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
       reverseDeepest = CUBE_END;
       currentP = CUBE_END;
       targetP = CUBE_END;
-      const sbReset = scrollExtent;
-      if (sbReset > 0) el.scrollTop = currentP * sbReset;
+      el.scrollTop = currentP * coreExtent;
       if (!rafId) rafId = requestAnimationFrame(tick);
     };
 
@@ -2915,7 +3180,13 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     // liens de la fin et sortir de l'intro.
     const el = sectionRef.current;
     if (el && el.scrollHeight > el.offsetHeight) {
-      el.scrollTop = el.scrollHeight;
+      // On s'arrête à la FIN DU PARCOURS ÉCRIT, pas au bout de la piste : le
+      // repli doit être complet et le RETOUR disponible. La queue reste un
+      // parcours de scroll, que le visiteur fera ou défaira ensuite à son rythme.
+      el.scrollTop = Math.max(
+        0,
+        el.scrollHeight - el.offsetHeight * (1 + TAIL_SCREENS),
+      );
     }
   }, []);
 
@@ -2947,7 +3218,10 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
           pointerEvents: isMobileLandscape ? "none" : undefined,
         }}
       >
-      <div style={{ height: "calc(10 * var(--svh))" }}>
+      {/* La piste porte le parcours écrit PLUS la queue (voir
+          `lib/cube-tail.js`). La hauteur vient de `trackScreens()` et non d'un
+          nombre en dur, pour que la géométrie reste la source de vérité. */}
+      <div style={{ height: `calc(${trackScreens()} * var(--svh))` }}>
         <div className="sticky top-0 min-h-[calc(var(--svh))] flex items-center">
         <div
           ref={bgRef}
@@ -3004,6 +3278,36 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
               subtitleRef={subtitleRef}
               hintRef={scrollHintRef}
             />
+            {/* Le visage. Il est POSÉ SUR le marqueur d'intro, pas à côté :
+                c'est le point blanc de la fin qui s'ouvre en traits, donc il doit
+                reprendre exactement la boîte qu'occupait la ligne. En frère dans
+                le flux, le `flex` l'alignerait à côté et le morphing se ferait en
+                deux temps. D'où le centrage explicite en surimpression. */}
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                width: squareSize,
+                height: squareSize,
+                // `FACE_DROP` descend le dessin pour que son premier trait
+                // démarre exactement au niveau de la ligne réduite. C'est ici que
+                // se joue le raccord : la ligne, à plat, ne bouge qu'en
+                // horizontal — donc son niveau est celui du centre du carré, et
+                // c'est au dessin qu'il revient de se placer.
+                //
+                // Ce `transform` est statique, donc en `style` inline et non dans
+                // une classe : il n'est écrit par personne, et React le poserait
+                // une fois pour toutes.
+                transform: `translate(-50%, calc(-50% + ${FACE_DROP}%))`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <FaceDraw progressRef={faceProgressRef} />
+            </div>
           </div>
               <CubeNav
                 lang={lang}
