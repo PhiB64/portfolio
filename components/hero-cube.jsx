@@ -55,6 +55,7 @@ import {
   skipUnfoldP,
 } from "../lib/cube-finale";
 import { isMobileDevice, isRealMobileDevice } from "../lib/device";
+import { computeCubeMetrics, needsOrientationLock } from "../lib/cube-viewport";
 import { sonarGeometry } from "../lib/cube-sonar";
 
 // Default media files from the public/ folder, mapped to FACE_LABELS order:
@@ -152,7 +153,6 @@ const POINTER_RING_SIZE = 72;
 // glyphe. D'où la conversion en px, pour que changer `POINTER_GLYPH_SIZE` ne
 // déplace pas la pointe.
 const POINTER_TIP = (4.14 * POINTER_GLYPH_SIZE) / 24;
-const MOBILE_CUBE_MAX_SCALE = 0.8;
 // Retard de l'onde de fond après le clic sur une face, et durée de l'onde
 // elle-même. Sur mobile les deux sont raccourcis : le fond est la seule chose
 // qui change au clic, et 380 ms d'attente plus 700 ms de propagation laissaient
@@ -1144,8 +1144,9 @@ export function HeroCube({ title, subtitle, images = [] }) {
   useEffect(() => {
     const portraitQuery = window.matchMedia?.("(orientation: portrait)");
     const updateOrientation = () => {
-      const portrait = window.innerHeight >= window.innerWidth;
-      setIsMobileLandscape(isRealMobileDevice() && !portrait);
+      setIsMobileLandscape(
+        needsOrientationLock(window.innerWidth, window.innerHeight, isRealMobileDevice())
+      );
     };
     const screenOrientation = window.screen?.orientation;
 
@@ -1196,22 +1197,14 @@ export function HeroCube({ title, subtitle, images = [] }) {
 
   useEffect(() => {
     const compute = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const landscape = w > h;
-      const mobile = isMobileDevice();
-      const baseSize = 300;
-      const reserveH = landscape ? 96 : 168;
-      const maxScale = mobile ? MOBILE_CUBE_MAX_SCALE : 1;
-      const availW = Math.max(120, w - 24);
-      const availH = Math.max(120, h - reserveH);
-      const s = Math.max(0.35, Math.min(maxScale, availW / baseSize, availH / baseSize));
-      cubeScaleRef.current = s;
-      setCubeScale(s);
-      // Floor the card size: an <svg> with a negative width/height is invalid and
-      // React logs "A negative value is not valid". `w - 8` is the only term that
-      // can go negative on an extremely narrow viewport.
-      setSquareSize(Math.max(1, Math.min(343 * s, w - 8)));
+      const { scale, squareSize } = computeCubeMetrics(
+        window.innerWidth,
+        window.innerHeight,
+        isMobileDevice()
+      );
+      cubeScaleRef.current = scale;
+      setCubeScale(scale);
+      setSquareSize(squareSize);
     };
     compute();
     window.addEventListener("resize", compute);
