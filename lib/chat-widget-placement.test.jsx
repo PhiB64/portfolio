@@ -180,4 +180,41 @@ describe("présence du chatbot", () => {
     // portfolio n'a rien à montrer, un bouton de discussion n'y servirait à rien.
     expect(chatZ).toBeLessThan(orientationZ);
   });
+
+  it("voile la page sur mobile quand le panneau s'ouvre", async () => {
+    // Sur mobile le panneau fait presque plein écran : sans voile, le visiteur
+    // lit deux couches à la fois. Sur desktop ce n'est qu'une bulle en coin,
+    // un voile plein écran y serait intrusif. Le test porte donc sur trois
+    // choses : le voile n'existe pas au départ, il couvre la page à l'ouverture
+    // mais s'efface en `sm:`, et il disparaît à la fermeture.
+    const { fireEvent } = await import("@testing-library/react");
+    render(
+      <SiteShell lang="fr">
+        <ProjectsPage lang="fr" />
+      </SiteShell>,
+    );
+
+    expect(document.querySelector("[data-chat-backdrop]")).toBeNull();
+
+    fireEvent.click(hasLauncher());
+    const backdrop = document.querySelector("[data-chat-backdrop]");
+    expect(backdrop).not.toBeNull();
+    // Plein écran, sombre semi-transparent, masqué dès `sm:`.
+    expect(backdrop.className).toMatch(/fixed inset-0/);
+    expect(backdrop.className).toMatch(/bg-\[#0a0f1c\]\/70/);
+    expect(backdrop.className).toMatch(/sm:hidden/);
+    // Juste sous le panneau et le lanceur, mais au-dessus des overlays : le
+    // voile est lu dans le JSX du widget, les overlays dans `hero-cube.jsx`
+    // (voir le test d'empilement ci-dessus pour ces valeurs).
+    const z = Number(backdrop.className.match(/z-\[(\d+)\]/)?.[1]);
+    expect(z).toBeLessThan(70);
+    expect(z).toBeGreaterThan(60);
+    // Caché aux lecteurs d'écran : le widget reste non modal au clavier.
+    expect(backdrop.getAttribute("aria-hidden")).toBe("true");
+
+    // Le voile est aussi une sortie : un clic dessus referme le panneau.
+    fireEvent.click(backdrop);
+    expect(document.querySelector("[data-chat-backdrop]")).toBeNull();
+    expect(screen.queryByRole("region")).toBeNull();
+  });
 });

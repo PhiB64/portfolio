@@ -519,12 +519,29 @@ export function ChatWidget({ lang }) {
           overlay mais un mur : un mobile en paysage n'a rien à montrer ici, et
           un bouton de discussion par-dessus n'y servirait à personne. */}
       {open && (
-        <section
-          id="chat-panel"
-          ref={panelRef}
-          aria-label={t.assistant}
-          className="fixed inset-x-4 top-20 z-[70] flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
-        >
+        <>
+          {/* Voile mobile : le panneau y fait presque plein écran (`inset-x-4`),
+              donc la page derrière doit s'effacer — sinon le visiteur lit deux
+              couches à la fois. Sur desktop le panneau n'est qu'une bulle en
+              coin (`sm:w-96`), un voile plein écran y serait intrusif : `sm:hidden`.
+              `z-[69]`, juste sous le panneau et le lanceur (`z-[70]`) mais
+              au-dessus des overlays contact (`z-[60]`) et projet (`z-50`) :
+              ouvrir le chat depuis une fiche assombrit la fiche, et le refermer
+              la révèle intacte. Un clic dessus referme — le geste de sortie
+              naturel au tactile. `aria-hidden`, non focusable : le widget reste
+              non modal au clavier, comme avant. */}
+          <div
+            data-chat-backdrop
+            aria-hidden="true"
+            onClick={close}
+            className="fixed inset-0 z-[69] bg-[#0a0f1c]/70 sm:hidden"
+          />
+          <section
+            id="chat-panel"
+            ref={panelRef}
+            aria-label={t.assistant}
+            className="fixed inset-x-4 top-20 z-[70] flex max-h-[calc(var(--svh)-7rem)] flex-col overflow-hidden rounded-2xl border border-[#1e293b] bg-[#0f172a]/95 shadow-2xl shadow-black/50 backdrop-blur-md sm:inset-x-auto sm:right-8 sm:w-96"
+          >
           <header className="flex items-center justify-between gap-3 border-b border-[#1e293b] px-4 py-3">
             <div className="flex items-center gap-2">
               <MessageCircle size={16} className="text-[#00a5b0]" />
@@ -633,7 +650,8 @@ export function ChatWidget({ lang }) {
               {t.disclaimer}
             </p>
           </form>
-        </section>
+          </section>
+        </>
       )}
 
       {/* Lanceur, en haut à droite. Même `z-[70]` que le panneau, pour qu'il reste
