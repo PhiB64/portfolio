@@ -4,7 +4,7 @@
  * Sélecteur de langue.
  *
  * Why un composant client. Il doit connaître la page courante pour proposer son
- * équivalent dans l'autre langue — `/projects` doit devenir `/en/projects` et non
+ * équivalent dans l'autre langue — `/projects` doit devenir `/fr/projects` et non
  * la racine. Cette information ne peut venir que du routage, donc de
  * `usePathname`. Le reste du site est rendu côté serveur ; ce composant est le
  * seul endroit où le client est nécessaire pour la langue.
@@ -14,7 +14,7 @@
  * courante. Un `<a>` s'affiche, se copie, s'ouvre dans un onglet et fonctionne
  * sans JavaScript ; un bouton ne ferait rien de tout cela. La navigation est
  * dialoguée par le serveur, ce qui est aussi ce qui permet à un moteur de
- * recherche de découvrir `/en` en suivant le lien.
+ * recherche de découvrir `/fr` en suivant le lien.
  *
  * Pourquoi il ne reprend pas `?project=N`. Le paramètre désigne la face du cube
  * ouverte au chargement. Le reprendre demanderait `useSearchParams`, qui impose

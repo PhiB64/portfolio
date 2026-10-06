@@ -363,7 +363,7 @@ le découpage en deltas.
 
 L'assistant répond dans la langue de la page, et cette langue vient de la
 requête — jamais du texte de la question. Un visiteur anglophone qui écrit en
-français sur `/en` attend une réponse en anglais ; déduire la langue de la
+français depuis la racine attend une réponse en anglais ; déduire la langue de la
 question ferait l'inverse, et une conversation changerait de langue d'un tour à
 l'autre.
 

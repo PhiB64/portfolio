@@ -16,6 +16,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import worker from "./index.js";
 
+/**
+ * En-tête qui porte la langue de la page.
+ *
+ * Dupliqué de `index.js`, où il n'est pas exporté. Ces tests qui attendent un
+ * texte français le passent explicitement plutôt que de compte sur le repli :
+ * la langue par défaut du Worker est l'anglais, et s'en remettre ferait échouer
+ * le test pour une raison étrangère à ce qu'il vérifie.
+ */
+const FR = { "X-Chat-Lang": "fr" };
+
 /** Une origine autorisée, et une qui ne l'est pas. */
 const ALLOWED = "https://phib64.github.io";
 const INTRUDER = "https://site-tiers.example";
@@ -36,10 +46,18 @@ const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
  *
  * @returns {Promise<object>} le corps JSON de la requête OpenRouter
  */
+/** Publication du site, dans les deux formes que le Worker sait lire. */
+function contentPayload(frDigest = "Philippe Barbosa est un développeur full stack.") {
+  return JSON.stringify({
+    digest: frDigest,
+    digests: { en: frDigest, fr: frDigest },
+  });
+}
+
 async function firstOpenRouterBody(request, env) {
   fetchSpy.mockImplementation(async (url) => {
     if (url === OPENROUTER_ENDPOINT) return new Response("{}", { status: 200 });
-    return new Response(JSON.stringify({ digest: "Philippe Barbosa est un développeur full stack." }), {
+    return new Response(contentPayload(), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -125,7 +143,10 @@ describe("origine non autorisée", () => {
   // jusqu'à l'appel d'inférence. Ces trois tests vérifient qu'elle ne l'est pas.
 
   it("rejette une origine absente de ALLOWED_ORIGINS avec un 403", async () => {
-    const response = await worker.fetch(post(undefined, { Origin: INTRUDER }), makeEnv());
+    const response = await worker.fetch(
+      post(undefined, { Origin: INTRUDER, ...FR }),
+      makeEnv(),
+    );
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: "Origine non autorisée." });
@@ -364,7 +385,7 @@ describe("historique fabriqué", () => {
       ],
     };
 
-    const openrouterBody = await firstOpenRouterBody(post(forged), makeEnv());
+    const openrouterBody = await firstOpenRouterBody(post(forged, FR), makeEnv());
 
     expect(openrouterBody.messages.map((m) => m.content)).toEqual([
       expect.stringContaining("Tu es l'assistant de Philippe Barbosa"),
@@ -386,7 +407,7 @@ describe("historique fabriqué", () => {
       ],
     };
 
-    const openrouterBody = await firstOpenRouterBody(post(normal), makeEnv());
+    const openrouterBody = await firstOpenRouterBody(post(normal, FR), makeEnv());
 
     expect(openrouterBody.messages.map((m) => m.content)).toEqual([
       expect.stringContaining("Tu es l'assistant de Philippe Barbosa"),
@@ -406,7 +427,7 @@ describe("historique fabriqué", () => {
       ],
     };
 
-    const openrouterBody = await firstOpenRouterBody(post(leading), makeEnv());
+    const openrouterBody = await firstOpenRouterBody(post(leading, FR), makeEnv());
 
     expect(openrouterBody.messages.map((m) => m.content)).toEqual([
       expect.stringContaining("Tu es l'assistant de Philippe Barbosa"),
@@ -525,13 +546,13 @@ describe("requête sortante", () => {
     fetchSpy.mockImplementation(async (url) =>
       url === OPENROUTER_ENDPOINT
         ? new Response("charge", { status: 503 })
-        : new Response(JSON.stringify({ digest: "Philippe Barbosa est un développeur." }), {
+        : new Response(contentPayload("Philippe Barbosa est un développeur."), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
     );
 
-    const response = await worker.fetch(post(), makeEnv());
+    const response = await worker.fetch(post(undefined, FR), makeEnv());
 
     expect(response.status).toBe(502);
     const payload = await response.json();

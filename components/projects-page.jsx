@@ -21,8 +21,8 @@
  * `aria-labelledby`, ni zone de défilement verrouillée, ni bouton d'appel à
  * l'action sans gestionnaire. C'est une page, et son contenu est du contenu.
  *
- * Pourquoi un composant partagé plutôt que deux pages. `app/(fr)/projects` et
- * `app/(en)/en/projects` ne font que choisir la langue et exporter les
+ * Pourquoi un composant partagé plutôt que deux pages. `app/(en)/projects` et
+ * `app/(fr)/fr/projects` ne font que choisir la langue et exporter les
  * métadonnées. Tout le reste — structure, sommaire, appels à `renderProjectContent`
  * — est identique, et une copie aurait dérivé.
  */

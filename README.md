@@ -8,6 +8,44 @@ Portfolio interactif de **Philippe Barbosa**, Concepteur Développeur Full Stack
 
 Site one-page immersif avec un **cube 3D interactif** qui présente les compétences et projets. Chaque face du cube représente un domaine d'expertise (Web, React, Backend, Database, Mobile, Projets). L'animation est pilotée par le scroll avec des effets visuels avancés (sonar, scramble, morphing).
 
+## Langues
+
+Deux langues, choisies par le chemin de l'URL — jamais par un paramètre, pour
+que chaque variante soit indexable et partageable telle quelle.
+
+| URL | Langue |
+|---|---|
+| `/` | Anglais — la langue par défaut |
+| `/projects` | Anglais, page texte |
+| `/fr` | Français |
+| `/fr/projects` | Français, page texte |
+
+Trois points à connaître avant d'y toucher.
+
+- **`DEFAULT_LOCALE` est l'unique interrupteur.** Il est défini dans
+  `lib/content/locales.js` et l'on n'écrit `"en"` ou `"fr"` nulle part ailleurs :
+  `localePrefix` en déduit le préfixe d'URL, le `x-default` des métadonnées, la
+  priorité du sitemap et le digest de repli du chat. Changer de langue par
+  défaut se fait donc à un seul endroit.
+- **Chaque langue a son layout racine.** `<html lang>` est un attribut du
+  document : il ne peut pas être posé plus bas. D'où `app/(en)/layout.js` et
+  `app/(fr)/layout.js`, tous deux rendus par `components/site-shell.jsx`. Le
+  nom du groupe n'apparaît jamais dans l'URL — c'est lui qui permet à `/` d'être
+  anglais et `/fr` français sans que l'arborescence n'impose l'un ou l'autre.
+- **`WORKER_DEFAULT_LANG` doit suivre `DEFAULT_LOCALE`.** Le Worker est déployé
+  indépendamment, mais il ne lit la clé `digest` de repli que pour sa langue par
+  défaut. Les deux constantes diverger désactiverait ce chemin sans lever la
+  moindre erreur.
+
+Les anciennes URL anglaises `/en` et `/en/projects` sont conservées par des
+pages statiques, `public/en.html` et `public/en/projects.html`, que le build
+copie telles quelles dans `dist/` : elles sont déjà partagées, indexées et
+citées dans le CV. `output: "export"` n'applique pas les `redirects` de
+`next.config.mjs` — Next.js le signale à chaque build — donc une page HTML avec
+un `<meta http-equiv="refresh">` est le seul mécanisme disponible sur un
+hébergeur sans serveur. GitHub Pages ne sert pas de HTTP 301, donc le lien
+fonctionne mais le signal SEO est plus faible qu'un vrai redirigé.
+
 ## Stack Technique
 
 - **Next.js 16** — App Router, export statique (`output: "export"` vers `dist/`)
@@ -239,7 +277,7 @@ un composant client. Le HTML servi ne contenait donc aucun mot de contenu
 éditorial : un moteur de recherche n'indexait qu'un titre, un nom et six
 mots-clés.
 
-`app/projects/page.jsx` est la version en texte, pré-rendue au build. Deux
+`app/(en)/projects/page.jsx` est la version en texte, pré-rendue au build. Deux
 contraintes ont guidé sa conception.
 
 **Elle n'a pas de source de contenu propre.** Elle appelle
@@ -274,9 +312,17 @@ Deux détails qui ne sont pas visibles à la lecture du code :
 ```
 portfolio/
 ├── app/                      # Pages et layout Next.js
-│   ├── layout.js             # Layout principal avec metadata SEO
-│   ├── page.js               # Page d'accueil (HeroCube + ChatWidget)
+│   ├── (en)/                 # Anglais : la langue par défaut, donc à la racine
+│   │   ├── layout.js         # Layout racine EN (<html lang="en">)
+│   │   ├── page.js           # /            Page d'accueil (HeroCube + ChatWidget)
+│   │   └── projects/         # /projects
+│   ├── (fr)/                 # Français : préfixé, donc sous /fr
+│   │   ├── layout.js         # Layout racine FR (<html lang="fr">)
+│   │   └── fr/
+│   │       ├── page.js       # /
+│   │       └── projects/     # /fr/projects
 │   ├── globals.css           # Styles globaux et thème
+│   ├── sitemap.js            # sitemap.xml, entry point
 │   └── manifest.js           # Manifeste PWA
 ├── components/               # Composants React
 │   ├── hero-cube.jsx         # Cube 3D interactif principal (3192 lignes)
@@ -335,7 +381,7 @@ portfolio/
 
 Les médias des six faces sont définis dans **`lib/cube-media.js`** (constante
 `FACE_MEDIA`), dans l'ordre de `FACE_LABELS`. Cette liste est la source unique :
-`app/page.js` la passe au cube, et `components/hero-cube.jsx` s'en sert de
+`app/(en)/page.js` la passe au cube, et `components/hero-cube.jsx` s'en sert de
 repli si la prop `images` est vide.
 
 L'appariement se fait sur le nom de fichier : correspondance exacte du nom sans
@@ -428,7 +474,7 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   cyan des boutons primaires (3,00) est passé au texte sombre `#0a0f1c` (6,38) ;
   le placeholder du formulaire `#334155` (1,72) est passé à `#728296` (4,55).
 - Le titre de la page d'accueil est un `<text>` SVG, non exposé aux lecteurs
-  d'écran : un `<h1 class="sr-only">` est posé dans `app/page.js`.
+  d'écran : un `<h1 class="sr-only">` est posé dans `app/(en)/page.js`.
 - **Ce qui reste à faire.** Le verrou d'orientation est un `alertdialog` sans
   contrôle focusable : il est annoncé au focus, mais rien ne permet de le fermer
   au clavier, ce qui est correct — il n'a pas de fermeture, seulement une

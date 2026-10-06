@@ -12,13 +12,19 @@
  * `postbuild`.
  *
  * Deux clés, et pourquoi. `digests` porte une entrée par langue et porte la
- * logique. `digest` reste le digest français, inchangé, pour deux raisons qui
- * sont la même : le Worker déjà déployé ne lit que cette clé, et continuer à la
- * publier lui permet de fonctionner contre un site déployé avant lui. Un site et
- * un Worker sont déployés séparément — le Worker à la main, le site à chaque
- * push — et la période entre les deux est réelle. `digest` et `digests.en` sont
- * donc volontairement redondants : le redondant est le français, qui est le seul
- * cas où un ancien reader et un nouveau writer doivent s'entendre.
+ * logique. `digest` reste le digest de la langue par défaut, pour deux raisons
+ * qui sont la même : le Worker déjà déployé ne lit que cette clé, et continuer à
+ * la publier lui permet de fonctionner contre un site déployé avant lui. Un
+ * site et un Worker sont déployés séparément — le Worker à la main, le site à
+ * chaque push — et la période entre les deux est réelle. `digest` et
+ * `digests[DEFAULT_LOCALE]` sont donc volontairement redondants : le redondant
+ * est le cas de repli, celui où un ancien lecteur et un nouveau rédacteur
+ * doivent s'entendre.
+ *
+ * `DEFAULT_LOCALE` doit rester la même constante que `WORKER_DEFAULT_LANG` dans
+ * `worker/src/index.js` : c'est la condition sous laquelle le Worker lit cette
+ * clé. Diverger entre les deux ne casse rien tout de suite, mais désactive le
+ * chemin de repli sans lever la moindre erreur.
  */
 
 import { writeFile, mkdir, readFile } from "node:fs/promises";

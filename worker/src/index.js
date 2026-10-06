@@ -322,9 +322,15 @@ const digestCaches = {
  * doit rester lisible — mais ici il protège surtout le prompt : répondre à un
  * visiteur avec un digest vide serait pire que de répondre dans la mauvaise
  * langue.
+ *
+ * Elle doit être identique à `DEFAULT_LOCALE` de `lib/content/locales.js`. Le
+ * Worker est déployé à la main, indépendamment du site, mais le digest de
+ * repli — la clé `digest` — n'est lu par le Worker que pour sa langue par
+ * défaut. Les deux constantes diverger, et ce serait invisible : le chemin
+ * legacy cesserait de fonctionner sans qu'aucune erreur ne soit levée.
  */
-const WORKER_DEFAULT_LANG = "fr";
-const WORKER_LANGS = ["fr", "en"];
+const WORKER_DEFAULT_LANG = "en";
+const WORKER_LANGS = ["en", "fr"];
 
 /**
  * En-tête qui porte la langue de la page.
@@ -337,7 +343,8 @@ const WORKER_LANGS = ["fr", "en"];
  * Renalait.
  *
  * Il est donc dans le preflight CORS, sans quoi le navigateur refuserait la
- * requête entière. `normalizeLang` le replie sur le français : l'en-tête
+ * requête entière. `normalizeLang` le replie sur la langue par défaut :
+ * l'en-tête
  * comme le corps sont fournis par le client, et ne décident d'aucun droit.
  */
 const LANG_HEADER = "X-Chat-Lang";
@@ -428,7 +435,7 @@ const MESSAGES = {
 };
 
 /**
- * Messages d'une langue, avec repli sur le français.
+ * Messages d'une langue, avec repli sur la langue par défaut.
  *
  * @param {string} lang
  */
@@ -485,12 +492,12 @@ async function getSiteDigest(env, lang) {
     const payload = await response.json();
 
     // Deux formes lues, dans cet ordre. `digests[lang]` est ce que publie le site
-    // actuel. `digest` est le digest français, que les Workers déjà déployés
-    // lisent et que le site continue de publier : s'y rabattre est ce qui permet
-    // à un Worker bilingue de fonctionner contre un site qui ne l'est pas encore,
-    // et l'inverse. Le résultat est qu'un seul des deux a besoin d'être déployé en
-    // premier — ce qui compte, parce que le Worker se déploie à la main et le site
-    // à chaque push.
+    // actuel. `digest` est le digest de la langue par défaut, que les Workers
+    // déjà déployés lisent et que le site continue de publier : s'y rabattre est
+    // ce qui permet à un Worker bilingue de fonctionner contre un site qui ne
+    // l'est pas encore, et l'inverse. Le résultat est qu'un seul des deux a
+    // besoin d'être déployé en premier — ce qui compte, parce que le Worker se
+    // déploie à la main et le site à chaque push.
     const text =
       (typeof payload?.digests?.[lang] === "string" && payload.digests[lang].trim()) ||
       (lang === WORKER_DEFAULT_LANG && typeof payload?.digest === "string"

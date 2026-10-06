@@ -4,7 +4,7 @@
  * Tests de la présence du chatbot sur toutes les pages.
  *
  * Why monter le layout. Le widget était rendu par `HomePage`, donc par les deux
- * pages d'accueil seulement. `/projects` et `/en/projects` s'en trouvaient
+ * pages d'accueil seulement. `/projects` et `/fr/projects` s'en trouvaient
  * dépourvues — les deux routes où le visiteur reste le plus longtemps à lire, et
  * les seules où le contenu textuel est servi en HTML. Aucune capture d'écran ne
  * révèle l'absence d'un composant : il n'y a rien à comparer. Le test porte donc
@@ -80,7 +80,7 @@ describe("présence du chatbot", () => {
     hasLauncher();
   });
 
-  it("sur la page /en/projects", () => {
+  it("sur la page /fr/projects", () => {
     render(
       <SiteShell lang="en">
         <ProjectsPage lang="en" />

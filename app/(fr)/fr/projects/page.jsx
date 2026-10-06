@@ -1,5 +1,5 @@
 /**
- * Page `/projects` en français.
+ * Page `/fr/projects` — le pendant français de `/projects`.
  *
  * Les métadonnées viennent de la même fabrique que celles du layout, avec le
  * chemin de cette page. Il faut les redéclarer ici : sans cela la page
@@ -8,8 +8,8 @@
  * l'URL réelle.
  */
 
-import { ProjectsPage } from "../../../components/projects-page";
-import { siteMetadata } from "../../../lib/site-metadata";
+import { ProjectsPage } from "../../../../components/projects-page";
+import { siteMetadata } from "../../../../lib/site-metadata";
 
 export const metadata = siteMetadata("fr", "/projects");
 

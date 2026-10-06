@@ -1,0 +1,33 @@
+<!doctype html>
+<!--
+  Redirection de l'ancienne URL anglaise `/en/projects` vers `/projects`.
+
+  Le pendant exact de `public/en.html` ; voir ce fichier pour ce qu'est cette
+  redirection et pourquoi GitHub Pages ne peut pas servir de vrai 301.
+
+  La destination est `/portfolio/projects` — le préfixe de sous-dossier doit être
+  écrit en dur, comme dans `public/en.html` : ces pages sont copiées telles
+  quelles dans `dist/` et ne passent ni par `basePath` ni par `next/link`.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>Skills &amp; projects — Philippe Barbosa</title>
+    <link rel="canonical" href="https://phib64.github.io/portfolio/projects" />
+    <meta http-equiv="refresh" content="0; url=/portfolio/projects" />
+    <noscript>
+      <meta http-equiv="refresh" content="0; url=/portfolio/projects" />
+      <p>
+        This page has moved to
+        <a href="/portfolio/projects">phib64.github.io/portfolio/projects</a>.
+      </p>
+    </noscript>
+  </head>
+  <body>
+    <p>
+      This page has moved to
+      <a href="/portfolio/projects">phib64.github.io/portfolio/projects</a>.
+    </p>
+  </body>
+</html>

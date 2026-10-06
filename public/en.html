@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  Redirection de l'ancienne URL anglaise `/en` vers la racine, `/`.
+
+  Pourquoi ce fichier existe. L'anglais est passé de `/en` à la racine quand il
+  est devenu la langue par défaut, et le français de `/` à `/fr`. Les URL `/en`
+  sont pourtant déjà partagées, indexées et citées dans le CV : sans cette page,
+  tous ces liens tomberaient sur une 404.
+
+  Pourquoi un fichier plutôt qu'une entrée `redirects` dans `next.config.mjs`.
+  `output: "export"` n'applique pas les `redirects` : Next.js le signale à chaque
+  build et ne produit aucun fichier. Une page statique est la seule chose qu'un
+  hébergeur sans serveur — GitHub Pages — peut servir pour une redirection.
+
+  Ce que ce n'est pas : un 301. GitHub Pages ne permet pas d'émettre un statut
+  de redirection, donc le navigateur suit un `<meta refresh>` et un moteur de
+  recherche reçoit un 200 sur une page sans contenu. C'est pourquoi la page est
+  en `noindex` : elle ne doit jamais être indexée en concurrence de la racine.
+
+  Le nom du fichier suit ce que Next produit pour une vraie route (`fr.html`
+  sert `/fr`) : c'est ainsi que GitHub Pages résout les URL sans extension.
+
+  La version `?project=N` n'est pas concernée — ce sont des états d'overlay, pas
+  des pages.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <title>Philippe Barbosa — Full Stack Developer</title>
+    <link rel="canonical" href="https://phib64.github.io/portfolio/" />
+    <meta http-equiv="refresh" content="0; url=/portfolio/" />
+    <noscript>
+      <meta http-equiv="refresh" content="0; url=/portfolio/" />
+      <p>
+        This page has moved to
+        <a href="/portfolio/">phib64.github.io/portfolio</a>.
+      </p>
+    </noscript>
+  </head>
+  <body>
+    <p>
+      This page has moved to
+      <a href="/portfolio/">phib64.github.io/portfolio</a>.
+    </p>
+  </body>
+</html>

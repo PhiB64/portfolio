@@ -1,6 +1,18 @@
 /** @type {import('next').NextConfig} */
 const BASE = process.env.GITHUB_PAGES === "true" ? "/portfolio" : "";
 
+/*
+ * Pas de `redirects` ici, volontairement. `output: "export"` ne les applique pas
+ * : Next.js le signale à chaque build et ne génère rien. Les anciennes URL
+ * anglaises sont donc redirigées par `public/en.html` et
+ * `public/en/projects.html`, que ce build copie tels quels dans `dist/`.
+ *
+ * Le nommage suit exactement celui que Next produit pour une vraie route
+ * (`fr.html`, `fr/projects.html`), parce que c'est ainsi que GitHub Pages sert
+ * `/fr` et `/fr/projects`. Les deux mécanismes se superposent donc sans
+ * divergence possible.
+ */
+
 const nextConfig = {
   output: "export",
   // basePath only applied during GitHub Pages build to avoid changing local dev URL.

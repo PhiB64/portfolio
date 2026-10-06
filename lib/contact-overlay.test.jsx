@@ -60,7 +60,11 @@ const CHAMPS = [
 
 /** Monte le formulaire et remplit les champs, `SAISIE` par défaut. */
 function remplir(saisie = {}) {
-  render(<ContactOverlay onClose={() => {}} />);
+  // `lang` est passé explicitement, même si les libellés de `CHAMPS` sont déjà en
+  // français. L'overlay retombe sur la langue par défaut quand elle est absente,
+  // et laisser le test en hériter le ferait échouer le jour où cette langue
+  // change — pour une raison sans rapport avec ce qu'il vérifie.
+  render(<ContactOverlay lang="fr" onClose={() => {}} />);
   for (const [nom, libelle] of CHAMPS) {
     const valeur = nom in saisie ? saisie[nom] : SAISIE[nom];
     if (valeur === undefined) continue;

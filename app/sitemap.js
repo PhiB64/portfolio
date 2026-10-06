@@ -9,7 +9,7 @@
  * La boucle, elle, ne peut pas oublier une langue.
  *
  * Chaque entrée porte `alternates.languages`, ce qui fait le lien explicite
- * entre les variantes d'une même page. Indispensable ici : la racine et `/en`
+ * entre les variantes d'une même page. Indispensable ici : la racine et `/fr`
  * sont deux URL distinctes au contenu très proche, et sans ce lien un moteur de
  * recherche est libre de les traiter comme deux pages concurrentes du même
  * site — donc de n'indexer que la plus ancienne, la française.
@@ -19,7 +19,7 @@
  * contenu ne se distingue pas.
  *
  * La priorité suit la structure : la racine d'une langue vaut plus que sa page
- * `/projects`, et le français, langue d'origine, reste au-dessus de l'anglais.
+ * `/projects`, et la langue par défaut — l'anglais — reste au-dessus du français.
  * `force-static` pour rester compatible avec `output: "export"`.
  *
  * La racine du site vient de `lib/site-url.js`, partagée avec la canonique et
@@ -54,7 +54,7 @@ export default function sitemap() {
         url: `${SITE_ROOT}${localePath(lang, pathname)}`,
         lastModified,
         changeFrequency: "monthly",
-        // L'anglais passe sous le français : la langue d'origine fait foi, et
+        // Le français passe sous l'anglais : la langue par défaut fait foi, et
         // sur une seule paire de pages l'écart n'a pas besoin d'être grand.
         priority: PRIORITY[pathname] * (lang === DEFAULT_LOCALE ? 1 : 0.9),
         alternates: { languages },
