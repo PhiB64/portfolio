@@ -78,6 +78,16 @@ import {
   skipUnfoldP,
 } from "../lib/cube-finale";
 import { isMobileDevice, isRealMobileDevice } from "../lib/device";
+import {
+  DRAG_INERTIA_MAX_MS,
+  DRAG_INERTIA_START_SPEED,
+  DRAG_INERTIA_STOP_SPEED,
+  DRAG_INERTIA_TAU_MS,
+  capDragSpeed,
+  dragReleaseVelocity,
+  dragSpeed,
+  inertiaStep,
+} from "../lib/drag-inertia";
 import { computeCubeMetrics, needsOrientationLock } from "../lib/cube-viewport";
 import { sonarGeometry } from "../lib/cube-sonar";
 
@@ -352,6 +362,13 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   const dragEaseStartRef = useRef(0);
   // Active pointer-drag session: { startX, startY, lastX, lastY, pointerType, moved }.
   const dragStateRef = useRef(null);
+  // Glisse après relâchement : vitesse de rotation au lâcher, en deg/ms, qui
+  // prolonge le geste dans `tick` en décroissance exponentielle. Posée à null
+  // quand la glisse est éteinte — le cube est alors exactement posé.
+  const dragInertiaRef = useRef(null);
+  // Échantillons de la rotation APPLIQUÉE pendant le drag ({ t, rx, ry }),
+  // pour estimer la vitesse de relâchement sur les ~120 dernières ms.
+  const dragSamplesRef = useRef([]);
   // True while the end-sequence spin animation is playing (drag is locked then).
   const spinningRef = useRef(false);
   // True while the cube is on screen and can be grabbed (after the intro, before the spin).
@@ -953,6 +970,9 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     // comprises, même si la position de scroll est encore dans la fenêtre de
     // sortie. `revealOverrideRef` neutralise le fondu jusqu'au prochain scroll.
     if (mediaRetractedRef.current) revealOverrideRef.current = true;
+    // Un clic fige la pose : une glisse encore en cours s'arrête, le cube ne
+    // tourne plus sous le visuel qui s'ouvre.
+    dragInertiaRef.current = null;
     unretractMedia();
     zoomedFaceRef.current = i;
     setZoomedFaces((prev) => {
@@ -1857,7 +1877,10 @@ const sync = () => {
       targetP = real;
       // Une reprise du scroll recentre la rotation laissée par un drag : la
       // piste redonne la main, l'offset s'éteint en fondu dans `tick` pendant
-      // le défilement, faces et labels se réalignent.
+      // le défilement, faces et labels se réalignent. La glisse éventuelle est
+      // coupée net : le scroll reprend le cube où le doigt l'a laissé, il ne le
+      // relance pas.
+      dragInertiaRef.current = null;
       if (
         !dragEaseResetRef.current &&
         (dragOffsetRef.current.rx !== 0 || dragOffsetRef.current.ry !== 0)
@@ -2444,7 +2467,8 @@ const sync = () => {
       } else if (
         Math.abs(diff) < SNAP_THRESHOLD &&
         Math.abs(tailTargetP - tailSmoothP) < SNAP_THRESHOLD &&
-        !autoplay
+        !autoplay &&
+        !dragInertiaRef.current
       ) {
         // The cube is at rest: park the loop.
         // `!autoplay` évite de garer pendant le scroll automatique : `targetP` y
@@ -2457,6 +2481,10 @@ const sync = () => {
         // écrit se posait laisse la queue encore en retard de quelques pixels. Garer
         // là-dessus figerait la ligne et le dessin en plein geste, sans rien pour
         // les finir.
+        //
+        // Et la glisse du drag doit être éteinte, elle aussi : elle avance hors
+        // scroll, donc `diff` et la queue ne la voient pas — garer dessus
+        // figerait le cube en pleine glisse, sans rien pour la finir.
         currentP = targetP;
         tailSmoothP = tailTargetP;
         lastTickTime = 0;
@@ -2692,6 +2720,33 @@ const sync = () => {
       // toute la chorégraphie lui-même et n'a pas de segment showcase à jouer.
       const showcasing = unlocked && !skipRef.current && tlP > SHOW_START && tlP <= SHOW_END;
       spinningRef.current = spinning;
+
+      // Glisse après relâchement : la vitesse mesurée au lâcher prolonge le
+      // geste en décroissance exponentielle (intégration exacte, donc
+      // indépendante du framerate), MAIS seulement à cube posé — dès que le
+      // scroll, l'autoplay, le skip ou le reset bougent, la piste reprend la
+      // main (voir `sync` qui coupe `dragInertiaRef`, et les branches
+      // programmées ci-dessus qui rendent la main avant d'arriver ici). Le
+      // garage plus haut ne gare jamais pendant une glisse
+      // (`!dragInertiaRef.current`), donc aucune relance n'est nécessaire ici :
+      // la boucle est déjà en vie.
+      if (dragInertiaRef.current && !autoplay && !skipRef.current && !resetPlay) {
+        const iv = dragInertiaRef.current;
+        iv.elapsed = (iv.elapsed ?? 0) + dt;
+        if (
+          iv.elapsed > DRAG_INERTIA_MAX_MS ||
+          dragSpeed(iv.vel) < DRAG_INERTIA_STOP_SPEED ||
+          !cubeDraggableRef.current ||
+          spinningRef.current
+        ) {
+          dragInertiaRef.current = null;
+        } else {
+          const { step, vel } = inertiaStep(iv.vel, dt, DRAG_INERTIA_TAU_MS);
+          iv.vel = vel;
+          dragOffsetRef.current.rx += step.rx;
+          dragOffsetRef.current.ry += step.ry;
+        }
+      }
 
       // The direct drag adds a fixed offset over the scroll-driven orientation.
       // From the end-sequence spin onward the offset fades out so the cube
@@ -3006,6 +3061,8 @@ const sync = () => {
       setSkipped(false);
       setSkipRevealedFaces([false, false, false, false, false, false]);
       dragOffsetRef.current = { rx: 0, ry: 0 };
+      dragInertiaRef.current = null;
+      dragSamplesRef.current = [];
       dragEaseResetRef.current = false;
       dragEaseStartRef.current = 0;
       spinTourRef.current = null;
@@ -3152,6 +3209,10 @@ const sync = () => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       if (dragStateRef.current) return;
       if (!cubeDraggableRef.current) return;
+      // Un nouveau geste coupe la glisse du précédent : le cube repart du
+      // doigt, il ne cumule pas deux vitesses.
+      dragInertiaRef.current = null;
+      dragSamplesRef.current = [{ t: e.timeStamp, rx: dragOffsetRef.current.rx, ry: dragOffsetRef.current.ry }];
       dragStateRef.current = {
         startX: e.clientX,
         startY: e.clientY,
@@ -3198,6 +3259,10 @@ const sync = () => {
       // multiplicatif, donc indifferent au signe.
       dragOffsetRef.current.ry += dx * sens.ry;
       dragOffsetRef.current.rx += -dy * sens.rx;
+      // L'échantillon enregistre la rotation APPLIQUÉE, gains tactile/souris
+      // compris : la vitesse estimée au lâcher est donc homogène aux deux
+      // pointeurs, sans branchement par appareil.
+      dragSamplesRef.current.push({ t: e.timeStamp, rx: dragOffsetRef.current.rx, ry: dragOffsetRef.current.ry });
       queueDragRender();
     };
 
@@ -3228,6 +3293,22 @@ const sync = () => {
         suppressTimer = setTimeout(() => {
           suppressClickRef.current = false;
         }, 400);
+        // Le relâchement prolonge le geste : la vitesse mesurée sur les
+        // derniers échantillons part en glisse, TOUCH comme SOURIS — le même
+        // code sert les deux pointeurs. Un geste qui s'est arrêté avant de
+        // lâcher (positionnement précis) y mesure une vitesse nulle et ne
+        // glisse pas. Sous `prefers-reduced-motion`, pas de mouvement imposé :
+        // le cube reste où le pointeur l'a laissé.
+        //
+        // `pointercancel` exclu : un geste interrompu (appel, navigateur qui
+        // reprend la main) ne doit pas relancer le cube tout seul.
+        if (e.type !== "pointercancel" && !reduceMotion()) {
+          const v = capDragSpeed(dragReleaseVelocity(dragSamplesRef.current));
+          if (dragSpeed(v) >= DRAG_INERTIA_START_SPEED && cubeDraggableRef.current && !spinningRef.current) {
+            dragInertiaRef.current = { vel: v, elapsed: 0 };
+            queueDragRender();
+          }
+        }
       } else if (e.type !== "pointercancel") {
         // Genuine tap (no real displacement): resolve the face hit right here
         // instead of trusting the synthesized click, which some mobile
@@ -3249,6 +3330,7 @@ const sync = () => {
         }
       }
       dragStateRef.current = null;
+      dragSamplesRef.current = [];
       zone.style.cursor = "grab";
     };
 
