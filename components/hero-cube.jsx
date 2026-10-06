@@ -1571,6 +1571,11 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     let resetPlay = false;
     let resetFrom = 0;
     let resetElapsed = 0;
+    // Affaissement des noms déjà joué par le doigt AVANT la prise de relais du
+    // sweep (voir `sync`, branche du recul non confirmé). En pixels, mesuré au
+    // déclenchement : la tête du sweep repart de là où l'écran est, pas de 1 —
+    // sinon la première frame du décompte remonterait les noms d'un coup.
+    let resetNamesY = 0;
     // Dénouement programmé de la queue avant le balayage de retour (bouton
     // RETOUR). Distinct de la queue pilotée par le scroll : là, la position se
     // défait toute seule, ici elle doit être animée parce que le scroll est gelé
@@ -1800,9 +1805,14 @@ const sync = () => {
           goToStartRef.current?.();
           return;
         }
-        // Tant que le recul n'est pas confirmé, la tête reste où elle est : on
-        // ne laisse pas la position glisser vers l'arrière en attendant.
-        targetP = currentP;
+        // Tant que le recul n'est pas confirmé, la tête SUIT le doigt : figer
+        // la position pendant l'accumulation laissait 120 px de geste sans
+        // réponse à l'écran — le scroll inverse semblait mort, puis le retour
+        // prenait le relais d'un coup. Ici les noms s'affaissent de quelques
+        // pixels sous le doigt, et c'est `resetNamesY` (voir `goToStartRef`)
+        // qui absorbe ce résidu à la prise de relais pour garder le
+        // raccord invisible.
+        targetP = real;
         return;
       }
       reverseEffort = 0;
@@ -2019,13 +2029,18 @@ const sync = () => {
         el.scrollTop = currentP * coreExtent;
         // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
         // dès le début du retour (fondu + glissement vers le bas), avant que la
-        // ligne de fin d'animation ne se transforme en « souris ».
+        // ligne de fin d'animation ne se transforme en « souris ». Le fondu
+        // part de l'affaissement déjà joué par le doigt (`resetNamesY`, voir
+        // `goToStartRef`), pas de zéro : quand le retour vient du scroll
+        // inverse, les noms sont déjà à quelques pixels sous leur pose, et
+        // repartir de zéro les ferait sauter vers le haut à la première frame.
         const namesK = Math.min(1, sweepElapsed / RESET_NAMES_MS);
         const namesE = namesK * namesK * (3 - 2 * namesK);
+        const namesY = resetNamesY + (70 - resetNamesY) * namesE;
         names.style.opacity = String(1 - namesE);
         sub.style.opacity = String(1 - namesE);
-        names.style.transform = `translateY(${70 * namesE}px)`;
-        sub.style.transform = `translateY(${-70 * namesE}px)`;
+        names.style.transform = `translateY(${namesY}px)`;
+        sub.style.transform = `translateY(${-namesY}px)`;
         // Réapparition en douceur de la « souris » par morphing : une fois les
         // textes entièrement disparus (RESET_NAMES_MS), la ligne de fin
         // d'animation (carré aplati) se redéploie en carré, puis ses points
@@ -2061,6 +2076,7 @@ const sync = () => {
           resetPlay = false;
           resetFrom = 0;
           resetElapsed = 0;
+          resetNamesY = 0;
           currentP = 0;
           targetP = 0;
           el.scrollTop = 0;
@@ -2997,8 +3013,21 @@ const sync = () => {
       reverseEffort = 0;
       reverseAnchor = CUBE_END;
       reverseDeepest = CUBE_END;
-      currentP = CUBE_END;
-      targetP = CUBE_END;
+      // La tête a pu reculer sous le doigt AVANT la confirmation (voir `sync`) :
+      // les noms sont alors affaissés de quelques pixels. Le sweep repart de là
+      // où l'écran est — `currentP` suit la position réelle — et le fondu part
+      // de l'affaissement affiché, pas de zéro : aucun saut à la première
+      // frame. Le bouton RETOUR, lui, déclenche depuis l'arrêt : `currentP`
+      // vaut 1, l'affaissement vaut 0 et le fondu part de sa valeur d'origine.
+      // La formule est celle du rendu (voir le bloc des noms dans `tick`) :
+      // c'est le même nombre, donc le raccord est exact.
+      currentP = Math.min(CUBE_END, targetP);
+      targetP = currentP;
+      const resumeK = Math.min(
+        1,
+        Math.max(0, (currentP - NAMES_START) / (NAMES_END - NAMES_START)),
+      );
+      resetNamesY = (1 - resumeK * resumeK * (3 - 2 * resumeK)) * 70;
       el.scrollTop = currentP * coreExtent;
       if (!rafId) rafId = requestAnimationFrame(tick);
     };
