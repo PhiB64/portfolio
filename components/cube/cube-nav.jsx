@@ -128,7 +128,16 @@ export function CubeNav({
         onClick={onContactClick}
         tabIndex={contactDone ? 0 : -1}
         aria-hidden={contactDone ? undefined : true}
-        className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-6 py-2.5 text-sm hover:bg-white/80 transition-colors duration-300 cursor-pointer border-0"
+        // Même gabarit que les onglets mobile : `px-2.5 py-2 text-[11px]`, et
+        // la largeur d'une cellule d'onglet. La nav mobile vaut `w-[88vw] px-2
+        // grid-cols-3 gap-2`, donc une cellule fait (88vw − 2×`px-2` − 2×`gap-2`)
+        // / 3 = (88vw − 2rem) / 3. Si la grille change, mettre à jour ici.
+        // L'exemplaire desktop garde son `px-4 py-2 text-xs` : avant, centré en
+        // bas, le `px-6 py-2.5 text-sm` le faisait lire comme un appel à
+        // l'action au lieu d'un onglet parmi d'autres. La `border-transparent`
+        // absorbe les 2 px de la bordure des onglets : même boîte au pixel
+        // près, sans trait visible.
+        className="sm:hidden absolute bottom-[calc(env(safe-area-inset-bottom)+24px)] left-1/2 -translate-x-1/2 z-30 bg-white text-[#0a0f1c] tracking-[0.2em] uppercase rounded-full px-2.5 py-2 text-[11px] text-center whitespace-nowrap w-[calc((88vw-2rem)/3)] border border-transparent hover:bg-white/80 transition-colors duration-300 cursor-pointer"
         style={contactBtnStyle}
       >
         CONTACT
