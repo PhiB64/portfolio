@@ -88,7 +88,19 @@ export function CubeNav({
         </button>
       </nav>
       <button
-        onClick={showReturn ? () => onRestart?.() : onSkip}
+        onClick={(e) => {
+          // SKIP comme RETOUR se masquent dès l'activation — `skipped` fait
+          // basculer `aria-hidden` pour l'un, `setShowReturn(false)` pour
+          // l'autre — alors que le bouton a encore le focus : sans ce `blur`,
+          // Chrome refuse `aria-hidden` sur un élément focalisé et l'écrit
+          // en console, et le focus reste sur un contrôle masqué.
+          e.currentTarget.blur();
+          if (showReturn) {
+            onRestart?.();
+          } else {
+            onSkip?.();
+          }
+        }}
         aria-label={showReturn ? t.restart : t.skip}
         // Le bouton n'a pas de fondu — l'opacité passe de 1 à 0 d'un coup — mais
         // la correction retenue est la même que pour CONTACT, et pour la même
