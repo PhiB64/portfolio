@@ -72,6 +72,7 @@ import {
   SKIP_UNFOLD_MS,
   autoplayHeadP,
   finaleBudgets,
+  resetSweepP,
   runFinale,
   skipDurationMs,
   skipUnfoldP,
@@ -2006,8 +2007,14 @@ const sync = () => {
         // vaut un temps mort franc entre les deux parties qu'une deuxième partie
         // qu'on a réaménagée.
         const sweepElapsed = Math.max(0, resetElapsed - RESET_LEAD_MS);
-        const k = Math.min(1, sweepElapsed / RESET_MS);
-        currentP = resetFrom * (1 - k);
+        // Le sweep est adouci (`resetSweepP`, dans `lib/cube-finale.js`), mais
+        // les phases qu'il porte — noms, repousse de la ligne, morphing,
+        // réapparition de l'invite — restent lues sur le temps LINÉAIRE : leurs
+        // fenêtres en ms ne changent pas, seule la tête qui les traverse
+        // accélère puis ralentit. Sinon l'adoucissement décalerait chaque
+        // événement (les noms partiraient plus tard, la souris reviendrait plus
+        // tôt) et le geste perdrait son calibrage.
+        currentP = resetSweepP(sweepElapsed, RESET_MS, resetFrom);
         targetP = currentP;
         el.scrollTop = currentP * coreExtent;
         // Les noms « PHILIPPE BARBOSA / CONCEPTEUR DÉVELOPPEUR » disparaissent
