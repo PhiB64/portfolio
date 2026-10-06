@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useMemo, useState, useCallback } from "react";
 import anime from "animejs";
 
 
@@ -207,6 +207,11 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   const [showContact, setShowContact] = useState(false);
   const [contactDone, setContactDone] = useState(false);
   const [isMobileLandscape, setIsMobileLandscape] = useState(false);
+  // Monté côté client : faux dans le HTML servi, vrai dès le layout effect.
+  // La custom property `--intro-size` n'est posée qu'à ce moment-là — sinon le
+  // serveur la servirait à 343 px et écraserait le défaut CSS mobile (voir
+  // `globals.css`).
+  const [mounted, setMounted] = useState(false);
   const [cubeScale, setCubeScale] = useState(1);
   // Taille affichée (px) de la carte d'intro (viewBox 300) ; suit cubeScale
   // pour que le crossfade carré→cube reste aligné sur tous les formats.
@@ -1224,7 +1229,14 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     } catch {}
   }, [isMobileLandscape]);
 
-  useEffect(() => {
+  // `useLayoutEffect` et non `useEffect` : l'état initial (`scale: 1`,
+  // `squareSize: 343`) est celui du bureau, et sur mobile la correction à 0,8 /
+  // 274 px arrivait APRES le premier paint — la « souris » passait visiblement
+  // d'une taille plus grande à sa taille normale à chaque refresh. En layout
+  // effect, la correction est appliquée avant la peinture : le premier paint a
+  // déjà la bonne taille. Le serveur rend toujours 343, donc pas de mismatch
+  // d'hydratation : l'état initial reste la valeur servie.
+  useLayoutEffect(() => {
     const compute = () => {
       const { scale, squareSize } = computeCubeMetrics(
         window.innerWidth,
@@ -1236,6 +1248,9 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
       setSquareSize(squareSize);
     };
     compute();
+    // Voir `mounted` : c'est ce basculement qui fait poser `--intro-size` sur
+    // la vraie valeur, en remplacement du défaut servi par le CSS.
+    setMounted(true);
     window.addEventListener("resize", compute);
     window.addEventListener("orientationchange", compute);
     return () => {
@@ -3310,7 +3325,17 @@ const sync = () => {
         </button>
 
         <div className="relative z-10 w-full">
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            // Taille de la carte d'intro, posée en custom property pour le
+            // premier paint : voir `globals.css` (`--intro-size`). Posée
+            // seulement une fois monté : le serveur la servirait à 343 px
+            // (l'état initial desktop) et écraserait le défaut CSS, qui est
+            // déjà la bonne valeur sur mobile. Le JS réécrit ensuite la MÊME
+            // property, pas un miroir : aucun saut dans un sens comme dans
+            // l'autre.
+            style={mounted ? { "--intro-size": `${squareSize}px` } : undefined}
+          >
             <IntroMarker
               lang={lang}
               squareSize={squareSize}
@@ -3329,12 +3354,11 @@ const sync = () => {
                 deux temps. D'où le centrage explicite en surimpression. */}
             <div
               aria-hidden="true"
+              className="intro-face-box"
               style={{
                 position: "absolute",
                 left: "50%",
                 top: "50%",
-                width: squareSize,
-                height: squareSize,
                 // `FACE_DROP` descend le dessin pour que son premier trait
                 // démarre exactement au niveau de la ligne réduite. C'est ici que
                 // se joue le raccord : la ligne, à plat, ne bouge qu'en

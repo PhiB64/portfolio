@@ -35,6 +35,7 @@ export function IntroMarker({
         width={squareSize}
         height={squareSize}
         viewBox="0 0 300 300"
+        className="intro-marker-svg"
         style={{ overflow: "visible" }}
       >
         <polygon

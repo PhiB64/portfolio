@@ -71,6 +71,47 @@ html::-webkit-scrollbar, body::-webkit-scrollbar {
   transform: scale(0);
 }
 
+/* Taille de la carte d'intro (souris + visage posé dessus), lue dans la
+   custom property `--intro-size` que `hero-cube.jsx` pose sur leur ancêtre
+   commun une fois monté — et dont la valeur servie par défaut anticipe le
+   calcul JS pour le cas courant.
+   Sans ça, le HTML servi portait les attributs `width`/`height` desktop
+   (343 px) et le layout effect les corrigeait après coup : sur mobile, la
+   « souris » passait visiblement d'une taille plus grande à sa taille normale
+   à chaque refresh, d'autant plus longtemps que le bundle mettait de temps à
+   arriver. Ici le premier paint a déjà la bonne taille, et le JS reprend la
+   main sur la MÊME property (il la réécrit, il ne la duplique pas) : aucun
+   saut à la reprise.
+   Le défaut suit `computeCubeMetrics` (`lib/cube-viewport.js`) : 343 px, sauf
+   sur tactile compact où le plafond mobile (0,8 × 343 = 274,4 px) s'applique.
+   C'est une anticipation, pas un miroir exact — `isMobileDevice()` lit aussi
+   l'user-agent, qu'une media query ne voit pas — mais l'écart ne peut pas
+   durer : dès le montage, la property inline porte la vraie valeur et gagne
+   sur ce défaut dans tous les cas. Les attributs `width`/`height` restent en
+   repli (navigateur sans CSS ou sans JS) ; dès que le CSS s'applique, il gagne
+   sur eux et `height: auto` préserve le carré via la viewBox. */
+:root {
+  --intro-size: 343px;
+}
+
+/* Tactile + viewport compact (`max`, largeur comme hauteur, ≤ 1100 px) : les
+   mêmes bornes que `isMobileDevice()`, moins l'user-agent. */
+@media (pointer: coarse) and (max-width: 1100px) and (max-height: 1100px) {
+  :root {
+    --intro-size: 274.4px;
+  }
+}
+
+.intro-marker-svg {
+  width: var(--intro-size);
+  height: auto;
+}
+
+.intro-face-box {
+  width: var(--intro-size);
+  height: var(--intro-size);
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
