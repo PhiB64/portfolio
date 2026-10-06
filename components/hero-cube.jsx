@@ -1581,6 +1581,21 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     // vers le bas de plus que cette distance depuis son point le plus reculé.
     // Un simple rebond ne l'annule pas.
     const REVERSE_CANCEL_PX = 60;
+    // Voisinage de la frontière de la queue (en progression `tp`) en deçà
+    // duquel il n'y a plus rien à dénouer : le scrub a déjà tout ramené, et
+    // un décompte complet y rejouerait des segments vides — pire, ses
+    // fenêtres reparamétrées y feraient disparaître des textes déjà revenus
+    // avant de les refaire revenir. Sert deux fois : en `sync`, le retour
+    // armé par un recul franc attend que la queue ait rattrapé ce voisinage
+    // avant de partir ; dans `goToStartRef`, le dénouement est sauté quand la
+    // queue affichée s'y trouve déjà.
+    const TAIL_SETTLE_P = 0.02;
+    // Retour armé mais différé : un recul franc en flick rapide arrive alors
+    // que la queue affichée accuse encore du retard (lissage), et partir tout
+    // de suite ferait rejouer au dénouement ce que le scrub vient de jouer —
+    // les textes reviendraient deux fois. On arme ici, et `tick` déclenche
+    // dès que la queue a rattrapé la frontière.
+    let reverseArmed = false;
     // Fondu de retour au début : un balayage programmé de CUBE_END vers 0,
     // pendant lequel la détection de recul est suspendue.
     let resetPlay = false;
@@ -1809,9 +1824,25 @@ const sync = () => {
           reverseAnchor = real;
           reverseDeepest = real;
           reverseEffort = 0;
+          // Un retour franc vers le bas désarme aussi le retour différé : il
+          // n'a pas été confirmé, on repart de zéro.
+          reverseArmed = false;
         }
         if (reverseEffort >= REVERSE_TRIGGER_PX) {
-          // Recul franc : on rejoue le retour, exactement comme le bouton.
+          // Recul franc : on rejoue le retour, exactement comme le bouton —
+          // mais pas forcément tout de suite. Si la queue affichée accuse
+          // encore du retard (lissage), partir maintenant ferait rejouer au
+          // dénouement ce que le scrub vient de jouer et les textes
+          // reviendraient deux fois : on arme, et `tick` déclenche dès que la
+          // queue a rattrapé la frontière (`TAIL_SETTLE_P`). Si elle s'y
+          // trouve déjà, on part tout de suite — `goToStartRef` saute alors
+          // le dénouement, il n'y a plus rien à dénouer.
+          if (tailSmoothP > TAIL_SETTLE_P) {
+            reverseArmed = true;
+            targetP = currentP;
+            return;
+          }
+          reverseArmed = false;
           goToStartRef.current?.();
           return;
         }
@@ -1966,6 +1997,8 @@ const sync = () => {
               reverseAnchor = 1;
               reverseDeepest = 1;
               reverseEffort = 0;
+              // Arrivée réelle : aucun retour n'est en attente, on désarme.
+              reverseArmed = false;
             }
             // Une fois `p` rejoint la tête (ou si l'utilisateur a repris la
             // main), la timeline n'a plus de canal séparé à tenir : `sync` la
@@ -2274,6 +2307,17 @@ const sync = () => {
         if (Math.abs(tailTargetP - tailSmoothP) < SNAP_THRESHOLD) {
           tailSmoothP = tailTargetP;
         }
+        // Retour armé par un recul franc : le scrub manuel vient de ramener
+        // la queue à sa frontière, il n'y a plus rien à dénouer — on part.
+        // Sans ce différé, un flick rapide déclenchait le dénouement alors
+        // que la queue affichée accusait encore du retard, et il rejouait ce
+        // que le scrub venait de jouer : les textes revenaient deux fois.
+        if (reverseArmed && tailSmoothP <= TAIL_SETTLE_P) {
+          reverseArmed = false;
+          goToStartRef.current?.();
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
       }
 
       if (skipRef.current) {
@@ -2393,6 +2437,8 @@ const sync = () => {
           reverseAnchor = 1;
           reverseDeepest = 1;
           reverseEffort = 0;
+          // Fin de skip : arrivée réelle, aucun retour en attente.
+          reverseArmed = false;
         }
         rafId = requestAnimationFrame(tick);
       } else if (
@@ -3000,11 +3046,25 @@ const sync = () => {
       // l'écran montre. Partir de la position brute ferait sauter la queue de tout
       // le retard accumulé — plusieurs traits du visage d'un coup, au moment
       // précis où l'on vient d'appuyer sur RETOUR.
+      //
+      // Le même `tailSmoothP` peut déjà valoir presque zéro : recul franc armé
+      // puis rattrapé par le scrub (`TAIL_SETTLE_P`, voir `tick`), ou queue
+      // jamais vraiment entrée. Un décompte complet y rejouerait des segments
+      // vides — pire, ses fenêtres reparamétrées (`tailUnwindStages`) y
+      // feraient disparaître des textes déjà revenus avant de les refaire
+      // revenir. On le saute : il n'y a plus rien à dénouer. On pose quand
+      // même l'état frontière — c'est ce que le scrub aurait écrit une frame
+      // plus tard : sans cet appel, la ligne resterait blanche pendant tout
+      // le balayage, car le SAUT blanc → cyan ne se joue que dans `applyTail`.
       const tpNow = tailSmoothP;
-      if (tpNow > 0) {
+      if (tpNow > TAIL_SETTLE_P) {
         tailUnwind = true;
         tailUnwindElapsed = 0;
         tailUnwindFrom = tpNow;
+      } else if (tpNow > 0) {
+        applyTail(0, 1);
+        tailSmoothP = 0;
+        tailTargetP = 0;
       }
       resetPlay = true;
       resetFrom = CUBE_END;
@@ -3012,6 +3072,7 @@ const sync = () => {
       reverseEffort = 0;
       reverseAnchor = CUBE_END;
       reverseDeepest = CUBE_END;
+      reverseArmed = false;
       currentP = CUBE_END;
       targetP = CUBE_END;
       el.scrollTop = currentP * coreExtent;
