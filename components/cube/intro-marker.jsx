@@ -7,10 +7,10 @@ import { uiFor } from "../../lib/content/ui.js";
 // chorégraphie via `anime` (morphing du polygone, fil de roue, entrée/sortie du
 // titre et du sous-titre) : ce composant ne garde aucun état.
 //
-// L'invite « SCROLLEZ / VERS / LE BAS » vient du dictionnaire, en lignes : le
-// français tient sur trois lignes là où l'anglais (« SCROLL / DOWN ») en tient
-// deux. `whitespace-nowrap` a donc été retiré — il était calibré sur deux
-// lignes et aurait laissé déborder « SCROLLEZ ». La position verticale est
+// L'invite « SCROLLEZ » vient du dictionnaire, en lignes : le français tient
+// sur une ligne là où l'anglais (« SCROLL / DOWN ») en tient deux.
+// `whitespace-nowrap` a donc été retiré — il était calibré sur deux lignes et
+// aurait laissé déborder « SCROLL ». La position verticale est
 // calée sur le bas du texte (`top: calc(100% - 78px)`), donc elle encaisse le
 // changement de hauteur sans ajusteur : les lignes montent vers le carré.
 export function IntroMarker({

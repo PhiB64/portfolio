@@ -208,9 +208,11 @@ délibéré, et leur seul destinataire est le digest :
 
 - `CAREER_CONTENT` vient du CV : reconversion professionnelle, formations,
   années de management et de gestion d'équipe avant le développement, langues,
-  permis. Ce sont pourtant ce que les visiteurs demandent en premier
-  (« d'où viens-tu ? », « comment es-tu arrivé au développement ? ») — et le
-  site ne le disait pas.
+  permis, ainsi que les coordonnées citables (localité, téléphone, e-mail,
+  disponibilité — sans URL, voir `contact` dans `fr.js`). Ce sont pourtant ce
+  que les visiteurs demandent en premier
+  (« d'où viens-tu ? », « comment es-tu arrivé au développement ? »,
+  « comment le joindre ? ») — et le site ne le disait pas.
 - `STACK_CONTENT` décrit avec quoi ce site est construit (Next.js 16, CSS 3D,
   ni three.js ni WebGL) : sans elle, le modèle répondait avec les technologies
   des autres projets.

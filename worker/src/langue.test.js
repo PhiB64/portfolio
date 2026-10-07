@@ -437,9 +437,19 @@ describe("intégrité des consignes systeme", () => {
     expect(await promptFor("en")).toContain("Philippe is the developer");
   });
 
-  it("chacune interdit d'écrire une adresse", async () => {
+  it("chacune interdit d'écrire une adresse de rubrique ou de profil", async () => {
     expect(await promptFor("fr")).toContain("tu ne les écris jamais");
     expect(await promptFor("en")).toContain("you never write them");
+  });
+
+  it("chacune interdit de parler du modèle d'IA", async () => {
+    expect(await promptFor("fr")).toContain("Parler du modèle d'IA");
+    expect(await promptFor("en")).toContain("Talk about the AI model");
+  });
+
+  it("chacune autorise le téléphone, la localité et l'e-mail de la section Contact", async () => {
+    expect(await promptFor("fr")).toContain("sont citables");
+    expect(await promptFor("en")).toContain("may be quoted");
   });
 
   it("ne laisse passer aucune consigne systeme venue du client", async () => {
