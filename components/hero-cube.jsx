@@ -43,7 +43,7 @@ import {
   nextCubeStepBound,
   rotateVecByXY,
 } from "../lib/cube-math";
-import { scrambleLabel, stopScramble } from "../lib/scramble";
+import { scrambleBaseLength, scrambleLabel, stopScramble } from "../lib/scramble";
 import { electDecodingFace, readFaceExposure } from "../lib/face-labels";
 import { FACE_MEDIA } from "../lib/cube-media";
 import { reduceMotion as readReducedMotion } from "../lib/reduced-motion";
@@ -746,6 +746,10 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   // `scrambleLabel` renvoie toujours une timeline en mode `cipher`, et
   // `stopScramble` / `stopFaceScramble` / le `?.eventCallback` du tick
   // l'acceptent déjà.
+  // Tous les labels démarrent sur la même largeur brouillée : le max calculé
+  // des six (`scrambleBaseLength`), bourrage réparti moitié-moitié autour du
+  // mot pour l'extinction symétrique. Un jour un libellé change, le max suit —
+  // rien n'est écrit en dur.
   const encodeFaceLabel = (i) => {
     const el = clickLabelRefs.current[i];
     if (!el) return;
@@ -753,6 +757,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     faceScrambleTlRef.current[i] = undefined;
     faceScrambleTlRef.current[i] = scrambleLabel(el, labelsRef.current[i], {
       cipher: true,
+      scrambleLength: scrambleBaseLength(labelsRef.current),
     });
   };
 
@@ -760,6 +765,9 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   // final. Démarre dès l'exposition, sans latence — il existait ici un délai
   // d'une seconde, supprimé quand il a été ramené à 0 ; la seconde qui figure
   // désormais dans la durée est celle de la TWEEN, pas une attente.
+  // Le décodage repart de la même largeur brouillée que l'état codé (le max
+  // des six) : les faces ne changent pas de largeur entre les deux phases, et
+  // le surplus s'éteint symétriquement une fois le mot résolu.
   // Renvoie la timeline créée, ou `null` si le label n'est pas monté. L'appelant
   // s'en sert pour n'accrocher son `onComplete` que sur un vrai décodage :
   // accroché à la timeline précédente (boucle `cipher`, `repeat: -1`, qui
@@ -771,6 +779,7 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
     faceScrambleTlRef.current[i] = undefined;
     faceScrambleTlRef.current[i] = scrambleLabel(el, labelsRef.current[i], {
       duration: FACE_LABEL_DECODE_MS / 1000,
+      scrambleLength: scrambleBaseLength(labelsRef.current),
     });
     return faceScrambleTlRef.current[i];
   };

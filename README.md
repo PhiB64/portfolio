@@ -134,7 +134,7 @@ Les tests couvrent `lib/` et le Worker — 322 tests, 17 fichiers :
 | `lib/leak-filter.js` | `lib/leak-filter.test.js` (30 tests) | le filtrage des fuites de modération sur un flux fragmenté |
 | `lib/device.js` | `lib/device.test.js` (11 tests) | la détection de capacité et de préférence |
 | `lib/reduced-motion.js` | `lib/reduced-motion.test.js` (6 tests) | la lecture de la préférence, y compris quand elle est absente |
-| `lib/scramble.js` | `lib/scramble-reduced-motion.test.js` (4 tests, jsdom) | branche `cipher` + `prefers-reduced-motion` : image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact |
+| `lib/scramble.js` | `lib/scramble-reduced-motion.test.js` (4 tests, jsdom) + `lib/scramble-padding.test.js` (12 tests, jsdom) | branche `cipher` + `prefers-reduced-motion` : image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact ; départ brouillé commun (max calculé des six, jamais en dur) et extinction symétrique du surplus par paires, du bord vers le mot |
 | `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (22 tests, jsdom) | piège de focus, Échap, restauration du focus |
 | `lib/chat-request.js` | `lib/chat-request.test.jsx` (12 tests) | le cycle de vie d'une requête du chat : course sur le contrôleur d'annulation, délai, distinction fermeture / expiration |
 | `lib/contact-form.js` | `lib/contact-form.test.js` (18 tests) | les décisions d'envoi du formulaire : pot de miel, délai de remplissage, bornes de longueur |
@@ -398,6 +398,16 @@ présentée à l'écran : au-delà de `FACE_LABEL_DECODE_MIN_EXPOSURE` (0,5), da
 révélée était élue d'office, encore bieu, et son label s'affichait déjà décodé
 sans jamais avoir été brouillé. La raison est détaillée dans le module, et le
 comportement est verrouillé par `lib/face-labels.test.js`.
+
+Tous les labels démarrent sur la même largeur brouillée : le max calculé des
+six (`scrambleBaseLength` dans `lib/scramble.js`), jamais écrit en dur — un
+libellé change, le max suit. Le surplus entoure le mot (moitié à gauche,
+moitié à droite) et s'éteint symétriquement par paires, du bord vers le mot,
+une fois les lettres résolues : le bloc se resserre sur son centre au lieu de
+sauter d'un côté. Un surplus impair est arrondi d'un cran (+1) pour garder des
+paires entières — les faces démarrent donc sur deux largeurs à un caractère
+près (8 et 9 aujourd'hui), parité oblige. Verrouillé par
+`lib/scramble-padding.test.js`.
 
 ### Modifier les couleurs
 
