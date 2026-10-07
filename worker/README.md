@@ -223,7 +223,7 @@ Le CV n'étant pas à jour, les formulations du parcours sont volontairement
 neutres :
 
 - « depuis mars 2025 » plutôt qu'une date limite ;
-- « pendant plusieurs dizaines d'années » plutôt qu'un compte d'années précis ;
+- « une solide carrière » plutôt qu'un compte d'années précis ;
 - aucune mention de recherche d'alternance ni de statut, qui daterait le
   document.
 
