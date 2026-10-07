@@ -13,6 +13,7 @@ import {
 } from "../lib/voice";
 import { uiFor } from "../lib/content/ui.js";
 import {
+  AudioWaveform,
   Loader2,
   MessageCircle,
   Mic,
@@ -315,6 +316,21 @@ export function ChatWidget({ lang }) {
   const canDictate = voiceReady && isRecognitionSupported();
   const canSpeak = voiceReady && isSynthesisSupported();
 
+  // Conversation mains libres : boucle écoute → envoi auto → lecture →
+  // ré-écoute, sans appui répété. `handsFree` est l'interrupteur visible ;
+  // `handsFreeRef` est son double synchrone, lu par les callbacks différés
+  // (`onresult`, `onend`) qui verraient sinon un état figé à leur création.
+  // `busyRef` et `requestReplyRef` jouent le même rôle pour `send` : son
+  // `finally` s'exécute après des `await`, et le state lu en closure y est
+  // périmé. Les deux voix sont exigées (voir `canHandsFree`) : sans lecture,
+  // le micro se rouvrirait sur un silence, et le visiteur parlerait dans le
+  // vide.
+  const [handsFree, setHandsFree] = useState(false);
+  const handsFreeRef = useRef(false);
+  const busyRef = useRef(false);
+  const requestReplyRef = useRef(null);
+  const canHandsFree = canDictate && canSpeak;
+
   // Le panneau et son lanceur flottent au-dessus des overlays, donc ils doivent
   // rester atteignables à la Tab pendant qu'un overlay modal est ouvert — sans
   // quoi le bouton serait visible à l'œil et hors d'atteinte au clavier. Voir
@@ -343,6 +359,9 @@ export function ChatWidget({ lang }) {
       // Démonter en pleine dictée ou lecture : arrêter les deux évite de
       // parler à un panneau qui n'existe plus. `speechSynthesis` est lu dans
       // le nettoyage, pas au rendu, pour ne jamais toucher `window` en SSR.
+      // La boucle mains libres s'éteint avec le panneau, même raison que
+      // `close` : pas de micro sans panneau visible.
+      handsFreeRef.current = false;
       try {
         dictationRef.current?.abort?.();
       } catch {}
@@ -358,7 +377,12 @@ export function ChatWidget({ lang }) {
     slotRef.current?.cancelCurrent();
     // Couper la dictée et la lecture à la fermeture : sans ça, la
     // transcription remplirait un panneau démonté et la voix continuerait
-    // de lire une bulle que le visiteur ne regarde plus.
+    // de lire une bulle que le visiteur ne regarde plus. La boucle mains
+    // libres s'éteint avec : rouvrir le panneau ne doit pas rouvrir le micro
+    // sans un geste explicite — un micro qui se rallume seul est un défaut de
+    // confidentialité, pas une commodité.
+    handsFreeRef.current = false;
+    setHandsFree(false);
     try {
       dictationRef.current?.abort?.();
     } catch {}
@@ -390,20 +414,39 @@ export function ChatWidget({ lang }) {
       }
     } catch {}
     setSpeaking(false);
+    // Effacer la conversation coupe aussi la boucle mains libres : la réponse
+    // que la boucle s'apprêtait à lire n'existe plus, et le micro rouvrirait
+    // sur un fil vide.
+    handsFreeRef.current = false;
+    setHandsFree(false);
+    try {
+      dictationRef.current?.abort?.();
+    } catch {}
+    setListening(false);
     setMessages([]);
     setError(null);
     setBusy(false);
+    busyRef.current = false;
+    requestReplyRef.current = null;
     setRetry(0);
     inputRef.current?.focus();
   }, []);
 
-  async function send(event) {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content || busy) return;
+  async function send(eventOrContent, maybeBusy) {
+    // Appelé depuis le formulaire (événement) ou depuis la boucle mains libres
+    // (chaîne). Le second argument n'existe que pour l'appel interne : il
+    // transmet l'état `busy` lu au moment du callback, pas celui figé dans la
+    // closure du `send` précédent.
+    const fromEvent = typeof eventOrContent?.preventDefault === "function";
+    if (fromEvent) eventOrContent.preventDefault();
+    const content = (fromEvent ? draft : eventOrContent).trim();
+    const isBusy = fromEvent ? busy : maybeBusy;
+    if (!content || isBusy) return;
 
     // La dictée s'arrête à l'envoi : garder le micro ouvert remplirait le
     // nouveau brouillon vide pendant que le visiteur croit parler à l'ancien.
+    // En mains libres aussi : c'est le `finally` qui relancera l'écoute après
+    // la lecture, pas la session qui vient de parler.
     try {
       dictationRef.current?.abort?.();
     } catch {}
@@ -415,6 +458,11 @@ export function ChatWidget({ lang }) {
     setDraft("");
     setError(null);
     setBusy(true);
+    busyRef.current = true;
+    // Supposée vide jusqu'à preuve du contraire : la boucle mains libres lit
+    // la réponse ici plutôt que dans `messages`, qu'elle ne peut pas lire
+    // sans closure périmée après les `await`.
+    requestReplyRef.current = null;
 
     const request = slotRef.current.begin();
 
@@ -428,14 +476,16 @@ export function ChatWidget({ lang }) {
             // Backoff croissant : laisse le temps au service de se rétablir
             // après un pic de charge, sans faire attendre un simple 400.
             await sleep(500 * attempt, request.signal);
-            // La tentative précédente a pu écrire des fragments avant d'échouer :
-            // on repart d'une bulle vide, sinon le texte partiel et la nouvelle
-            // réponse s'afficheraient collés l'un à l'autre.
+          // Réponse éventuellement écrite avant l'échec : on la jette, sinon
+            // le texte partiel et la nouvelle réponse s'afficheraient collés
+            // l'un à l'autre. La ref suit le même sort : elle ne doit porter
+            // que la réponse complète, jamais un fragment d'échec.
             setMessages((prev) =>
               prev[prev.length - 1]?.role === "assistant"
                 ? [...prev.slice(0, -1), { role: "assistant", content: "" }]
                 : prev,
             );
+            requestReplyRef.current = null;
             setRetry(attempt);
           }
 
@@ -495,6 +545,10 @@ export function ChatWidget({ lang }) {
           }
 
           const hasContent = await readStream(res.body, (delta) => {
+            requestReplyRef.current = {
+              ok: true,
+              text: `${requestReplyRef.current?.text ?? ""}${delta}`,
+            };
             setMessages((prev) => {
               const next = [...prev];
               const last = next[next.length - 1];
@@ -509,8 +563,12 @@ export function ChatWidget({ lang }) {
           // muette, sans erreur et sans aucun moyen de réessayer. On transforme
           // donc ce silence en relance : si le nouveau tirage répond, le trou est
           // invisible, et sinon l'erreur affichée plus bas est au moins une
-          // consigne claire plutôt qu'un vide.
-          if (!hasContent) throw emptyAnswerError(t);
+          // consigne claire plutôt qu'un vide. La ref est vidée avec, pour la
+          // même raison que la bulle ci-dessus : pas de lecture d'un fragment.
+          if (!hasContent) {
+            requestReplyRef.current = null;
+            throw emptyAnswerError(t);
+          }
 
           break; // Réponse reçue en entier : plus rien à relancer.
         } catch (err) {
@@ -562,12 +620,25 @@ export function ChatWidget({ lang }) {
       // déjà affiché suffit.
     } finally {
       setBusy(false);
+      busyRef.current = false;
       setRetry(0);
       // `finish()` ne libère la place et n'annule le délai que si cette requête
       // est encore la courante. C'est la propriété qui corrige la course : le
       // `finally` d'un envoi plus ancien ne peut ni voler le contrôleur d'un envoi
       // plus récent, ni annuler son délai.
       request.finish();
+      // Réponse complète (bulle non vide et pas d'erreur) : en mains libres,
+      // on la lit à voix haute, et c'est la fin de la lecture qui rouvre le
+      // micro. En cas d'échec, on rouvre directement : le visiteur doit pouvoir
+      // reformuler sans toucher à rien. `handsFreeRef` et non `handsFree` :
+      // ce `finally` s'exécute après des `await`, le state a pu changer entre
+      // temps — seule la ref dit si la boucle court encore.
+      if (handsFreeRef.current) {
+        const last = requestReplyRef.current;
+        requestReplyRef.current = null;
+        if (last?.ok && last?.text) speakReply(last.text, true);
+        else startHandsFreeListening();
+      }
     }
   }
 
@@ -575,17 +646,70 @@ export function ChatWidget({ lang }) {
   // arrive APRÈS tous les hooks : les mettre avant ferait dépendre le nombre de
   // hooks appelés d'une constante, ce qui casse la règle d'appel inconditionnel.
   //
-  // Les deux fonctions voix suivent pour la même raison : elles lisent `lang`
+  // Les fonctions voix suivent pour la même raison : elles lisent `lang`
   // via `t` déjà calculé, mais restent déclarées avant tout `return`.
+  /**
+   * Lit un texte à voix haute.
+   *
+   * Extrait de `toggleSpeech` : la boucle mains libres doit lire sans bascule,
+   * et `speakReply` partage avec `toggleSpeech` la construction de l'énoncé.
+   * `fromHandsFree` ne change que la fin : la lecture relance l'écoute, pour
+   * boucler sans appui. Le texte est nettoyé du Markdown avant lecture : sans
+   * ça, la voix épelle les `**` et les `#`.
+   *
+   * @param {string} html `content` de la bulle assistant.
+   * @param {boolean} [fromHandsFree] relancer l'écoute à la fin.
+   */
+  const speakReply = (html, fromHandsFree = false) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      // Synthèse absente en cours de boucle : on rouvre quand même le micro,
+      // pour que le visiteur puisse continuer à dicter plutôt que de rester
+      // bloqué sur un mode à moitié actif.
+      if (fromHandsFree) startHandsFreeListening();
+      return;
+    }
+    const synthesis = window.speechSynthesis;
+    const text = stripMarkdown(html ?? "");
+    if (!text) {
+      if (fromHandsFree) startHandsFreeListening();
+      return;
+    }
+    try {
+      synthesis.cancel();
+    } catch {}
+    const utterance = new window.SpeechSynthesisUtterance(text);
+    utterance.lang = speechLocale(lang);
+    const voice = pickVoice(synthesis.getVoices?.() ?? [], lang);
+    if (voice) utterance.voice = voice;
+    utterance.onend = () => {
+      setSpeaking(false);
+      if (fromHandsFree && handsFreeRef.current) startHandsFreeListening();
+    };
+    utterance.onerror = () => {
+      setSpeaking(false);
+      if (fromHandsFree && handsFreeRef.current) startHandsFreeListening();
+    };
+    try {
+      synthesis.speak(utterance);
+      setSpeaking(true);
+    } catch {
+      setSpeaking(false);
+      if (fromHandsFree && handsFreeRef.current) startHandsFreeListening();
+    }
+  };
+
   /**
    * Démarre ou coupe la dictée.
    *
    * La transcription ne fait que remplir le brouillon : le visiteur relit
    * puis envoie, par le circuit normal. `interimResults` garde la frappe en
-   * direct, `continuous` laisse le micro ouvert entre deux phrases.
+   * direct, `continuous` laisse le micro ouvert entre deux phrases. Couper la
+   * dictée manuelle coupe aussi la boucle mains libres : les deux partagent
+   * le micro, et un arrêt explicite vaut pour les deux.
    */
   const toggleDictation = () => {
     if (listening) {
+      stopHandsFree();
       try {
         dictationRef.current?.abort?.();
       } catch {}
@@ -643,7 +767,9 @@ export function ChatWidget({ lang }) {
    *
    * Le texte est nettoyé du Markdown avant lecture : sans ça, la voix épelle
    * les `**` et les `#`. La lecture est coupée avant d'en lancer une autre —
-   * une bulle ne parle jamais par-dessus la précédente.
+   * une bulle ne parle jamais par-dessus la précédente. Couper la lecture
+   * coupe aussi la boucle mains libres : c'est elle qui lisait, et un arrêt
+   * explicite vaut pour les deux.
    *
    * @param {string} html `content` de la bulle assistant.
    */
@@ -651,29 +777,137 @@ export function ChatWidget({ lang }) {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     const synthesis = window.speechSynthesis;
     if (speaking) {
+      stopHandsFree();
       try {
         synthesis.cancel();
       } catch {}
       setSpeaking(false);
       return;
     }
-    const text = stripMarkdown(html ?? "");
-    if (!text) return;
-    try {
-      synthesis.cancel();
-    } catch {}
-    const utterance = new window.SpeechSynthesisUtterance(text);
-    utterance.lang = speechLocale(lang);
-    const voice = pickVoice(synthesis.getVoices?.() ?? [], lang);
-    if (voice) utterance.voice = voice;
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
-    try {
-      synthesis.speak(utterance);
-      setSpeaking(true);
-    } catch {
-      setSpeaking(false);
+    speakReply(html);
+  };
+
+  /**
+   * Ouvre le micro pour un tour de boucle mains libres.
+   *
+   * Contrairement à la dictée manuelle, la session est à tir unique
+   * (`continuous: false`) : chaque pause du visiteur clôt un résultat final,
+   * qui part seul par le circuit normal. Un micro continu remplirait le
+   * brouillon sans jamais l'envoyer — la boucle attendrait un envoi qui ne
+   * viendrait pas. Le résultat final part avec `busyRef` lu au moment du
+   * callback, pas le `busy` figé de la closure, sinon un envoi en cours
+   * laisserait passer un doublon.
+   */
+  const startHandsFreeListening = () => {
+    if (!handsFreeRef.current) return;
+    const Ctor = getRecognitionCtor();
+    if (!Ctor) {
+      stopHandsFree();
+      return;
     }
+    try {
+      dictationRef.current?.abort?.();
+    } catch {}
+    const recognition = new Ctor();
+    dictationRef.current = recognition;
+    recognition.lang = speechLocale(lang);
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    // `maxAlternatives = 1` : la première hypothèse suffit, les suivantes ne
+    // serviraient qu'en cas de relecture manuelle, qu'on ne propose pas.
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      // Seul le résultat final part : les intermédiaires remplissent le
+      // brouillon en direct, pour que le visiteur voie ce qui est entendu.
+      let interim = "";
+      let final = "";
+      for (const result of event.results) {
+        const text = result[0]?.transcript ?? "";
+        if (result.isFinal) final += text;
+        else interim += text;
+      }
+      const heard = (final || interim).trim();
+      if (heard) setDraft(heard.slice(0, 4000));
+      if (final.trim()) send(final, busyRef.current);
+    };
+    recognition.onerror = (event) => {
+      // `not-allowed` = micro refusé : le seul cas qui mérite un message, car
+      // un bouton qui reste muet après un refus ressemble à une panne. Le mode
+      // s'arrête : relancer en boucle sur un refus afficherait le message à
+      // chaque tour sans jamais entendre personne.
+      if (event?.error === "not-allowed" || event?.error === "service-not-allowed") {
+        setError(t.voiceDenied);
+        stopHandsFree();
+        return;
+      }
+      // `no-speech` = silence, `aborted` = bascule vers l'envoi : la session
+      // est morte, mais la boucle ne l'est pas — `onend` la relancera.
+      setListening(false);
+    };
+    // `onend` suit chaque arrêt : fin de phrase, silence, envoi. Tant que la
+    // boucle court et qu'aucune requête n'est en vol, on rouvre le micro —
+    // c'est ce qui rend la conversation continue sans appui répété. Pendant
+    // l'envoi et la lecture, on ne rouvre rien : c'est le `finally` de `send`
+    // qui relancera après la réponse lue.
+    recognition.onend = () => {
+      setListening(false);
+      if (handsFreeRef.current && !busyRef.current) startHandsFreeListening();
+    };
+
+    try {
+      recognition.start();
+      setListening(true);
+      setError(null);
+    } catch {
+      // Micro déjà ouvert par un autre onglet, ou double appui rapide : on
+      // laisse la main à la session en cours, sans éteindre le mode.
+      setListening(false);
+    }
+  };
+
+  /**
+   * Coupe la boucle mains libres, micro et lecture compris.
+   *
+   * Le double `handsFree` / `handsFreeRef` s'éteint ensemble : le state pour
+   * le rendu, la ref pour les callbacks différés qui ne reverront jamais le
+   * nouveau state. `onend` et `utterance.onend` testent la ref, donc couper
+   * ici suffit à empêcher toute relance — aucun drapeau supplémentaire.
+   */
+  const stopHandsFree = () => {
+    handsFreeRef.current = false;
+    setHandsFree(false);
+    try {
+      dictationRef.current?.abort?.();
+    } catch {}
+    try {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+    setListening(false);
+    setSpeaking(false);
+  };
+
+  /**
+   * Bascule la boucle mains libres.
+   *
+   * À l'arrêt, tout s'éteint via `stopHandsFree`. Au démarrage, la dictée
+   * manuelle est coupée d'abord : les deux partagent le micro, et la boucle
+   * prend sa propre session à tir unique.
+   */
+  const toggleHandsFree = () => {
+    if (handsFreeRef.current) {
+      stopHandsFree();
+      return;
+    }
+    try {
+      dictationRef.current?.abort?.();
+    } catch {}
+    setListening(false);
+    handsFreeRef.current = true;
+    setHandsFree(true);
+    startHandsFreeListening();
   };
 
   if (!ENDPOINT) return null;
@@ -833,7 +1067,7 @@ export function ChatWidget({ lang }) {
                 placeholder={listening ? t.voiceListening : t.placeholder}
                 maxLength={4000}
                 autoComplete="off"
-                aria-describedby={listening ? "chat-voice-status" : undefined}
+                aria-describedby={listening || handsFree ? "chat-voice-status" : undefined}
                 className="min-w-0 flex-1 rounded-lg border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#7c8ca1] focus:border-[#00a5b0] focus:outline-none"
               />
               {/* Dictée : le bouton n'existe que si le navigateur sait
@@ -841,8 +1075,10 @@ export function ChatWidget({ lang }) {
                   affiché qui ne marche pas est pire qu'un micro absent. Le
                   texte remplit le brouillon, jamais envoyé directement : le
                   visiteur relit avant d'envoyer, et `close`/`send` coupent la
-                  session en cours. */}
-              {canDictate && (
+                  session en cours. Pendant la boucle mains libres, la dictée
+                  manuelle est masquée : les deux partagent le micro, et deux
+                  boutons d'écoute simultanés se disputeraient la même session. */}
+              {canDictate && !handsFree && (
                 <button
                   type="button"
                   onClick={toggleDictation}
@@ -858,6 +1094,25 @@ export function ChatWidget({ lang }) {
                   {listening ? <Square size={16} /> : <Mic size={16} />}
                 </button>
               )}
+              {/* Mains libres : le bouton n'existe que si le navigateur sait à
+                  la fois transcrire ET lire. Même règle que la dictée pour les
+                  autres — masqué, pas d'erreur. Un second appui coupe la
+                  boucle, micro et lecture compris. */}
+              {canHandsFree && (
+                <button
+                  type="button"
+                  onClick={toggleHandsFree}
+                  aria-label={handsFree ? t.voiceStopHandsFree : t.voiceHandsFree}
+                  aria-pressed={handsFree}
+                  className={
+                    handsFree
+                      ? "flex h-10 w-10 shrink-0 animate-pulse items-center justify-center rounded-lg bg-[#d900a8] text-white transition-colors duration-200 hover:bg-[#d900a8]/80"
+                      : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#1e293b] text-[#7c8ca1] transition-colors duration-200 hover:border-[#00a5b0] hover:text-[#00a5b0]"
+                  }
+                >
+                  {handsFree ? <Square size={16} /> : <AudioWaveform size={16} />}
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={!canSend}
@@ -869,11 +1124,16 @@ export function ChatWidget({ lang }) {
             </div>
             {/* Statut d'écoute annoncé aux lecteurs d'écran : sans lui, un
                 visiteur aveugle active le micro sans savoir s'il est entendu.
-                Rendu seulement en dictée pour ne pas polluer l'arbre sinon. */}
-            {listening && (
+                Rendu seulement en dictée pour ne pas polluer l'arbre sinon.
+                En mains libres, le statut dit que la boucle court : le micro
+                se rouvre seul après chaque réponse, et sans ce rappel le
+                visiteur croirait le micro coupé entre deux tours. */}
+            {(listening || handsFree) && (
               <p id="chat-voice-status" role="status" className="mt-2 flex items-center gap-1.5 text-[10px] leading-relaxed text-[#d900a8]">
-                <Mic size={12} aria-hidden="true" />
-                {t.voiceListening}
+                {handsFree
+                  ? <AudioWaveform size={12} aria-hidden="true" />
+                  : <Mic size={12} aria-hidden="true" />}
+                {handsFree ? t.voiceHandsFreeActive : t.voiceListening}
               </p>
             )}
             <p className="mt-2 text-[10px] leading-relaxed text-[#7c8ca1]">
