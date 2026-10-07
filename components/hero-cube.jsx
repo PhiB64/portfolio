@@ -84,9 +84,12 @@ import {
   DRAG_INERTIA_STOP_SPEED,
   DRAG_INERTIA_TAU_MS,
   capDragSpeed,
+  dragEaseFactor,
+  dragEaseMs,
   dragReleaseVelocity,
   dragSpeed,
   inertiaStep,
+  wrapDragOffset,
 } from "../lib/drag-inertia";
 import { computeCubeMetrics, needsOrientationLock } from "../lib/cube-viewport";
 import { sonarGeometry } from "../lib/cube-sonar";
@@ -116,10 +119,10 @@ const SNAP_THRESHOLD = 0.0005;
 // voir `TAIL_SCROLL_SMOOTHING_MS` et `TAIL_REVERSE_SCROLL_SMOOTHING_MS` dans
 // `lib/cube-tail.js`. Le parcours écrit, lui, garde les siennes ici, au-dessus :
 // 80 / 120 sur desktop, 60 / 100 sur mobile.
-// Durée du fondu qui ramène l'offset de rotation du drag à zéro quand le scroll
-// reprend : assez court pour « dé-poser » le cube vite, assez long pour ne pas
-// sauter d'un coup.
-const DRAG_EASE_MS = 450;
+// Le fondu qui ramène l'offset de rotation du drag à zéro quand le scroll
+// reprend vit dans `lib/drag-inertia.js` (`wrapDragOffset`, `dragEaseMs`,
+// `dragEaseFactor`) : 450 ms sous 90° d'amplitude, proportionnel au-delà à
+// 200°/s, plafonné à 1500 ms.
 // Durée du décodage d'un label de face : le brouillage se résout de gauche à
 // droite sur ce temps.
 // 1000 ms. La durée est celle de la TWEEN, pas le moment où le texte devient
@@ -356,10 +359,11 @@ export function HeroCube({ lang, title, subtitle, images = [] }) {
   // Rotation added by the user's direct drag, layered over the scroll-driven one.
   const dragOffsetRef = useRef({ rx: 0, ry: 0 });
   // Quand le scroll reprend après un drag, l'offset s'estompe vers zéro pour
-  // redonner la main à la piste : `dragEaseResetRef` arme le fondu, qui se
-  // déroule dans `tick` pendant le défilement.
-  const dragEaseResetRef = useRef(false);
-  const dragEaseStartRef = useRef(0);
+  // redonner la main à la piste : `dragEaseRef` porte l'offset figé à
+  // l'armement et la durée du fondu, et avance au `dt` de `tick` — jamais au
+  // temps mural, sinon une boucle garée à mi-fondu ferait sauter la suite.
+  // `null` = pas de fondu en cours.
+  const dragEaseRef = useRef(null);
   // Active pointer-drag session: { startX, startY, lastX, lastY, pointerType, moved }.
   const dragStateRef = useRef(null);
   // Glisse après relâchement : vitesse de rotation au lâcher, en deg/ms, qui
@@ -1881,12 +1885,16 @@ const sync = () => {
       // coupée net : le scroll reprend le cube où le doigt l'a laissé, il ne le
       // relance pas.
       dragInertiaRef.current = null;
+      // L'offset peut valoir des tours complets après un vrai geste au doigt :
+      // le fondu les effacerait en éclair à durée fixe. On les retire d'abord
+      // (identité : rien ne bouge à l'écran), puis on donne au reste une durée
+      // à sa mesure — voir `wrapDragOffset` / `dragEaseMs`.
       if (
-        !dragEaseResetRef.current &&
+        !dragEaseRef.current &&
         (dragOffsetRef.current.rx !== 0 || dragOffsetRef.current.ry !== 0)
       ) {
-        dragEaseResetRef.current = true;
-        dragEaseStartRef.current = performance.now();
+        const from = wrapDragOffset(dragOffsetRef.current);
+        dragEaseRef.current = { from, elapsed: 0, ms: dragEaseMs(from) };
       }
       // Tout scroll utilisateur annule l'override de révélation : le fondu de
       // fin peut reprendre la main dès que la position le redemande.
@@ -2468,7 +2476,8 @@ const sync = () => {
         Math.abs(diff) < SNAP_THRESHOLD &&
         Math.abs(tailTargetP - tailSmoothP) < SNAP_THRESHOLD &&
         !autoplay &&
-        !dragInertiaRef.current
+        !dragInertiaRef.current &&
+        !dragEaseRef.current
       ) {
         // The cube is at rest: park the loop.
         // `!autoplay` évite de garer pendant le scroll automatique : `targetP` y
@@ -2772,19 +2781,26 @@ const sync = () => {
           dragRy *= ease;
         }
       }
-      // Reprise du scroll après un drag : l'offset de rotation s'estompe vers
-      // zéro pendant le défilement pour réaligner faces et labels sur la piste.
-      if (dragEaseResetRef.current) {
-        const k = Math.min(
-          1,
-          Math.max(0, (performance.now() - dragEaseStartRef.current) / DRAG_EASE_MS),
-        );
-        const ease = 1 - k * k * (3 - 2 * k);
-        dragRx *= ease;
-        dragRy *= ease;
+      // Reprise du scroll après un drag : l'offset figé à l'armement s'estompe
+      // vers zéro pour réaligner faces et labels sur la piste. La durée est à
+      // la mesure de l'amplitude (`dragEaseMs`), et le pas avance au `dt` de la
+      // boucle : un fondu mural sauterait sa fin si la boucle se garait entre
+      // deux frames.
+      if (dragEaseRef.current) {
+        const ease = dragEaseRef.current;
+        ease.elapsed += dt;
+        const k = ease.ms > 0 ? Math.min(1, ease.elapsed / ease.ms) : 1;
+        const f = dragEaseFactor(k);
+        dragRx = ease.from.rx * f;
+        dragRy = ease.from.ry * f;
         if (k >= 1) {
-          dragEaseResetRef.current = false;
+          dragEaseRef.current = null;
           dragOffsetRef.current = { rx: 0, ry: 0 };
+        } else {
+          // La ref suit l'affiché : un nouveau geste part de la pose vue, et
+          // le parking ne fige pas un résidu désaligné. `from` reste figé —
+          // c'est l'origine du fondu, pas sa valeur courante.
+          dragOffsetRef.current = { rx: dragRx, ry: dragRy };
         }
       }
       if (tlP > SPIN_START) {
@@ -3063,8 +3079,7 @@ const sync = () => {
       dragOffsetRef.current = { rx: 0, ry: 0 };
       dragInertiaRef.current = null;
       dragSamplesRef.current = [];
-      dragEaseResetRef.current = false;
-      dragEaseStartRef.current = 0;
+      dragEaseRef.current = null;
       spinTourRef.current = null;
       bgResetRef.current = true;
       bgBaseRef.current = false;
@@ -3210,8 +3225,12 @@ const sync = () => {
       if (dragStateRef.current) return;
       if (!cubeDraggableRef.current) return;
       // Un nouveau geste coupe la glisse du précédent : le cube repart du
-      // doigt, il ne cumule pas deux vitesses.
+      // doigt, il ne cumule pas deux vitesses. Il coupe aussi le fondu de
+      // retour à la piste : l'offset affiché est déjà dans la ref (elle suit
+      // à chaque frame), le geste le reprend tel quel au lieu de se le voir
+      // écraser par la suite du fondu.
       dragInertiaRef.current = null;
+      dragEaseRef.current = null;
       dragSamplesRef.current = [{ t: e.timeStamp, rx: dragOffsetRef.current.rx, ry: dragOffsetRef.current.ry }];
       dragStateRef.current = {
         startX: e.clientX,
