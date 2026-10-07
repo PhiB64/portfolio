@@ -20,7 +20,10 @@
   --background: #0a0f1c;
   --foreground: #e2e8f0;
   --primary: #00a5b0;
-  --primary-foreground: #ffffff;
+  /* Texte sur fond cyan : blanc sur `#00a5b0` (3,00) sous le seuil AA (4,5),
+     sombre `#0a0f1c` sur `#00a5b0` (6,38) au-dessus. C'est déjà ce que portent
+     les boutons (cf. `TAB_ACTIVE`, bulles du chat) ; le token suit. */
+  --primary-foreground: #0a0f1c;
   --secondary: #d900a8;
   --secondary-foreground: #ffffff;
   --muted: #1e293b;

@@ -120,26 +120,37 @@ npm test           # une passe
 npm run test:watch # en continu
 ```
 
-Les tests couvrent `lib/` et le Worker — 322 tests, 17 fichiers :
+Les tests couvrent `lib/` et le Worker — 509 tests, 30 fichiers :
 
 | Module | Fichier de test | Ce qui est vérifié |
 |---|---|---|
 | `lib/cube-math.js` | `lib/cube-math.test.js` (58 tests) | la géométrie du cube (rotations, paliers de scroll, projection, hit-test) |
-| `lib/cube-finale.js` | `lib/cube-finale.test.js` (18 tests) | le contrat de temps de la fin : budgets d'animation, ordre des paliers, skip |
+| `lib/cube-finale.js` | `lib/cube-finale.test.js` (20 tests) | le contrat de temps de la fin : budgets d'animation, ordre des paliers, skip |
 | `lib/cube-timeline.js` | `lib/cube-timeline.test.js` (13 tests) | la construction de la chronologie des apparitions |
 | `lib/cube-tour.js` | `lib/cube-tour.test.js` (15 tests) | la tournée tirée au sort des faces |
 | `lib/cube-sonar.js` | `lib/cube-sonar.test.js` (10 tests) | la détection du survol et de la distance |
-| `lib/cube-viewport.js` | `lib/cube-viewport.test.js` (14 tests) | le contrat de fenêtre : métriques, orientation, verrouillage paysage |
+| `lib/cube-viewport.js` | `lib/cube-viewport.test.js` (15 tests) | le contrat de fenêtre : métriques, orientation, verrouillage paysage |
 | `lib/face-labels.js` | `lib/face-labels.test.js` (21 tests) | l'élection de la face dont le label se décode : seuil d'exposition, hystérésis, et le fait que **les six** labels passent par une phase codée |
 | `lib/leak-filter.js` | `lib/leak-filter.test.js` (30 tests) | le filtrage des fuites de modération sur un flux fragmenté |
 | `lib/device.js` | `lib/device.test.js` (11 tests) | la détection de capacité et de préférence |
 | `lib/reduced-motion.js` | `lib/reduced-motion.test.js` (6 tests) | la lecture de la préférence, y compris quand elle est absente |
 | `lib/scramble.js` | `lib/scramble-reduced-motion.test.js` (4 tests, jsdom) + `lib/scramble-padding.test.js` (12 tests, jsdom) | branche `cipher` + `prefers-reduced-motion` : image fixe sans boucle, `stopScramble(null)` no-op, décodage borné intact ; départ brouillé commun (max calculé des six, jamais en dur) et extinction symétrique du surplus par paires, du bord vers le mot |
-| `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (22 tests, jsdom) | piège de focus, Échap, restauration du focus |
+| `lib/use-dialog-focus.js` | `lib/use-dialog-focus.test.jsx` (26 tests, jsdom) | piège de focus, Échap, restauration du focus |
 | `lib/chat-request.js` | `lib/chat-request.test.jsx` (12 tests) | le cycle de vie d'une requête du chat : course sur le contrôleur d'annulation, délai, distinction fermeture / expiration |
 | `lib/contact-form.js` | `lib/contact-form.test.js` (18 tests) | les décisions d'envoi du formulaire : pot de miel, délai de remplissage, bornes de longueur |
 | `lib/contact-overlay.jsx` | `lib/contact-overlay.test.jsx` (9 tests, jsdom) | le câblage de ces décisions dans le composant : le piège est soumis, les bornes atteignent le HTML, un envoi automatique ne part pas |
 | `lib/chat-digest.js` | `lib/chat-digest.test.js` (29 tests) | la construction du digest du chatbot : troncature annoncée et coupée sur une fin de ligne, ordre des sections, exclusions volontaires |
+| `lib/cube-nav.jsx` | `lib/cube-nav-focus.test.jsx` (3 tests, jsdom) | le focus rendu par SKIP/RETOUR avant leur masquage, et le gabarit mobile de CONTACT aligné sur les onglets |
+| `lib/language-switcher.jsx` | `lib/language-switcher.test.jsx` (12 tests, jsdom) | la langue affichée, la destination conservée au changement, le nom accessible « Label in Name » |
+| `lib/site-routes.js` | `lib/site-routes.test.js` (22 tests) | le routage par langue : préfixe, conservation de la page, `localeHref` sans double préfixe |
+| `lib/voice.js` | `lib/voice.test.js` (14 tests) | la locale de synthèse et le choix de la voix par langue, y compris le repli |
+| `lib/content/ui.js` | `lib/content/ui.test.js` (12 tests) | la parité fr/en des libellés d'interface : mêmes clés dans le même ordre, pas de chaîne vide, pas de français résiduel |
+| `lib/content/` (éditorial) | `lib/content/parity.test.js` (8 tests) + `lib/content/content.test.js` (6 tests) | la parité fr/en du contenu et le chargement par langue |
+| `lib/drag-inertia.js` | `lib/drag-inertia.test.js` (19 tests) | la glisse du drag : vitesse au relâchement, plafond, décroissance, durée proportionnelle |
+| `lib/cube-tail.js` | `lib/cube-tail.test.js` (32 tests) | la géométrie de la piste, les paliers, le dénouement programmé, le lissage du scroll |
+| `components/hero-cube.jsx` + `lib/content/ui.js` | `lib/skip-link.test.js` (4 tests) | le lien d'évitement `#contenu` avant la section, la cible `id="contenu"`, le libellé traduit dans les deux langues |
+| `components/site-shell.jsx` + `components/projects-page.jsx` | `lib/chat-widget-placement.test.jsx` (5 tests, jsdom) | la présence du chatbot sur les quatre routes, une seule fois, au-dessus des overlays, avec voile mobile |
+| `worker/src/langue.js` | `worker/src/langue.test.js` (31 tests) | la détection de langue du Worker |
 | `worker/src/index.js` | `worker/src/index.test.js` (32 tests) | l'**ordre** des refus du Worker, la borne du flux, la reconstruction du prompt, et le traitement d'un refus amont |
 
 ### Ce que valent ces tests
@@ -188,10 +199,14 @@ documentent la propriété de sécurité, et pas seulement le code.
 
 Non testés : `lib/cube-media.js` (simple table + `faceSrcSet()`),
 `lib/portfolio-content.js` (données pures, sans logique), ainsi que
-`app/` et le reste de `components/` — `vitest.config.js` nomme explicitement
-`lib/` et `worker/src/` dans son `include`. Le seul composant monté par un test
-est `contact-overlay.jsx`, parce que c'est le seul dont la logique ait été
-extraite en un module testable.
+`app/` et l'essentiel de `components/` — `vitest.config.js` nomme explicitement
+`lib/` et `worker/src/` dans son `include`. Les composants montés par des tests
+sont ceux dont la logique a été extraite en un module testable
+(`contact-overlay.jsx` pour le formulaire, `cube-nav.jsx` pour le focus,
+`language-switcher.jsx` pour la langue), plus `SiteShell` + `ProjectsPage` pour
+la présence du chatbot ; les contrats trop couplés au DOM animé (`hero-cube.jsx`,
+lien d'évitement, ordre d'empilement) sont vérifiés par lecture de source, pas
+par montage — voir `chat-widget-placement.test.jsx` et `skip-link.test.jsx`.
 
 `scripts/build-chat-content.mjs` n'est plus dans cette liste : sa partie
 décisionnelle est dans `lib/chat-digest.js`, testée. Le script restant se limite
@@ -207,8 +222,10 @@ vérifiés par ces tests.
 
 Les fichiers sur DOM portent le pragma `// @vitest-environment jsdom` en tête
 (`vitest.config.js` reste en environnement `node` par défaut : le pragma n'est
-payé que par les fichiers qui en ont besoin). Trois d'entre eux ont en plus
-exigé `@testing-library/react` et le réglage JSX automatique du config.
+payé que par les fichiers qui en ont besoin). La plupart ont en plus
+exigé `@testing-library/react` et le réglage JSX automatique du config ;
+deux (`chat-widget-placement`, `skip-link`) lisent la source au lieu de monter,
+parce que le composant visé ne se monte pas sous jsdom.
 
 ## Déploiement
 
@@ -481,8 +498,17 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   fer du cube, icônes GitHub/LinkedIn), doublés par un texte adjacent.
 - **Contrastes.** Trois familles de texte échouaient au seuil AA (4,5:1) :
   `#64748b` sur fond sombre (4,02) est passé à `#7c8ca1` (5,58) ; le blanc sur le
-  cyan des boutons primaires (3,00) est passé au texte sombre `#0a0f1c` (6,38) ;
-  le placeholder du formulaire `#334155` (1,72) est passé à `#728296` (4,55).
+  cyan des boutons primaires (3,00) est passé au texte sombre `#0a0f1c` (6,38,
+  aujourd'hui porté par `--primary-foreground`) ; le placeholder du formulaire
+  `#334155` (1,72) est passé à `#728296` (4,55). Restent blancs sur fond sombre
+  les textes déjà au-dessus du seuil (19,13 pour le blanc pur) et la pastille
+  vocale du chat (blanc sur `#d900a8`, 4,65).
+- **Lien d'évitement.** Premier dans l'ordre de tabulation sur l'accueil, il mène
+  à `#contenu` (la section du cube) et n'apparaît qu'au focus clavier — sans
+  lui, un visiteur au clavier tabule SKIP, les six onglets et le cube avant tout
+  contenu. Le libellé est traduit (`nav.skipToContent`), comme la consigne de la
+  zone de clic du cube (`cube.cubeInstructions`), qui était restée en français
+  sur la page anglaise.
 - Le titre de la page d'accueil est un `<text>` SVG, non exposé aux lecteurs
   d'écran : un `<h1 class="sr-only">` est posé dans `app/(en)/page.js`.
 - **Ce qui reste à faire.** Le verrou d'orientation est un `alertdialog` sans

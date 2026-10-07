@@ -3433,8 +3433,25 @@ const sync = () => {
 
   return (
     <>
+      {/* Lien d'évitement : premier dans l'ordre de tabulation, il mène au
+          contenu principal. Une page sans repaire ni lien d'évitement oblige un
+          visiteur au clavier à tabuler SKIP, les six onglets et le cube avant
+          tout contenu — le cube étant un `role="button"` piloté au scroll, pas
+          une navigation. Le lien n'apparaît qu'au focus clavier (`:focus`
+          suffit : un pointeur ne le déclenche jamais), d'où le `sr-only` qui le
+          sort du visuel sans le sortir de la tabulation.
+
+          `href="#contenu"` sans routeur : un vrai lien d'ancrage, qui
+          fonctionne sans JavaScript et ne déclenche aucune navigation Next. */}
+      <a
+        href="#contenu"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[110] focus:rounded-full focus:bg-[#0a0f1c] focus:px-4 focus:py-2 focus:text-sm focus:text-[#00a5b0] focus:outline-none focus:ring-2 focus:ring-[#00a5b0]"
+      >
+        {uiFor(lang).nav.skipToContent}
+      </a>
       <section
         ref={sectionRef}
+        id="contenu"
         className="relative z-10 h-[calc(var(--svh))] overflow-y-auto overflow-x-hidden scroll-none"
         // Verrou d'orientation OU overlay ouvert : le contenu du cube devient
         // alors inerte. `aria-hidden` seul ne suffit pas — il sort l'arbre
@@ -3674,7 +3691,7 @@ const sync = () => {
                       onKeyDown={handleCubeKeyDown}
                       role="button"
                       tabIndex={0}
-                      aria-label="Cube de compétences. Faites défiler pour le faire tourner, puis appuyez sur Entrée pour ouvrir la face tournée vers vous."
+                      aria-label={uiFor(lang).cube.cubeInstructions}
                       className="absolute cursor-grab"
                       style={{
                         zIndex: 10,
