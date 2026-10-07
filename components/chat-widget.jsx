@@ -4,8 +4,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useEscapeKey, useFocusExempt } from "../lib/use-dialog-focus";
 import { createLeakFilter } from "../lib/leak-filter";
 import { createRequestSlot } from "../lib/chat-request";
+import {
+  getRecognitionCtor,
+  isRecognitionSupported,
+  isSynthesisSupported,
+  pickVoice,
+  speechLocale,
+} from "../lib/voice";
 import { uiFor } from "../lib/content/ui.js";
-import { Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
+import {
+  Loader2,
+  MessageCircle,
+  Mic,
+  RotateCcw,
+  Send,
+  Square,
+  Volume2,
+  X,
+} from "lucide-react";
 
 /**
  * URL du Worker proxy (voir `worker/`). Volontairement absente du dépôt : tant
@@ -284,6 +300,21 @@ export function ChatWidget({ lang }) {
   const launcherRef = useRef(null);
   const panelRef = useRef(null);
 
+  // Voix gratuite (Web Speech API), dictée et lecture.
+  //
+  // Le `supported` n'est lu qu'au rendu : ce sont des booléens figés au
+  // montage, pas un état React. En SSR `window` n'existe pas, les fonctions
+  // de `lib/voice.js` rendent donc `false` et les boutons restent masqués —
+  // jamais d'erreur, jamais de micro muet. Au montage, le state force un
+  // second rendu avec les vraies capacités du navigateur.
+  const [voiceReady, setVoiceReady] = useState(false);
+  const dictationRef = useRef(null);
+  const dictateBaseRef = useRef("");
+  const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const canDictate = voiceReady && isRecognitionSupported();
+  const canSpeak = voiceReady && isSynthesisSupported();
+
   // Le panneau et son lanceur flottent au-dessus des overlays, donc ils doivent
   // rester atteignables à la Tab pendant qu'un overlay modal est ouvert — sans
   // quoi le bouton serait visible à l'œil et hors d'atteinte au clavier. Voir
@@ -302,12 +333,42 @@ export function ChatWidget({ lang }) {
     if (open) inputRef.current?.focus();
   }, [open]);
 
-  // Referme le panneau sans laisser la requête en vol : le visiteur emporte
-  // sinon la génération avec lui, pour rien. Le délai part avec.
-  useEffect(() => () => slotRef.current?.cancelCurrent(), []);
+  // Révèle les boutons voix après le montage : `window` n'existe qu'au
+  // navigateur, et Firefox n'expose pas `SpeechRecognition`. Sans ce second
+  // rendu, le micro resterait masqué même sur Chrome ; sans la détection, il
+  // s'afficherait muet sur Firefox.
+  useEffect(() => {
+    setVoiceReady(true);
+    return () => {
+      // Démonter en pleine dictée ou lecture : arrêter les deux évite de
+      // parler à un panneau qui n'existe plus. `speechSynthesis` est lu dans
+      // le nettoyage, pas au rendu, pour ne jamais toucher `window` en SSR.
+      try {
+        dictationRef.current?.abort?.();
+      } catch {}
+      try {
+        if (typeof window !== "undefined" && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+      } catch {}
+    };
+  }, []);
 
   const close = useCallback(() => {
     slotRef.current?.cancelCurrent();
+    // Couper la dictée et la lecture à la fermeture : sans ça, la
+    // transcription remplirait un panneau démonté et la voix continuerait
+    // de lire une bulle que le visiteur ne regarde plus.
+    try {
+      dictationRef.current?.abort?.();
+    } catch {}
+    try {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+    setListening(false);
+    setSpeaking(false);
     setOpen(false);
     // Le champ de saisie est démonté avec le panneau : sans ça le focus tombe
     // sur `body` et le clavier repart du haut de la page. On le rend au bouton
@@ -323,6 +384,12 @@ export function ChatWidget({ lang }) {
 
   const reset = useCallback(() => {
     slotRef.current?.cancelCurrent();
+    try {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+    setSpeaking(false);
     setMessages([]);
     setError(null);
     setBusy(false);
@@ -334,6 +401,13 @@ export function ChatWidget({ lang }) {
     event.preventDefault();
     const content = draft.trim();
     if (!content || busy) return;
+
+    // La dictée s'arrête à l'envoi : garder le micro ouvert remplirait le
+    // nouveau brouillon vide pendant que le visiteur croit parler à l'ancien.
+    try {
+      dictationRef.current?.abort?.();
+    } catch {}
+    setListening(false);
 
     const history = [...messages, { role: "user", content }];
     // Bulle vide réservée à la réponse en cours, remplie delta par delta.
@@ -500,6 +574,108 @@ export function ChatWidget({ lang }) {
   // Le panneau ne s'affiche pas si le Worker n'est pas configuré. Le retour
   // arrive APRÈS tous les hooks : les mettre avant ferait dépendre le nombre de
   // hooks appelés d'une constante, ce qui casse la règle d'appel inconditionnel.
+  //
+  // Les deux fonctions voix suivent pour la même raison : elles lisent `lang`
+  // via `t` déjà calculé, mais restent déclarées avant tout `return`.
+  /**
+   * Démarre ou coupe la dictée.
+   *
+   * La transcription ne fait que remplir le brouillon : le visiteur relit
+   * puis envoie, par le circuit normal. `interimResults` garde la frappe en
+   * direct, `continuous` laisse le micro ouvert entre deux phrases.
+   */
+  const toggleDictation = () => {
+    if (listening) {
+      try {
+        dictationRef.current?.abort?.();
+      } catch {}
+      setListening(false);
+      return;
+    }
+    const Ctor = getRecognitionCtor();
+    if (!Ctor) return;
+    const recognition = new Ctor();
+    dictationRef.current = recognition;
+    dictateBaseRef.current = draft;
+    recognition.lang = speechLocale(lang);
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    // `maxAlternatives = 1` : la première hypothèse suffit, les suivantes ne
+    // serviraient qu'en cas de relecture manuelle, qu'on ne propose pas.
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      // Le moteur renvoie la session entière à chaque fragment : on repart
+      // donc du brouillon d'avant la dictée, pas du précédent `onresult`,
+      // sinon chaque phrase se dupliquerait à chaque nouveau mot.
+      let transcript = "";
+      for (const result of event.results) transcript += result[0]?.transcript ?? "";
+      transcript = transcript.trim();
+      const base = dictateBaseRef.current ? `${dictateBaseRef.current} ` : "";
+      setDraft(`${base}${transcript}`.slice(0, 4000));
+    };
+    recognition.onerror = (event) => {
+      // `not-allowed` = micro refusé : le seul cas qui mérite un message, car
+      // un bouton qui reste muet après un refus ressemble à une panne.
+      if (event?.error === "not-allowed" || event?.error === "service-not-allowed") {
+        setError(t.voiceDenied);
+      }
+      setListening(false);
+    };
+    // `onend` suit chaque arrêt, volontaire ou non : Chrome coupe la session
+    // au silence, ce qui éteindrait le micro sans éteindre le bouton.
+    recognition.onend = () => setListening(false);
+
+    try {
+      recognition.start();
+      setListening(true);
+      setError(null);
+    } catch {
+      // Micro déjà ouvert par un autre onglet, ou double appui rapide : le
+      // bouton reste dans son état, aucun message, la session en cours garde
+      // la main.
+      setListening(false);
+    }
+  };
+
+  /**
+   * Lit une réponse à voix haute, ou coupe la lecture en cours.
+   *
+   * Le texte est nettoyé du Markdown avant lecture : sans ça, la voix épelle
+   * les `**` et les `#`. La lecture est coupée avant d'en lancer une autre —
+   * une bulle ne parle jamais par-dessus la précédente.
+   *
+   * @param {string} html `content` de la bulle assistant.
+   */
+  const toggleSpeech = (html) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const synthesis = window.speechSynthesis;
+    if (speaking) {
+      try {
+        synthesis.cancel();
+      } catch {}
+      setSpeaking(false);
+      return;
+    }
+    const text = stripMarkdown(html ?? "");
+    if (!text) return;
+    try {
+      synthesis.cancel();
+    } catch {}
+    const utterance = new window.SpeechSynthesisUtterance(text);
+    utterance.lang = speechLocale(lang);
+    const voice = pickVoice(synthesis.getVoices?.() ?? [], lang);
+    if (voice) utterance.voice = voice;
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    try {
+      synthesis.speak(utterance);
+      setSpeaking(true);
+    } catch {
+      setSpeaking(false);
+    }
+  };
+
   if (!ENDPOINT) return null;
 
   const canSend = draft.trim().length > 0 && !busy;
@@ -604,9 +780,31 @@ export function ChatWidget({ lang }) {
                           </span>
                         </span>
                       ) : (
-                        <span className="whitespace-pre-wrap break-words">
-                          {isUser ? message.content : stripMarkdown(message.content)}
-                        </span>
+                        <>
+                          <span className="whitespace-pre-wrap break-words">
+                            {isUser ? message.content : stripMarkdown(message.content)}
+                          </span>
+                          {/* Lecture vocale : chaque réponse de l'assistant porte
+                              son bouton, car c'est la seule unité de lecture qui
+                              a du sens — lire toute la conversation d'un coup
+                              relirait les questions du visiteur. Masqué sans
+                              support (Firefox sans synthèse) et pendant la
+                              génération, où la bulle n'est pas encore complète
+                              et la voix lirait un texte tronqué. */}
+                          {!isUser && canSpeak && !lastIsPending && message.content && (
+                            <span className="mt-1 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => toggleSpeech(message.content)}
+                                aria-label={speaking ? t.stopReading : t.listen}
+                                aria-pressed={speaking}
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-[#7c8ca1] transition-colors duration-200 hover:bg-[#00a5b0]/10 hover:text-[#00a5b0]"
+                              >
+                                {speaking ? <Square size={14} /> : <Volume2 size={14} />}
+                              </button>
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                   </li>
@@ -632,11 +830,34 @@ export function ChatWidget({ lang }) {
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder={t.placeholder}
+                placeholder={listening ? t.voiceListening : t.placeholder}
                 maxLength={4000}
                 autoComplete="off"
+                aria-describedby={listening ? "chat-voice-status" : undefined}
                 className="min-w-0 flex-1 rounded-lg border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#7c8ca1] focus:border-[#00a5b0] focus:outline-none"
               />
+              {/* Dictée : le bouton n'existe que si le navigateur sait
+                  transcrire. Aucun message d'erreur pour les autres — un micro
+                  affiché qui ne marche pas est pire qu'un micro absent. Le
+                  texte remplit le brouillon, jamais envoyé directement : le
+                  visiteur relit avant d'envoyer, et `close`/`send` coupent la
+                  session en cours. */}
+              {canDictate && (
+                <button
+                  type="button"
+                  onClick={toggleDictation}
+                  disabled={busy}
+                  aria-label={listening ? t.voiceStopDictation : t.voiceDictate}
+                  aria-pressed={listening}
+                  className={
+                    listening
+                      ? "flex h-10 w-10 shrink-0 animate-pulse items-center justify-center rounded-lg bg-[#d900a8] text-white transition-colors duration-200 hover:bg-[#d900a8]/80 disabled:cursor-not-allowed disabled:opacity-30"
+                      : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#1e293b] text-[#7c8ca1] transition-colors duration-200 hover:border-[#00a5b0] hover:text-[#00a5b0] disabled:cursor-not-allowed disabled:opacity-30"
+                  }
+                >
+                  {listening ? <Square size={16} /> : <Mic size={16} />}
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={!canSend}
@@ -646,6 +867,15 @@ export function ChatWidget({ lang }) {
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
               </button>
             </div>
+            {/* Statut d'écoute annoncé aux lecteurs d'écran : sans lui, un
+                visiteur aveugle active le micro sans savoir s'il est entendu.
+                Rendu seulement en dictée pour ne pas polluer l'arbre sinon. */}
+            {listening && (
+              <p id="chat-voice-status" role="status" className="mt-2 flex items-center gap-1.5 text-[10px] leading-relaxed text-[#d900a8]">
+                <Mic size={12} aria-hidden="true" />
+                {t.voiceListening}
+              </p>
+            )}
             <p className="mt-2 text-[10px] leading-relaxed text-[#7c8ca1]">
               {t.disclaimer}
             </p>
