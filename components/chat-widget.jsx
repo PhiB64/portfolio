@@ -8,6 +8,7 @@ import {
   getRecognitionCtor,
   isRecognitionSupported,
   isSynthesisSupported,
+  isStopCommand,
   pickVoice,
   speakableText,
   speechLocale,
@@ -833,6 +834,13 @@ export function ChatWidget({ lang }) {
       }
       const heard = (final || interim).trim();
       if (heard) setDraft(heard.slice(0, 4000));
+      // Ordre d'arrêt vocal : dire `stop` coupe la boucle au lieu d'être
+      // envoyé au modèle. Exact seulement — « parle-moi du stop du cube »
+      // contient le mot sans être un ordre et part normalement.
+      if (final.trim() && isStopCommand(final, lang)) {
+        stopHandsFree();
+        return;
+      }
       if (final.trim()) send(final, busyRef.current);
     };
     recognition.onerror = (event) => {
