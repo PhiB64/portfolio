@@ -3506,7 +3506,15 @@ const sync = () => {
           aria-label={uiFor(lang).cube.reload}
         >
           <img
-            src={`${BASE}/icon.webp`}
+            src={`${BASE}/icon-160.webp`}
+            // LCP mobile : ce logo est le seul élément image du premier écran
+            // (le reste est du SVG animé en JS). `fetchPriority` propage la
+            // priorité au `<link rel="preload">` que Next génère pour lui, et la
+            // variante 160 px (×2 du plus grand affichage, 80 px desktop)
+            // remplace le 512 px servi avant.
+            fetchPriority="high"
+            width={48}
+            height={48}
             alt=""
             className="h-12 w-12 sm:h-20 sm:w-20 rounded-2xl object-cover"
           />
