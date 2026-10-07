@@ -303,7 +303,7 @@ export function ChatWidget({ lang }) {
   const launcherRef = useRef(null);
   const panelRef = useRef(null);
 
-  // Voix gratuite (Web Speech API), dictée et lecture.
+  // Voix gratuite (Web Speech API), mains libres et lecture.
   //
   // Le `supported` n'est lu qu'au rendu : ce sont des booléens figés au
   // montage, pas un état React. En SSR `window` n'existe pas, les fonctions
@@ -312,26 +312,10 @@ export function ChatWidget({ lang }) {
   // second rendu avec les vraies capacités du navigateur.
   const [voiceReady, setVoiceReady] = useState(false);
   const dictationRef = useRef(null);
-  const dictateBaseRef = useRef("");
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
-  const canDictate = voiceReady && isRecognitionSupported();
   const canSpeak = voiceReady && isSynthesisSupported();
-
-  // Conversation mains libres : boucle écoute → envoi auto → lecture →
-  // ré-écoute, sans appui répété. `handsFree` est l'interrupteur visible ;
-  // `handsFreeRef` est son double synchrone, lu par les callbacks différés
-  // (`onresult`, `onend`) qui verraient sinon un état figé à leur création.
-  // `busyRef` et `requestReplyRef` jouent le même rôle pour `send` : son
-  // `finally` s'exécute après des `await`, et le state lu en closure y est
-  // périmé. Les deux voix sont exigées (voir `canHandsFree`) : sans lecture,
-  // le micro se rouvrirait sur un silence, et le visiteur parlerait dans le
-  // vide.
-  const [handsFree, setHandsFree] = useState(false);
-  const handsFreeRef = useRef(false);
-  const busyRef = useRef(false);
-  const requestReplyRef = useRef(null);
-  const canHandsFree = canDictate && canSpeak;
+  const canHandsFree = voiceReady && isRecognitionSupported() && canSpeak;
 
   // Le panneau et son lanceur flottent au-dessus des overlays, donc ils doivent
   // rester atteignables à la Tab pendant qu'un overlay modal est ouvert — sans
@@ -358,7 +342,7 @@ export function ChatWidget({ lang }) {
   useEffect(() => {
     setVoiceReady(true);
     return () => {
-      // Démonter en pleine dictée ou lecture : arrêter les deux évite de
+      // Démonter en pleine reconnaissance ou lecture : arrêter les deux évite de
       // parler à un panneau qui n'existe plus. `speechSynthesis` est lu dans
       // le nettoyage, pas au rendu, pour ne jamais toucher `window` en SSR.
       // La boucle mains libres s'éteint avec le panneau, même raison que
@@ -377,7 +361,7 @@ export function ChatWidget({ lang }) {
 
   const close = useCallback(() => {
     slotRef.current?.cancelCurrent();
-    // Couper la dictée et la lecture à la fermeture : sans ça, la
+    // Couper la reconnaissance et la lecture à la fermeture : sans ça, la
     // transcription remplirait un panneau démonté et la voix continuerait
     // de lire une bulle que le visiteur ne regarde plus. La boucle mains
     // libres s'éteint avec : rouvrir le panneau ne doit pas rouvrir le micro
@@ -451,7 +435,7 @@ export function ChatWidget({ lang }) {
     const fromHandsFree = fromEvent ? false : maybeHandsFree === true;
     if (!content || isBusy) return;
 
-    // La dictée s'arrête à l'envoi : garder le micro ouvert remplirait le
+    // La reconnaissance s'arrête à l'envoi : garder le micro ouvert remplirait le
     // nouveau brouillon vide pendant que le visiteur croit parler à l'ancien.
     // En mains libres aussi : c'est le `finally` qui relancera l'écoute après
     // la lecture, pas la session qui vient de parler.
@@ -713,70 +697,6 @@ export function ChatWidget({ lang }) {
   };
 
   /**
-   * Démarre ou coupe la dictée.
-   *
-   * La transcription ne fait que remplir le brouillon : le visiteur relit
-   * puis envoie, par le circuit normal. `interimResults` garde la frappe en
-   * direct, `continuous` laisse le micro ouvert entre deux phrases. Couper la
-   * dictée manuelle coupe aussi la boucle mains libres : les deux partagent
-   * le micro, et un arrêt explicite vaut pour les deux.
-   */
-  const toggleDictation = () => {
-    if (listening) {
-      stopHandsFree();
-      try {
-        dictationRef.current?.abort?.();
-      } catch {}
-      setListening(false);
-      return;
-    }
-    const Ctor = getRecognitionCtor();
-    if (!Ctor) return;
-    const recognition = new Ctor();
-    dictationRef.current = recognition;
-    dictateBaseRef.current = draft;
-    recognition.lang = speechLocale(lang);
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    // `maxAlternatives = 1` : la première hypothèse suffit, les suivantes ne
-    // serviraient qu'en cas de relecture manuelle, qu'on ne propose pas.
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event) => {
-      // Le moteur renvoie la session entière à chaque fragment : on repart
-      // donc du brouillon d'avant la dictée, pas du précédent `onresult`,
-      // sinon chaque phrase se dupliquerait à chaque nouveau mot.
-      let transcript = "";
-      for (const result of event.results) transcript += result[0]?.transcript ?? "";
-      transcript = transcript.trim();
-      const base = dictateBaseRef.current ? `${dictateBaseRef.current} ` : "";
-      setDraft(`${base}${transcript}`.slice(0, 4000));
-    };
-    recognition.onerror = (event) => {
-      // `not-allowed` = micro refusé : le seul cas qui mérite un message, car
-      // un bouton qui reste muet après un refus ressemble à une panne.
-      if (event?.error === "not-allowed" || event?.error === "service-not-allowed") {
-        setError(t.voiceDenied);
-      }
-      setListening(false);
-    };
-    // `onend` suit chaque arrêt, volontaire ou non : Chrome coupe la session
-    // au silence, ce qui éteindrait le micro sans éteindre le bouton.
-    recognition.onend = () => setListening(false);
-
-    try {
-      recognition.start();
-      setListening(true);
-      setError(null);
-    } catch {
-      // Micro déjà ouvert par un autre onglet, ou double appui rapide : le
-      // bouton reste dans son état, aucun message, la session en cours garde
-      // la main.
-      setListening(false);
-    }
-  };
-
-  /**
    * Lit une réponse à voix haute, ou coupe la lecture en cours.
    *
    * Le texte est nettoyé du Markdown avant lecture : sans ça, la voix épelle
@@ -805,14 +725,14 @@ export function ChatWidget({ lang }) {
   /**
    * Ouvre le micro pour un tour de boucle mains libres.
    *
-   * Contrairement à la dictée manuelle, la session est à tir unique
-   * (`continuous: false`) : chaque pause du visiteur clôt un résultat final,
-   * qui part seul par le circuit normal. Un micro continu remplirait le
-   * brouillon sans jamais l'envoyer — la boucle attendrait un envoi qui ne
-   * viendrait pas. Le résultat final part avec `busyRef` lu au moment du
-   * callback, pas le `busy` figé de la closure, sinon un envoi en cours
-   * laisserait passer un doublon. Le `true` final dit à `send` que l'envoi
-   * est vocal : le Worker ajoute la consigne de brièveté orale.
+   * La session est à tir unique (`continuous: false`) : chaque pause du
+   * visiteur clôt un résultat final, qui part seul par le circuit normal.
+   * Un micro continu remplirait le brouillon sans jamais l'envoyer — la
+   * boucle attendrait un envoi qui ne viendrait pas. Le résultat final part
+   * avec `busyRef` lu au moment du callback, pas le `busy` figé de la
+   * closure, sinon un envoi en cours laisserait passer un doublon. Le `true`
+   * final dit à `send` que l'envoi est vocal : le Worker ajoute la consigne
+   * de brièveté orale.
    */
   const startHandsFreeListening = () => {
     if (!handsFreeRef.current) return;
@@ -915,8 +835,8 @@ export function ChatWidget({ lang }) {
   /**
    * Bascule la boucle mains libres.
    *
-   * À l'arrêt, tout s'éteint via `stopHandsFree`. Au démarrage, la dictée
-   * manuelle est coupée d'abord : les deux partagent le micro, et la boucle
+   * À l'arrêt, tout s'éteint via `stopHandsFree`. Au démarrage, toute
+   * session de reconnaissance en cours est coupée : la boucle mains libres
    * prend sa propre session à tir unique.
    */
   const toggleHandsFree = () => {
@@ -1087,40 +1007,15 @@ export function ChatWidget({ lang }) {
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder={listening ? t.voiceListening : t.placeholder}
+                placeholder={t.placeholder}
                 maxLength={4000}
                 autoComplete="off"
-                aria-describedby={listening || handsFree ? "chat-voice-status" : undefined}
+                aria-describedby={handsFree ? "chat-voice-status" : undefined}
                 className="min-w-0 flex-1 rounded-lg border border-[#1e293b] bg-[#0a0f1c] px-3 py-2 text-sm text-[#e2e8f0] placeholder:text-[#7c8ca1] focus:border-[#00a5b0] focus:outline-none"
               />
-              {/* Dictée : le bouton n'existe que si le navigateur sait
-                  transcrire. Aucun message d'erreur pour les autres — un micro
-                  affiché qui ne marche pas est pire qu'un micro absent. Le
-                  texte remplit le brouillon, jamais envoyé directement : le
-                  visiteur relit avant d'envoyer, et `close`/`send` coupent la
-                  session en cours. Pendant la boucle mains libres, la dictée
-                  manuelle est masquée : les deux partagent le micro, et deux
-                  boutons d'écoute simultanés se disputeraient la même session. */}
-              {canDictate && !handsFree && (
-                <button
-                  type="button"
-                  onClick={toggleDictation}
-                  disabled={busy}
-                  aria-label={listening ? t.voiceStopDictation : t.voiceDictate}
-                  aria-pressed={listening}
-                  className={
-                    listening
-                      ? "flex h-10 w-10 shrink-0 animate-pulse items-center justify-center rounded-lg bg-[#d900a8] text-white transition-colors duration-200 hover:bg-[#d900a8]/80 disabled:cursor-not-allowed disabled:opacity-30"
-                      : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#1e293b] text-[#7c8ca1] transition-colors duration-200 hover:border-[#00a5b0] hover:text-[#00a5b0] disabled:cursor-not-allowed disabled:opacity-30"
-                  }
-                >
-                  {listening ? <Square size={16} /> : <Mic size={16} />}
-                </button>
-              )}
               {/* Mains libres : le bouton n'existe que si le navigateur sait à
-                  la fois transcrire ET lire. Même règle que la dictée pour les
-                  autres — masqué, pas d'erreur. Un second appui coupe la
-                  boucle, micro et lecture compris. */}
+                  la fois transcrire ET lire. Masqué sans support — pas d'erreur.
+                  Un second appui coupe la boucle, micro et lecture compris. */}
               {canHandsFree && (
                 <button
                   type="button"
@@ -1133,7 +1028,7 @@ export function ChatWidget({ lang }) {
                       : "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#1e293b] text-[#7c8ca1] transition-colors duration-200 hover:border-[#00a5b0] hover:text-[#00a5b0]"
                   }
                 >
-                  {handsFree ? <Square size={16} /> : <AudioWaveform size={16} />}
+                  {handsFree ? <Square size={16} /> : <Mic size={16} />}
                 </button>
               )}
               <button
@@ -1147,16 +1042,13 @@ export function ChatWidget({ lang }) {
             </div>
             {/* Statut d'écoute annoncé aux lecteurs d'écran : sans lui, un
                 visiteur aveugle active le micro sans savoir s'il est entendu.
-                Rendu seulement en dictée pour ne pas polluer l'arbre sinon.
                 En mains libres, le statut dit que la boucle court : le micro
                 se rouvre seul après chaque réponse, et sans ce rappel le
                 visiteur croirait le micro coupé entre deux tours. */}
-            {(listening || handsFree) && (
+            {handsFree && (
               <p id="chat-voice-status" role="status" className="mt-2 flex items-center gap-1.5 text-[10px] leading-relaxed text-[#d900a8]">
-                {handsFree
-                  ? <AudioWaveform size={12} aria-hidden="true" />
-                  : <Mic size={12} aria-hidden="true" />}
-                {handsFree ? t.voiceHandsFreeActive : t.voiceListening}
+                <Mic size={12} aria-hidden="true" />
+                {t.voiceHandsFreeActive}
               </p>
             )}
             <p className="mt-2 text-[10px] leading-relaxed text-[#7c8ca1]">
