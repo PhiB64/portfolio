@@ -15,7 +15,6 @@ import {
 } from "../lib/voice";
 import { uiFor } from "../lib/content/ui.js";
 import {
-  AudioWaveform,
   Loader2,
   MessageCircle,
   Mic,
@@ -312,8 +311,12 @@ export function ChatWidget({ lang }) {
   // second rendu avec les vraies capacités du navigateur.
   const [voiceReady, setVoiceReady] = useState(false);
   const dictationRef = useRef(null);
-  const [listening, setListening] = useState(false);
+  const [_listening, setListening] = useState(false); // eslint-disable-line no-unused-vars
   const [speaking, setSpeaking] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
+  const handsFreeRef = useRef(false);
+  const busyRef = useRef(false);
+  const requestReplyRef = useRef(null);
   const canSpeak = voiceReady && isSynthesisSupported();
   const canHandsFree = voiceReady && isRecognitionSupported() && canSpeak;
 
