@@ -9,6 +9,7 @@ import {
   isRecognitionSupported,
   isSynthesisSupported,
   pickVoice,
+  speakableText,
   speechLocale,
 } from "../lib/voice";
 import { uiFor } from "../lib/content/ui.js";
@@ -655,7 +656,9 @@ export function ChatWidget({ lang }) {
    * et `speakReply` partage avec `toggleSpeech` la construction de l'énoncé.
    * `fromHandsFree` ne change que la fin : la lecture relance l'écoute, pour
    * boucler sans appui. Le texte est nettoyé du Markdown avant lecture : sans
-   * ça, la voix épelle les `**` et les `#`.
+   * ça, la voix épelle les `**` et les `#`. `speakableText` corrige ensuite
+   * deux prononciations (`CV` lu « chevaux », `@` lu « at ») : l'affichage
+   * garde le texte d'origine, seule la voix entend la version corrigée.
    *
    * @param {string} html `content` de la bulle assistant.
    * @param {boolean} [fromHandsFree] relancer l'écoute à la fin.
@@ -669,7 +672,7 @@ export function ChatWidget({ lang }) {
       return;
     }
     const synthesis = window.speechSynthesis;
-    const text = stripMarkdown(html ?? "");
+    const text = speakableText(stripMarkdown(html ?? ""), lang);
     if (!text) {
       if (fromHandsFree) startHandsFreeListening();
       return;
@@ -766,7 +769,8 @@ export function ChatWidget({ lang }) {
    * Lit une réponse à voix haute, ou coupe la lecture en cours.
    *
    * Le texte est nettoyé du Markdown avant lecture : sans ça, la voix épelle
-   * les `**` et les `#`. La lecture est coupée avant d'en lancer une autre —
+   * les `**` et les `#`. `speakableText` corrige ensuite deux prononciations
+   * (`CV` lu « chevaux », `@` lu « at »). La lecture est coupée avant d'en lancer une autre —
    * une bulle ne parle jamais par-dessus la précédente. Couper la lecture
    * coupe aussi la boucle mains libres : c'est elle qui lisait, et un arrêt
    * explicite vaut pour les deux.
