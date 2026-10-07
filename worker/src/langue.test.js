@@ -437,9 +437,9 @@ describe("intégrité des consignes systeme", () => {
     expect(await promptFor("en")).toContain("Philippe is the developer");
   });
 
-  it("chacune interdit d'inventer une adresse absente du contenu", async () => {
-    expect(await promptFor("fr")).toContain("n'en fabrique pas");
-    expect(await promptFor("en")).toContain("do not invent one");
+  it("chacune interdit d'écrire une adresse", async () => {
+    expect(await promptFor("fr")).toContain("tu ne les écris jamais");
+    expect(await promptFor("en")).toContain("you never write them");
   });
 
   it("ne laisse passer aucune consigne systeme venue du client", async () => {
