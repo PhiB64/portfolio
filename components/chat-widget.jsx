@@ -434,15 +434,21 @@ export function ChatWidget({ lang }) {
     inputRef.current?.focus();
   }, []);
 
-  async function send(eventOrContent, maybeBusy) {
+  async function send(eventOrContent, maybeBusy, maybeHandsFree) {
     // Appelé depuis le formulaire (événement) ou depuis la boucle mains libres
     // (chaîne). Le second argument n'existe que pour l'appel interne : il
     // transmet l'état `busy` lu au moment du callback, pas celui figé dans la
-    // closure du `send` précédent.
+    // closure du `send` précédent. Le troisième dit si l'envoi vient du mains
+    // libres : le Worker ajoute alors une consigne de brièveté orale (l'essentiel
+    // + renvoi vers la page, pas de détails lus à voix haute).
     const fromEvent = typeof eventOrContent?.preventDefault === "function";
     if (fromEvent) eventOrContent.preventDefault();
     const content = (fromEvent ? draft : eventOrContent).trim();
     const isBusy = fromEvent ? busy : maybeBusy;
+    // Depuis le formulaire, le mains libres ne change rien à l'envoi : seul
+    // l'envoi vocal demande la version courte. `handsFreeRef` et non
+    // `handsFree` : après des `await`, le state en closure est périmé.
+    const fromHandsFree = fromEvent ? false : maybeHandsFree === true;
     if (!content || isBusy) return;
 
     // La dictée s'arrête à l'envoi : garder le micro ouvert remplirait le
@@ -514,6 +520,10 @@ export function ChatWidget({ lang }) {
             headers: { "Content-Type": "application/json", "X-Chat-Lang": lang },
             body: JSON.stringify({
               lang,
+              // `handsfree: true` seulement sur l'envoi vocal : le Worker y
+              // ajoute une consigne de brièveté orale. `false` ou absent à
+              // l'écrit — la réponse complète reste la bonne quand on relit.
+              ...(fromHandsFree ? { handsfree: true } : {}),
               messages: history.slice(-HISTORY_LIMIT).map(({ role, content: text }) => ({
                 role,
                 content: text,
@@ -801,7 +811,8 @@ export function ChatWidget({ lang }) {
    * brouillon sans jamais l'envoyer — la boucle attendrait un envoi qui ne
    * viendrait pas. Le résultat final part avec `busyRef` lu au moment du
    * callback, pas le `busy` figé de la closure, sinon un envoi en cours
-   * laisserait passer un doublon.
+   * laisserait passer un doublon. Le `true` final dit à `send` que l'envoi
+   * est vocal : le Worker ajoute la consigne de brièveté orale.
    */
   const startHandsFreeListening = () => {
     if (!handsFreeRef.current) return;
@@ -841,7 +852,7 @@ export function ChatWidget({ lang }) {
         stopHandsFree();
         return;
       }
-      if (final.trim()) send(final, busyRef.current);
+      if (final.trim()) send(final, busyRef.current, true);
     };
     recognition.onerror = (event) => {
       // `not-allowed` = micro refusé : le seul cas qui mérite un message, car

@@ -282,6 +282,23 @@ GitHub repositories may follow between their own markers. They are fresher than 
  */
 
 /**
+ * Consigne ajoutée au system prompt pour une réponse lue à voix haute.
+ *
+ * Le mains libres lit la réponse en entier : sans consigne, le modèle donne
+ * le même niveau de détail qu'à l'écrit, et la lecture s'éternise. La consigne
+ * ne tronque rien — elle demande au modèle une réponse courte qui renvoie vers
+ * la page du site concernée, dans la langue du prompt (rédigée ici dans les
+ * deux langues, pas traduite à la volée).
+ *
+ * Le renvoi nomme la destination, jamais l'adresse : c'est la même règle que
+ * le reste du prompt (« nomme la destination sans écrire son adresse »).
+ */
+const HANDSFREE_NOTES = {
+  fr: "La réponse sera lue à voix haute : donne l'essentiel en une ou deux phrases, sans entrer dans les détails, puis renvoie vers la page du site concernée en la nommant (rubrique, onglet, projet) sans jamais écrire son adresse.",
+  en: "The answer will be read aloud: give the essentials in one or two sentences, without going into detail, then point to the relevant page of the site by naming it (section, tab, project) without ever writing its address.",
+};
+
+/**
  * Délai de validité du digest en cache.
  *
  * Le contenu du site ne bouge qu'à chaque déploiement, mais un cache plus long
@@ -671,14 +688,28 @@ function traduireLangage(language, lang) {
  * `MAX_CHARS` : il ne doit mordre que si le build et le Worker divergent, ce
  * qui est précisément le cas qu'il couvre.
  *
+ * En mains libres (`handsfree`), la consigne `HANDSFREE_NOTES` s'ajoute : la
+ * réponse sera lue à voix haute, le modèle donne l'essentiel et renvoie vers
+ * la page du site plutôt que de détailler.
+ *
  * @param {string} digest
  * @param {string|null} github
+ * @param {string} lang
+ * @param {boolean} [handsfree]
  * @returns {string}
  */
 const MAX_PROMPT_CHARS = 16000 + 6000;
 
-function buildSystemPrompt(digest, github, lang) {
+function buildSystemPrompt(digest, github, lang, handsfree = false) {
   let prompt = SYSTEM_PROMPTS[lang] ?? SYSTEM_PROMPTS[WORKER_DEFAULT_LANG];
+
+  // Consigne de brièveté orale, dans la langue du prompt : elle s'adresse au
+  // modèle, une consigne dans l'autre langue serait du bruit au milieu des
+  // garde-fous. Ignorée hors mains libres — à l'écrit le visiteur relit, la
+  // réponse complète reste la bonne.
+  if (handsfree) {
+    prompt += `\n\n${HANDSFREE_NOTES[lang] ?? HANDSFREE_NOTES[WORKER_DEFAULT_LANG]}`;
+  }
 
   if (digest) {
     let body = digest;
@@ -1271,7 +1302,12 @@ export default {
     // dans le seul cas où on n'appellera aucun modèle.
     const github = await getGithubDigest(env, bodyLang);
 
-    const systemPrompt = buildSystemPrompt(digest, github, bodyLang);
+    // `handsfree` est un booléen strict, pas une valeur de vérité : un client
+    // qui envoie `"false"` ou `1` n'obtient pas la consigne orale. Seul `true`
+    // l'active — c'est une indication de confort, pas un droit, et elle ne
+    // change que le ton de la réponse, jamais son contenu.
+    const handsfree = body?.handsfree === true;
+    const systemPrompt = buildSystemPrompt(digest, github, bodyLang, handsfree);
     // Le system prompt est reconstruit ici, jamais repris du client.
     const history = [{ role: "system", content: systemPrompt }, ...messages.messages];
 

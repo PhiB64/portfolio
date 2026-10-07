@@ -560,3 +560,42 @@ describe("requête sortante", () => {
     expect(payload.error).not.toContain("503");
   });
 });
+
+describe("consigne mains libres", () => {
+  // Le `handsfree` du corps est une indication de confort : à `true`, le
+  // system prompt demande l'essentiel en une ou deux phrases + renvoi vers la
+  // page, sans détails lus à voix haute. Absent ou non booléen, rien ne change.
+  const systemOf = (body, headers = FR) => firstOpenRouterBody(post(body, headers), makeEnv()).then((sent) => sent.messages[0].content);
+
+  it("ajoute la consigne orale quand le corps porte handsfree: true", async () => {
+    const prompt = await systemOf({
+      handsfree: true,
+      messages: [{ role: "user", content: "Bonjour" }],
+    });
+
+    expect(prompt).toContain("lue à voix haute");
+    expect(prompt).toContain("renvoie vers la page du site");
+  });
+
+  it("ne change rien sans handsfree, à false, ou non booléen", async () => {
+    for (const body of [
+      { messages: [{ role: "user", content: "Bonjour" }] },
+      { handsfree: false, messages: [{ role: "user", content: "Bonjour" }] },
+      { handsfree: "true", messages: [{ role: "user", content: "Bonjour" }] },
+      { handsfree: 1, messages: [{ role: "user", content: "Bonjour" }] },
+    ]) {
+      const prompt = await systemOf(body);
+      expect(prompt, JSON.stringify(body)).not.toContain("voix haute");
+    }
+  });
+
+  it("rédige la consigne orale en anglais sur la page anglaise", async () => {
+    const prompt = await firstOpenRouterBody(
+      post({ handsfree: true, messages: [{ role: "user", content: "Hello" }] }),
+      makeEnv(),
+    ).then((sent) => sent.messages[0].content);
+
+    expect(prompt).toContain("read aloud");
+    expect(prompt).not.toContain("voix haute");
+  });
+});
