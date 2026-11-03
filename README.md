@@ -16,9 +16,9 @@ que chaque variante soit indexable et partageable telle quelle.
 | URL | Langue |
 |---|---|
 | `/` | Français — la langue par défaut |
-| `/page` | Français, page texte |
+| `/projects` | Français, page texte |
 | `/en` | Anglais |
-| `/en/page` | Anglais, page texte |
+| `/en/projects` | Anglais, page texte |
 
 Trois points à connaître avant d'y toucher.
 
@@ -37,8 +37,8 @@ Trois points à connaître avant d'y toucher.
   défaut. Les deux constantes diverger désactiverait ce chemin sans lever la
   moindre erreur.
 
-Les anciennes URL françaises `/fr` et `/fr/page` sont conservées par des
-pages statiques, `public/fr.html` et `public/fr/page.html`, que le build
+Les anciennes URL françaises `/fr` et `/fr/projects` sont conservées par des
+pages statiques, `public/fr.html` et `public/fr/projects.html`, que le build
 copie telles quelles dans `dist/` : elles sont déjà partagées, indexées et
 citées. `output: "export"` n'applique pas les `redirects` de
 `next.config.mjs` — Next.js le signale à chaque build — donc une page HTML avec
@@ -71,7 +71,7 @@ fonctionne mais le signal SEO est plus faible qu'un vrai redirigé.
 - Responsive design (mobile, tablette, desktop)
 - Gestion des événements tactiles et pointer
 - SEO optimisé (metadata, Open Graph, JSON-LD)
-- Version textuelle indexable des rubriques (`/page`), sans contenu dupliqué
+- Version textuelle indexable des rubriques (`/projects`), sans contenu dupliqué
 - Déploiement automatique sur GitHub Pages
 
 ## Démarrage
@@ -287,14 +287,14 @@ normalement, simplement sans bouton de chat.
   deux produisent la même `AbortError`, et sans cette distinction une panne du
   service s'affichait comme un geste du visiteur, donc en silence.
 
-## Version textuelle (`/page`)
+## Version textuelle (`/projects`)
 
 Le contenu des six rubriques ne vit que dans des boîtes de dialogue rendues par
 un composant client. Le HTML servi ne contenait donc aucun mot de contenu
 éditorial : un moteur de recherche n'indexait qu'un titre, un nom et six
 mots-clés.
 
-`app/(fr)/page/page.jsx` est la version en texte, pré-rendue au build. Deux
+`app/(fr)/projects/page.jsx` est la version en texte, pré-rendue au build. Deux
 contraintes ont guidé sa conception.
 
 **Elle n'a pas de source de contenu propre.** Elle appelle
@@ -314,11 +314,11 @@ Deux détails qui ne sont pas visibles à la lecture du code :
 - La page a **son propre** conteneur de défilement (`fixed inset-0 overflow-y-auto`)
   parce que `globals.css` verrouille `html, body` pour que la section du cube soit
   le seul scroller. Réutiliser le verrou existant plutôt que le desserrer.
-- Le lien vers `/page` est dans un `<noscript>` sur la page d'accueil, parce
+- Le lien vers `/projects` est dans un `<noscript>` sur la page d'accueil, parce
   que c'est le seul endroit du HTML servi où il peut figurer sans trouer la mise
   en page du cube. Il y fait une vraie alternative, pas un lien caché : le cube
   exige JavaScript, donc sans lui la page d'accueil est vide.
-- Il n'y a **pas** de lien vers `/page` dans `contact-overlay.jsx`, et il ne
+- Il n'y a **pas** de lien vers `/projects` dans `contact-overlay.jsx`, et il ne
   faut pas en ajouter un. Son HTML n'est pas servi au moment du crawl (il ne se
   construit qu'à l'ouverture du panneau), et le `<noscript>` couvre déjà le
   cas sans JavaScript — un second lien n'apporterait rien au visiteur. Le garder
@@ -332,12 +332,12 @@ portfolio/
 │   ├── (fr)/                 # Français : la langue par défaut, donc à la racine
 │   │   ├── layout.js         # Layout racine FR (<html lang="fr">)
 │   │   ├── page.js           # /            Page d'accueil (HeroCube + ChatWidget)
-│   │   └── page/             # /page
+│   │   └── projects/         # /projects
 │   ├── (en)/                 # Anglais : préfixé, donc sous /en
 │   │   ├── layout.js         # Layout racine EN (<html lang="en">)
 │   │   └── en/
 │   │       ├── page.js       # /en
-│   │       └── page/         # /en/page
+│   │       └── projects/     # /en/projects
 │   ├── globals.css           # Styles globaux et thème
 │   ├── sitemap.js            # sitemap.xml, entry point
 │   └── manifest.js           # Manifeste PWA

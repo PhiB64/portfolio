@@ -35,9 +35,9 @@ export const dynamic = "force-static";
 
 // Le contenu de chaque page est identique d'une langue à l'autre : mêmes
 // rubriques, mêmes projets. Seule la racine se distingue vraiment, le cube
-// restant l'expérience principale — `/page` n'en est que la transcription
+// restant l'expérience principale — `/projects` n'en est que la transcription
 // textuelle pour les moteurs.
-const PRIORITY = { "/": 1, "/page": 0.8 };
+const PRIORITY = { "/": 1, "/projects": 0.8 };
 
 export default function sitemap() {
   const lastModified = new Date();

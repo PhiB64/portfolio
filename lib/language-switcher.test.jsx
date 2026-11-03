@@ -77,8 +77,8 @@ function texteVisible(lien) {
 const NAVIGATION = [
   ["fr", "/", "/en"],
   ["en", "/en", "/"],
-  ["fr", "/page", "/en/page"],
-  ["en", "/en/page", "/page"],
+  ["fr", "/projects", "/en/projects"],
+  ["en", "/en/projects", "/projects"],
 ];
 
 describe("langue affichée", () => {
