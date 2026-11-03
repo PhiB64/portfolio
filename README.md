@@ -15,10 +15,10 @@ que chaque variante soit indexable et partageable telle quelle.
 
 | URL | Langue |
 |---|---|
-| `/` | Anglais — la langue par défaut |
-| `/projects` | Anglais, page texte |
-| `/fr` | Français |
-| `/fr/projects` | Français, page texte |
+| `/` | Français — la langue par défaut |
+| `/page` | Français, page texte |
+| `/en` | Anglais |
+| `/en/page` | Anglais, page texte |
 
 Trois points à connaître avant d'y toucher.
 
@@ -28,19 +28,19 @@ Trois points à connaître avant d'y toucher.
   priorité du sitemap et le digest de repli du chat. Changer de langue par
   défaut se fait donc à un seul endroit.
 - **Chaque langue a son layout racine.** `<html lang>` est un attribut du
-  document : il ne peut pas être posé plus bas. D'où `app/(en)/layout.js` et
-  `app/(fr)/layout.js`, tous deux rendus par `components/site-shell.jsx`. Le
+  document : il ne peut pas être posé plus bas. D'où `app/(fr)/layout.js` et
+  `app/(en)/layout.js`, tous deux rendus par `components/site-shell.jsx`. Le
   nom du groupe n'apparaît jamais dans l'URL — c'est lui qui permet à `/` d'être
-  anglais et `/fr` français sans que l'arborescence n'impose l'un ou l'autre.
+  français et `/en` anglais sans que l'arborescence n'impose l'un ou l'autre.
 - **`WORKER_DEFAULT_LANG` doit suivre `DEFAULT_LOCALE`.** Le Worker est déployé
   indépendamment, mais il ne lit la clé `digest` de repli que pour sa langue par
   défaut. Les deux constantes diverger désactiverait ce chemin sans lever la
   moindre erreur.
 
-Les anciennes URL anglaises `/en` et `/en/projects` sont conservées par des
-pages statiques, `public/en.html` et `public/en/projects.html`, que le build
+Les anciennes URL françaises `/fr` et `/fr/page` sont conservées par des
+pages statiques, `public/fr.html` et `public/fr/page.html`, que le build
 copie telles quelles dans `dist/` : elles sont déjà partagées, indexées et
-citées dans le CV. `output: "export"` n'applique pas les `redirects` de
+citées. `output: "export"` n'applique pas les `redirects` de
 `next.config.mjs` — Next.js le signale à chaque build — donc une page HTML avec
 un `<meta http-equiv="refresh">` est le seul mécanisme disponible sur un
 hébergeur sans serveur. GitHub Pages ne sert pas de HTTP 301, donc le lien
@@ -71,7 +71,7 @@ fonctionne mais le signal SEO est plus faible qu'un vrai redirigé.
 - Responsive design (mobile, tablette, desktop)
 - Gestion des événements tactiles et pointer
 - SEO optimisé (metadata, Open Graph, JSON-LD)
-- Version textuelle indexable des rubriques (`/projects`), sans contenu dupliqué
+- Version textuelle indexable des rubriques (`/page`), sans contenu dupliqué
 - Déploiement automatique sur GitHub Pages
 
 ## Démarrage
@@ -287,14 +287,14 @@ normalement, simplement sans bouton de chat.
   deux produisent la même `AbortError`, et sans cette distinction une panne du
   service s'affichait comme un geste du visiteur, donc en silence.
 
-## Version textuelle (`/projects`)
+## Version textuelle (`/page`)
 
 Le contenu des six rubriques ne vit que dans des boîtes de dialogue rendues par
 un composant client. Le HTML servi ne contenait donc aucun mot de contenu
 éditorial : un moteur de recherche n'indexait qu'un titre, un nom et six
 mots-clés.
 
-`app/(en)/projects/page.jsx` est la version en texte, pré-rendue au build. Deux
+`app/(fr)/page/page.jsx` est la version en texte, pré-rendue au build. Deux
 contraintes ont guidé sa conception.
 
 **Elle n'a pas de source de contenu propre.** Elle appelle
@@ -314,11 +314,11 @@ Deux détails qui ne sont pas visibles à la lecture du code :
 - La page a **son propre** conteneur de défilement (`fixed inset-0 overflow-y-auto`)
   parce que `globals.css` verrouille `html, body` pour que la section du cube soit
   le seul scroller. Réutiliser le verrou existant plutôt que le desserrer.
-- Le lien vers `/projects` est dans un `<noscript>` sur la page d'accueil, parce
+- Le lien vers `/page` est dans un `<noscript>` sur la page d'accueil, parce
   que c'est le seul endroit du HTML servi où il peut figurer sans trouer la mise
   en page du cube. Il y fait une vraie alternative, pas un lien caché : le cube
   exige JavaScript, donc sans lui la page d'accueil est vide.
-- Il n'y a **pas** de lien vers `/projects` dans `contact-overlay.jsx`, et il ne
+- Il n'y a **pas** de lien vers `/page` dans `contact-overlay.jsx`, et il ne
   faut pas en ajouter un. Son HTML n'est pas servi au moment du crawl (il ne se
   construit qu'à l'ouverture du panneau), et le `<noscript>` couvre déjà le
   cas sans JavaScript — un second lien n'apporterait rien au visiteur. Le garder
@@ -329,15 +329,15 @@ Deux détails qui ne sont pas visibles à la lecture du code :
 ```
 portfolio/
 ├── app/                      # Pages et layout Next.js
-│   ├── (en)/                 # Anglais : la langue par défaut, donc à la racine
-│   │   ├── layout.js         # Layout racine EN (<html lang="en">)
-│   │   ├── page.js           # /            Page d'accueil (HeroCube + ChatWidget)
-│   │   └── projects/         # /projects
-│   ├── (fr)/                 # Français : préfixé, donc sous /fr
+│   ├── (fr)/                 # Français : la langue par défaut, donc à la racine
 │   │   ├── layout.js         # Layout racine FR (<html lang="fr">)
-│   │   └── fr/
-│   │       ├── page.js       # /
-│   │       └── projects/     # /fr/projects
+│   │   ├── page.js           # /            Page d'accueil (HeroCube + ChatWidget)
+│   │   └── page/             # /page
+│   ├── (en)/                 # Anglais : préfixé, donc sous /en
+│   │   ├── layout.js         # Layout racine EN (<html lang="en">)
+│   │   └── en/
+│   │       ├── page.js       # /en
+│   │       └── page/         # /en/page
 │   ├── globals.css           # Styles globaux et thème
 │   ├── sitemap.js            # sitemap.xml, entry point
 │   └── manifest.js           # Manifeste PWA
@@ -398,7 +398,7 @@ portfolio/
 
 Les médias des six faces sont définis dans **`lib/cube-media.js`** (constante
 `FACE_MEDIA`), dans l'ordre de `FACE_LABELS`. Cette liste est la source unique :
-`app/(en)/page.js` la passe au cube, et `components/hero-cube.jsx` s'en sert de
+`app/(fr)/page.js` la passe au cube, et `components/hero-cube.jsx` s'en sert de
 repli si la prop `images` est vide.
 
 L'appariement se fait sur le nom de fichier : correspondance exacte du nom sans
@@ -510,7 +510,7 @@ Le thème est défini dans `app/globals.css` via les variables CSS (`--primary`,
   zone de clic du cube (`cube.cubeInstructions`), qui était restée en français
   sur la page anglaise.
 - Le titre de la page d'accueil est un `<text>` SVG, non exposé aux lecteurs
-  d'écran : un `<h1 class="sr-only">` est posé dans `app/(en)/page.js`.
+  d'écran : un `<h1 class="sr-only">` est posé dans `app/(fr)/page.js`.
 - **Ce qui reste à faire.** Le verrou d'orientation est un `alertdialog` sans
   contrôle focusable : il est annoncé au focus, mais rien ne permet de le fermer
   au clavier, ce qui est correct — il n'a pas de fermeture, seulement une

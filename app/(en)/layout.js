@@ -9,6 +9,8 @@
  *
  * Ce fichier ne contient donc volontairement que le nom de la langue. Toute la
  * différence est dans `components/site-shell.jsx` et `lib/site-metadata.js`.
+ *
+ * L'anglais n'est plus la langue par défaut : il est préfixé par `/en`.
  */
 
 import "../globals.css";

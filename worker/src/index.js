@@ -348,8 +348,8 @@ const digestCaches = {
  * défaut. Les deux constantes diverger, et ce serait invisible : le chemin
  * legacy cesserait de fonctionner sans qu'aucune erreur ne soit levée.
  */
-const WORKER_DEFAULT_LANG = "en";
-const WORKER_LANGS = ["en", "fr"];
+const WORKER_DEFAULT_LANG = "fr";
+const WORKER_LANGS = ["fr", "en"];
 
 /**
  * En-tête qui porte la langue de la page.

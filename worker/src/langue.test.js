@@ -8,15 +8,15 @@
  * décisions invisibles, dont trois peuvent casser en silence :
  *
  * 1. la langue vient de la requête, pas du texte de la question. Un visiteur
- *    anglophone qui écrit en français sur la page anglaise attend une réponse en
- *    anglais ; déduire la langue de la question produit l'inverse de la
+ *    francophone qui écrit en anglais sur la page française attend une réponse en
+ *    français ; déduire la langue de la question produit l'inverse de la
  *    convention, et une conversation qui change de langue d'un tour à l'autre ;
  * 2. la langue est connue **avant** les rejets précoces. Un `lang` dans le corps
  *    arrive trop tard pour traduire un refus d'origine ou de méthode, et c'est
  *    précisément à ces moments-là que le visiteur ne parle pas la langue du
  *    serveur ;
- * 3. le digest suit la langue. Un prompt anglais nourri d'un digest français
- *    produit un assistant qui cite des intitulés français et se contredit ;
+ * 3. le digest suit la langue. Un prompt français nourri d'un digest anglais
+ *    produit un assistant qui cite des intitulés anglais et se contredit ;
  * 4. un site et un Worker se déploient séparément. Le premier doit donc encore
  *    parler au second.
  *
@@ -47,9 +47,9 @@ const EN_DIGEST = "DIGEST_ENGLISH Philippe Barbosa is a full stack developer.";
  *
  * `digest` porte la langue par défaut, comme le Worker l'attend : c'est la
  * forme qu'il lit quand la forme `digests` n'existe pas encore. Elle vaut donc
- * l'anglais, et non le français.
+ * le français, et non l'anglais.
  */
-const FULL = { digest: EN_DIGEST, digests: { en: EN_DIGEST, fr: FR_DIGEST } };
+const FULL = { digest: FR_DIGEST, digests: { en: EN_DIGEST, fr: FR_DIGEST } };
 
 /**
  * Une instance neuve du Worker, cache vide.
@@ -135,18 +135,19 @@ describe("langue du system prompt", () => {
     expect(prompt).not.toContain("Tu es l'assistant de Philippe Barbosa");
   });
 
-  it("répond en anglais par défaut", async () => {
+  it("répond en français par défaut", async () => {
     // Absence d'en-tête : c'est le cas d'un `curl` de test, d'un ancien client, et
-    // du repli de sécurité. L'anglais est la langue par défaut du site, donc c'est
+    // du repli de sécurité. Le français est la langue par défaut du site, donc c'est
     // elle qui doit répondre.
     const prompt = await captureSystemPrompt(FULL);
-    expect(prompt).toContain("You are Philippe Barbosa's assistant");
+    expect(prompt).toContain("Tu es l'assistant de Philippe Barbosa");
+    expect(prompt).not.toContain("You are Philippe Barbosa's assistant");
   });
 
-  it("replie sur l'anglais pour une langue non livrée", async () => {
+  it("replie sur le français pour une langue non livrée", async () => {
     for (const lang of ["de", "DE", "fr-FR", "", "javascript"]) {
       const prompt = await captureSystemPrompt(FULL, { [LANG_HEADER]: lang });
-      expect(prompt, `langue « ${lang} »`).toContain("You are Philippe Barbosa's assistant");
+      expect(prompt, `langue « ${lang} »`).toContain("Tu es l'assistant de Philippe Barbosa");
     }
   });
 
@@ -250,14 +251,14 @@ describe("messages d'erreur traduits", () => {
   // corps, donc la seule source de langue disponible est l'en-tête. C'est aussi
   // le cas le plus fréquent en pratique, puisque le navigateur envoie toujours
   // Origin — c'est le corps qui peut manquer, pas l'origine.
-  it("répond en anglais à un refus d'origine, sans en-tête de langue", async () => {
+  it("répond en français à un refus d'origine, sans en-tête de langue", async () => {
     const worker = await freshWorker();
     const response = await worker.fetch(
       post(undefined, { Origin: "https://ailleurs.example" }),
       makeEnv(),
     );
     expect(response.status).toBe(403);
-    expect((await response.json()).error).toBe("Origin not allowed.");
+    expect((await response.json()).error).toBe("Origine non autorisée.");
   });
 
   it("traduit le refus d'origine quand la page est en français", async () => {
@@ -366,8 +367,8 @@ describe("repli sans digest", () => {
     return chunks.join("");
   }
 
-  it("se lit en anglais par défaut", async () => {
-    expect(await fallbackText({})).toContain("isn't available right now");
+  it("se lit en français par défaut", async () => {
+    expect(await fallbackText({})).toContain("Le détail du portfolio n'est pas disponible");
   });
 
   it("se lit en français sur la page française", async () => {
@@ -394,8 +395,8 @@ describe("repli sans digest", () => {
 
 describe("intégrité des consignes systeme", () => {
   // La langue est toujours passée explicitement, y compris dans le « français »
-  // de ces tests : la langue par défaut du Worker est l'anglais, donc s'appuyer
-  // sur elle ferait comparer l'anglais à lui-même — un test qui passe sans rien
+  // de ces tests : la langue par défaut du Worker est le français, donc s'appuyer
+  // sur elle ferait comparer le français à lui-même — un test qui passe sans rien
   // vérifier.
   const promptFor = (lang) => captureSystemPrompt(FULL, { [LANG_HEADER]: lang });
 

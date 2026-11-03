@@ -20,11 +20,12 @@ import worker from "./index.js";
  * En-tête qui porte la langue de la page.
  *
  * Dupliqué de `index.js`, où il n'est pas exporté. Ces tests qui attendent un
- * texte français le passent explicitement plutôt que de compte sur le repli :
- * la langue par défaut du Worker est l'anglais, et s'en remettre ferait échouer
+ * texte anglais le passent explicitement plutôt que de compter sur le repli :
+ * la langue par défaut du Worker est le français, et s'en remettre ferait échouer
  * le test pour une raison étrangère à ce qu'il vérifie.
  */
 const FR = { "X-Chat-Lang": "fr" };
+const EN = { "X-Chat-Lang": "en" };
 
 /** Une origine autorisée, et une qui ne l'est pas. */
 const ALLOWED = "https://phib64.github.io";
@@ -591,7 +592,7 @@ describe("consigne mains libres", () => {
 
   it("rédige la consigne orale en anglais sur la page anglaise", async () => {
     const prompt = await firstOpenRouterBody(
-      post({ handsfree: true, messages: [{ role: "user", content: "Hello" }] }),
+      post({ handsfree: true, messages: [{ role: "user", content: "Hello" }] }, EN),
       makeEnv(),
     ).then((sent) => sent.messages[0].content);
 

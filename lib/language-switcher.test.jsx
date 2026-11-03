@@ -75,10 +75,10 @@ function texteVisible(lien) {
 
 /** Cas de navigation : langue courante, page visitée, page attendue. */
 const NAVIGATION = [
-  ["en", "/", "/fr"],
-  ["fr", "/fr", "/"],
-  ["en", "/projects", "/fr/projects"],
-  ["fr", "/fr/projects", "/projects"],
+  ["fr", "/", "/en"],
+  ["en", "/en", "/"],
+  ["fr", "/page", "/en/page"],
+  ["en", "/en/page", "/page"],
 ];
 
 describe("langue affichée", () => {
